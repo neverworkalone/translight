@@ -8,6 +8,7 @@ import {
 
 export const CONTENT_CONTROLLER_KEY = '__translight_content_controller__';
 export const DOCUMENT_TOKEN_KEY = '__translight_document_token__';
+const NAVIGATION_PATCH_KEY = '__translight_content_navigation_patch__';
 
 function getDocumentToken() {
   if (globalThis[DOCUMENT_TOKEN_KEY]) return globalThis[DOCUMENT_TOKEN_KEY];
@@ -28,6 +29,23 @@ function sendRuntimeMessage(runtime, message) {
   }
 }
 
+function installNavigationPatch(view, notify) {
+  if (!view?.history || view[NAVIGATION_PATCH_KEY]) return;
+  const originalPushState = view.history.pushState;
+  const originalReplaceState = view.history.replaceState;
+  view.history.pushState = function patchedPushState(...args) {
+    const result = originalPushState.apply(this, args);
+    notify();
+    return result;
+  };
+  view.history.replaceState = function patchedReplaceState(...args) {
+    const result = originalReplaceState.apply(this, args);
+    notify();
+    return result;
+  };
+  view[NAVIGATION_PATCH_KEY] = true;
+}
+
 export function installContentController({
   runtime = globalThis.chrome?.runtime,
   createSession = (options) => new PageSession(options)
@@ -43,7 +61,9 @@ export function installContentController({
     translationCache: new Map(),
     settingsReady: null,
     unsubscribeSettings: null,
-    pageLifecycleHandler: null
+    pageLifecycleHandler: null,
+    navigationHandler: null,
+    lastNavigationUrl: globalThis.location?.href ?? ''
   };
   globalThis[CONTENT_CONTROLLER_KEY] = controller;
 
@@ -63,6 +83,21 @@ export function installContentController({
     controller.currentSession = null;
   };
   globalThis.addEventListener?.('pagehide', controller.pageLifecycleHandler);
+  controller.navigationHandler = () => {
+    const url = globalThis.location?.href ?? '';
+    if (!url || url === controller.lastNavigationUrl) return;
+    controller.lastNavigationUrl = url;
+    sendRuntimeMessage(runtime, {
+      type: 'CONTENT_NAVIGATION',
+      documentToken: controller.documentToken,
+      url,
+      origin: globalThis.location?.origin ?? ''
+    });
+  };
+  const view = globalThis.window ?? globalThis;
+  installNavigationPatch(view, controller.navigationHandler);
+  view?.addEventListener?.('popstate', controller.navigationHandler);
+  view?.addEventListener?.('hashchange', controller.navigationHandler);
 
   const sendStatus = (payload) => sendRuntimeMessage(runtime, {
     type: 'TRANSLATION_STATUS',

@@ -211,6 +211,28 @@ describe('PageSession', () => {
     expect(document.title).toBe('Original title');
   });
 
+  it('retranslates a title when a site replaces the title element', async () => {
+    document.title = 'First title';
+    document.body.innerHTML = '<p>Title replacement.</p>';
+    const session = new PageSession({
+      generation: 53,
+      document,
+      settings: {translatePageTitle: true},
+      provider: makeProvider()
+    });
+
+    await session.start();
+    expect(document.title).toBe('ko:First title');
+
+    const replacement = document.createElement('title');
+    replacement.textContent = 'Second title';
+    document.head.replaceChild(replacement, document.querySelector('title'));
+    await wait();
+
+    expect(document.title).toBe('ko:Second title');
+    session.stop();
+  });
+
   it('starts with visible blocks, then adjacent blocks, then document-order blocks', async () => {
     document.title = '';
     document.body.innerHTML = `

@@ -209,6 +209,7 @@ function styleText(sessionId, presentation) {
   const styleSelector = (style) =>
     `${styledSelector}[${STYLE_ATTRIBUTE}="${style}"], ${replacementSelector}[${STYLE_ATTRIBUTE}="${style}"]`;
   const replacementTextSelector = `[${REPLACEMENT_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"][${SESSION_ATTRIBUTE}="${escapeAttribute(sessionId)}"]`;
+  const translationTextSelector = `${styledSelector} > [${TRANSLATION_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"]`;
   const textStyleSelector = (style) =>
     `${styledSelector}[${STYLE_ATTRIBUTE}="${style}"], ${replacementTextSelector}[${STYLE_ATTRIBUTE}="${style}"]`;
   const hiddenSelector = `[${HIDDEN_ATTRIBUTE}="true"][${SESSION_ATTRIBUTE}="${escapeAttribute(sessionId)}"]`;
@@ -239,6 +240,7 @@ function styleText(sessionId, presentation) {
       font-size: 0.95em !important;
       font-weight: var(--translight-font-weight) !important;
       font-style: var(--translight-font-style) !important;
+      font-synthesis: style !important;
       line-height: inherit !important;
       letter-spacing: normal !important;
       text-align: inherit !important;
@@ -262,6 +264,14 @@ function styleText(sessionId, presentation) {
       color: var(--translight-text-color) !important;
       font-weight: var(--translight-font-weight) !important;
       font-style: var(--translight-font-style) !important;
+      font-synthesis: style !important;
+    }
+    ${translationTextSelector},
+    ${replacementTextSelector} {
+      color: var(--translight-text-color) !important;
+      font-weight: var(--translight-font-weight) !important;
+      font-style: var(--translight-font-style) !important;
+      font-synthesis: style !important;
     }
     ${selector}[${ROLE_ATTRIBUTE}="${ROLE_ORIGINAL}"] {
       color: inherit !important;
@@ -269,6 +279,7 @@ function styleText(sessionId, presentation) {
       font-size: inherit !important;
       font-weight: inherit !important;
       font-style: inherit !important;
+      font-synthesis: inherit !important;
       line-height: inherit !important;
       margin: 0.45em 0 1em !important;
     }

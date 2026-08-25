@@ -171,11 +171,13 @@ export class PageSession {
       const blocks = collectTranslationBlocks(this.document.body);
       this.notify('TRANSLATING', {count: blocks.length});
       this.installObservers();
-      await this.queue.enqueueAll(blocks);
-      if (!this.isCurrent()) throw new TranslationCancelledError();
+      // Translate the title before the document queue so a long page cannot
+      // leave the browser tab showing the original title for a long time.
       if (this.settings.translatePageTitle || this.legacyTranslatePageTitle) {
         await this.translateTitle(signal);
       }
+      if (!this.isCurrent()) throw new TranslationCancelledError();
+      await this.queue.enqueueAll(blocks);
       if (!this.isCurrent()) throw new TranslationCancelledError();
       if (this.translatedCount === 0 && this.firstError) throw this.firstError;
 
@@ -274,12 +276,14 @@ export class PageSession {
         !(this.settings.translatePageTitle || this.legacyTranslatePageTitle)) return;
     const view = getView(this.document);
     const MutationObserverClass = view?.MutationObserver ?? globalThis.MutationObserver;
-    const title = this.document.querySelector?.('title');
-    if (!title || typeof MutationObserverClass !== 'function') return;
+    const titleRoot = this.document.head ?? this.document.documentElement;
+    if (!titleRoot || typeof MutationObserverClass !== 'function') return;
     this.titleObserver = new MutationObserverClass(() => {
       if (!this.updatingTitle) void this.translateTitle(this.controller.signal);
     });
-    this.titleObserver.observe(title, {childList: true, characterData: true, subtree: true});
+    // Observe the head rather than only the initial <title> node. SPA sites
+    // commonly replace the node itself when updating their document title.
+    this.titleObserver.observe(titleRoot, {childList: true, characterData: true, subtree: true});
   }
 
   disconnectObservers() {
@@ -406,7 +410,10 @@ export class PageSession {
     }
     if (!wasTranslatingTitle && shouldTranslateTitle && this.isCurrent()) {
       this.installTitleObserver();
-      void this.translateTitle(this.controller.signal, {force: true});
+      // During startup the provider may not be prepared yet. The main run
+      // translates the title after preparation; avoid recording a spurious
+      // NOT_READY error from this settings update.
+      if (this.renderer) void this.translateTitle(this.controller.signal, {force: true});
     }
   }
 }

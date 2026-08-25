@@ -312,6 +312,34 @@ async function handleContentReady(message, sender) {
   );
 }
 
+async function handleContentNavigation(message, sender) {
+  await ready;
+  const tabId = sender?.tab?.id;
+  if (typeof tabId !== 'number' || !message.documentToken || !message.url) return;
+
+  const state = getState(tabId);
+  if (state.documentToken && state.documentToken !== message.documentToken) return;
+  if (isBusyOrActive(state)) return;
+
+  const settings = await loadSettings();
+  const navigation = classifyNavigation({
+    state,
+    url: message.url,
+    autoTranslateSites: settings.autoTranslateSites,
+    autoTranslateSameSite: settings.autoTranslateSameSite
+  });
+  if (!navigation.translate) return;
+
+  await startTranslation(
+    {id: tabId, url: message.url},
+    {
+      activation: navigation.activation,
+      url: message.url,
+      documentToken: message.documentToken
+    }
+  );
+}
+
 async function handleTabUpdated(tabId, changeInfo) {
   await ready;
   let state = getState(tabId);
@@ -426,6 +454,9 @@ chrome.runtime.onMessage.addListener((message, sender) => {
   }
   if (message?.type === 'CONTENT_READY' && typeof tabId === 'number') {
     void enqueueTabOperation(tabId, () => handleContentReady(message, sender));
+  }
+  if (message?.type === 'CONTENT_NAVIGATION' && typeof tabId === 'number') {
+    void enqueueTabOperation(tabId, () => handleContentNavigation(message, sender));
   }
   return false;
 });
