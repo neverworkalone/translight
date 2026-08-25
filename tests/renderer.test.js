@@ -228,4 +228,68 @@ describe('TranslationRenderer', () => {
     renderer.removeAll();
     expect(document.body.innerHTML).toBe('<div id="mixed">Direct text.<p id="nested">Nested text.</p></div>');
   });
+
+  it('keeps translations inside table cells in original-translation mode', () => {
+    document.body.innerHTML = '<table><tbody><tr><td id="cell">Original cell</td></tr></tbody></table>';
+    const cell = document.querySelector('#cell');
+    const renderer = new TranslationRenderer({
+      document,
+      sessionId: 'table-session',
+      settings: {translationMode: TRANSLATION_MODES.ORIGINAL_TRANSLATION}
+    });
+
+    renderer.insert({
+      element: cell,
+      sourceId: 'table-source',
+      sourceHash: 'table-hash',
+      translatedText: 'Translated cell'
+    });
+
+    const translation = cell.querySelector('translight-translation');
+    expect(translation?.parentElement).toBe(cell);
+    expect(cell.closest('tr')?.querySelectorAll(':scope > td')).toHaveLength(1);
+    expect(translation?.textContent).toBe('Translated cell');
+    expect(renderer.style.textContent).toContain('td > translight-translation');
+
+    renderer.removeAll();
+    expect(document.body.innerHTML).toBe('<table><tbody><tr><td id="cell">Original cell</td></tr></tbody></table>');
+  });
+
+  it.each(Object.values(TRANSLATION_STYLES))('applies and removes the %s style', (displayStyle) => {
+    const source = document.querySelector('#source');
+    const renderer = new TranslationRenderer({document, sessionId: `style-${displayStyle}`});
+
+    renderer.insert({element: source, sourceId: `style-${displayStyle}`, translatedText: 'Styled translation'});
+    renderer.updatePresentation({displayStyle});
+
+    expect(document.querySelector('translight-translation').getAttribute('data-translight-style'))
+      .toBe(displayStyle);
+    renderer.removeAll();
+    expect(document.body.innerHTML).toBe('<p id="source">Original text</p>');
+  });
+
+  it('replaces only the table cell text in translation-only mode', () => {
+    document.body.innerHTML = '<table><tbody><tr><th id="cell">Original heading</th></tr></tbody></table>';
+    const cell = document.querySelector('#cell');
+    const renderer = new TranslationRenderer({
+      document,
+      sessionId: 'table-only-session',
+      settings: {translationMode: TRANSLATION_MODES.TRANSLATION_ONLY}
+    });
+
+    renderer.insert({
+      element: cell,
+      sourceId: 'table-only-source',
+      sourceHash: 'table-only-hash',
+      translatedText: 'Translated heading'
+    });
+
+    expect(cell.textContent).toBe('Translated heading');
+    expect(cell.querySelector('translight-translation')).toBeNull();
+    expect(cell.closest('tr')?.querySelectorAll(':scope > th')).toHaveLength(1);
+    expect(cell.hasAttribute('data-translight-style')).toBe(false);
+
+    renderer.removeAll();
+    expect(document.body.innerHTML).toBe('<table><tbody><tr><th id="cell">Original heading</th></tr></tbody></table>');
+  });
 });

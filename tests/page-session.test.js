@@ -80,6 +80,32 @@ describe('PageSession', () => {
     session.stop({notify: false});
   });
 
+  it('translates table cells and rechecks cells whose text changes', async () => {
+    document.body.innerHTML = `
+      <article>
+        <p>Article introduction.</p>
+        <table><tbody><tr><td id="cell">Original cell.</td></tr></tbody></table>
+        <pre>const keepThisCode = true;</pre>
+      </article>
+    `;
+    const session = new PageSession({
+      generation: 13,
+      document,
+      provider: makeProvider()
+    });
+
+    await session.start();
+
+    expect(document.querySelector('#cell translight-translation')?.textContent).toBe('ko:Original cell.');
+    expect(document.querySelector('pre').textContent).toBe('const keepThisCode = true;');
+
+    document.querySelector('#cell').firstChild.data = 'Changed cell.';
+    await wait();
+    expect(document.querySelector('#cell translight-translation')?.textContent).toBe('ko:Changed cell.');
+
+    session.stop();
+  });
+
   it('does not insert late results after cancellation', async () => {
     document.body.innerHTML = '<p>Pending paragraph.</p>';
     const resolvers = [];
@@ -99,6 +125,29 @@ describe('PageSession', () => {
 
     expect(document.querySelector('translight-translation')).toBeNull();
     expect(document.querySelector('p').textContent).toBe('Pending paragraph.');
+  });
+
+  it('removes generated nodes and styles when translation fails', async () => {
+    document.body.innerHTML = '<p>Safe failure paragraph.</p>';
+    const statuses = [];
+    const session = new PageSession({
+      generation: 14,
+      document,
+      provider: makeProvider({
+        translate: async () => {
+          throw new Error('translator failed');
+        }
+      }),
+      sendStatus: (status) => statuses.push(status)
+    });
+
+    await session.start();
+
+    expect(statuses.at(-1).status).toBe('ERROR');
+    expect(document.querySelector('p').textContent).toBe('Safe failure paragraph.');
+    expect(document.querySelector('translight-translation')).toBeNull();
+    expect(document.querySelector('style[data-translight-generated="true"]')).toBeNull();
+    session.stop({notify: false});
   });
 
   it('can be started and stopped repeatedly without accumulating nodes', async () => {

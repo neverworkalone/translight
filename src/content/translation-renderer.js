@@ -27,10 +27,11 @@ const ROLE_ATTRIBUTE = 'data-translight-role';
 const ROLE_TRANSLATION = 'translation';
 const ROLE_ORIGINAL = 'original';
 const TRANSLATION_TEXT_ATTRIBUTE = 'data-translight-text';
-const BLOCK_SELECTOR = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,figcaption,div';
+const BLOCK_SELECTOR = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,figcaption,div,td,th';
 const EXCLUDED_CONTENT_SELECTOR = 'script,style,noscript,code,pre,input,textarea,select,button';
 const GENERATED_SELECTOR = 'translight-translation,[data-translight-generated="true"]';
 const LAYOUT_DISPLAYS = new Set(['flex', 'inline-flex', 'grid', 'inline-grid']);
+const TABLE_CELL_TAGS = new Set(['td', 'th']);
 const ATTRIBUTE_NAMES = [
   SOURCE_ATTRIBUTE,
   SOURCE_HASH_ATTRIBUTE,
@@ -62,7 +63,8 @@ function getDirectNestedList(element) {
 }
 
 function shouldInsertInside(element) {
-  if (element.tagName?.toLowerCase() === 'li') return true;
+  const tagName = element.tagName?.toLowerCase();
+  if (tagName === 'li' || TABLE_CELL_TAGS.has(tagName)) return true;
   return LAYOUT_DISPLAYS.has(getDisplay(element.parentElement));
 }
 
@@ -209,6 +211,7 @@ function styleText(sessionId, presentation) {
   const styleSelector = (style) =>
     `${styledSelector}[${STYLE_ATTRIBUTE}="${style}"], ${replacementSelector}[${STYLE_ATTRIBUTE}="${style}"]`;
   const replacementTextSelector = `[${REPLACEMENT_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"][${SESSION_ATTRIBUTE}="${escapeAttribute(sessionId)}"]`;
+  const tableCellSelector = `td > ${selector}, th > ${selector}`;
   const translationTextSelector = `${styledSelector} > [${TRANSLATION_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"]`;
   const textStyleSelector = (style) =>
     `${styledSelector}[${STYLE_ATTRIBUTE}="${style}"], ${replacementTextSelector}[${STYLE_ATTRIBUTE}="${style}"]`;
@@ -282,6 +285,12 @@ function styleText(sessionId, presentation) {
       font-synthesis: inherit !important;
       line-height: inherit !important;
       margin: 0.45em 0 1em !important;
+    }
+
+    ${tableCellSelector} {
+      width: 100% !important;
+      max-width: 100% !important;
+      margin: 0.25em 0 0 !important;
     }
 
     ${styleSelector(TRANSLATION_STYLES.LEFT_BORDER)} {
