@@ -1,9 +1,14 @@
+import { hashSourceText } from './translation-queue.js';
+
 const BLOCK_SELECTOR = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,figcaption,div';
 const EXCLUDED_CONTENT_SELECTOR = 'script,style,noscript,code,pre,input,textarea,select,button';
 const EXCLUDED_ANCESTOR_SELECTOR = `${EXCLUDED_CONTENT_SELECTOR},[contenteditable="true"],[contenteditable=""]`;
 const GENERATED_SELECTOR = 'translight-translation,[data-translight-generated="true"]';
 const NAVIGATION_SELECTOR = 'nav,[role="navigation"],[role="menu"],[aria-haspopup="menu"]';
 const LINK_RATIO_LIMIT = 0.65;
+const SOURCE_ID_ATTRIBUTE = 'data-translight-source-id';
+const SOURCE_HASH_ATTRIBUTE = 'data-translight-source-hash';
+const PENDING_SOURCE_HASH_ATTRIBUTE = 'data-translight-pending-source-hash';
 
 let sourceSequence = 0;
 
@@ -103,17 +108,24 @@ export function collectTranslationBlocks(root = globalThis.document?.body) {
 
   for (const element of candidates) {
     if (!isElement(element)) continue;
-    if (isGenerated(element) || isExcluded(element) || isHidden(element)) continue;
+    if (isGenerated(element) || isExcluded(element)) continue;
+    const existingSourceId = element.getAttribute(SOURCE_ID_ATTRIBUTE);
+    const isExistingSource = Boolean(existingSourceId);
+    if (isHidden(element) && !isExistingSource) continue;
     if (hasBlockDescendant(element, candidateSet)) continue;
 
     const text = normalizeSourceText(textFromNode(element, element));
     if (!hasMeaningfulText(element) || isNavigationLike(element, text)) continue;
-    if (element.hasAttribute('data-translight-source-id')) continue;
+    const sourceHash = hashSourceText(text);
+    if (isExistingSource && !element.getAttribute(SOURCE_HASH_ATTRIBUTE)) continue;
+    if (isExistingSource && element.getAttribute(SOURCE_HASH_ATTRIBUTE) === sourceHash) continue;
+    if (isExistingSource) element.setAttribute(PENDING_SOURCE_HASH_ATTRIBUTE, sourceHash);
 
     blocks.push({
       element,
       text,
-      sourceId: `source-${++sourceSequence}`
+      sourceId: existingSourceId || `source-${++sourceSequence}`,
+      sourceHash
     });
   }
 
