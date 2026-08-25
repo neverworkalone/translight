@@ -38,7 +38,7 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
   border-radius: 12px;
   color: #111827;
   background: #f7f9fc;
-  box-shadow: 0 8px 24px rgba(17, 24, 39, .12), 0 2px 6px rgba(17, 24, 39, .06);
+  box-shadow: 0 8px 22px rgba(26, 36, 51, .14);
 }
 
 .settings-header {
@@ -50,6 +50,7 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
   height: 88px;
   padding: 0 24px 0 48px;
   background: #fff;
+  box-shadow: inset 0 -1px #e5e7eb;
 }
 
 .brand-lockup {
@@ -149,9 +150,9 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
   height: 16px;
   margin-bottom: 0;
   color: #6b7280;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
-  letter-spacing: .22px;
+  letter-spacing: .24px;
   line-height: 16px;
 }
 
@@ -165,7 +166,7 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
   border-radius: 8px;
   color: #111827;
   background: transparent;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 400;
   line-height: 20px;
   text-align: left;
@@ -201,19 +202,19 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
 .service-intro h2 {
   margin: 0;
   color: #111827;
-  font-size: 26px;
+  font-size: 24px;
   font-weight: 700;
-  letter-spacing: -.02em;
-  line-height: 38px;
+  letter-spacing: normal;
+  line-height: 32px;
 }
 
 .page-intro p,
 .advanced-intro p,
 .data-intro p,
 .service-intro p {
-  margin: 4px 0 0;
+  margin: 6px 0 0;
   color: #6b7280;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 400;
   line-height: 20px;
 }
@@ -524,6 +525,7 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
 .service-page {
   min-height: 772px;
   padding: 30px 40px;
+  background: #f8fafd;
 }
 
 .service-columns {
@@ -540,14 +542,15 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
   height: 59px;
 }
 
-.service-intro h2 { font-size: 26px; line-height: 32px; }
-.service-intro p { margin-top: 4px; line-height: 16px; }
+.service-intro h2 { font-size: 24px; line-height: 32px; }
+.service-intro p { margin-top: 8px; line-height: 20px; }
 
 .service-card {
   position: relative;
   width: 428px;
   margin-top: 13px;
   padding: 17px 19px;
+  border-radius: 10px;
 }
 
 .target-language-card { height: 90px; }
@@ -569,7 +572,7 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
 
 .static-select {
   position: absolute;
-  top: 34px;
+  top: 35px;
   right: 19px;
   display: flex;
   align-items: center;
@@ -611,7 +614,7 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
   align-items: flex-start;
   width: 388px;
   height: 78px;
-  margin-top: 26px;
+  margin-top: 15px;
   padding: 13px;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
@@ -643,11 +646,11 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
   color: #111827;
   font-size: 13px;
   font-weight: 500;
-  line-height: 18px;
+  line-height: 16px;
 }
 
 .provider-option small {
-  margin-top: 8px;
+  margin-top: 11px;
   color: #6b7280;
   font-size: 10px;
   line-height: 12px;
@@ -673,20 +676,76 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
   right: 13px;
 }
 
-.status-success { color: #16a34a; background: #ecfdf3; }
+.status-success { color: #16a34a; background: #edfbf1; }
 .status-info { color: #2563eb; background: #ecf3ff; }
 .status-warning { color: #b45309; background: #fff7ed; }
 .status-danger { color: #dc2626; background: #fef0f0; }
 .status-neutral { color: #6b7280; background: #f3f4f6; }
 
+.provider-status-active {
+  width: 60px;
+  min-width: 60px;
+  padding: 0;
+  color: #fff;
+  background: #2563eb;
+}
+
+.provider-status-failed {
+  width: 48px;
+  min-width: 48px;
+  padding: 0;
+}
+
+.provider-status-unavailable {
+  width: 66px;
+  min-width: 66px;
+  padding: 0;
+}
+
+.model-status-downloadable {
+  width: 98px;
+  min-width: 98px;
+  padding: 0;
+}
+
+.model-status-downloading {
+  width: 84px;
+  min-width: 84px;
+  padding: 0;
+}
+
+.model-status-available {
+  width: 74px;
+  min-width: 74px;
+  padding: 0;
+  background: #edfbf1;
+}
+
+.model-status-download-failed {
+  width: 90px;
+  min-width: 90px;
+  padding: 0;
+}
+
+.model-status-unavailable {
+  width: 74px;
+  min-width: 74px;
+  padding: 0;
+}
+
 .details-card {
   padding-top: 17px;
 }
 
+.details-card h3 {
+  font-size: 16px;
+  line-height: 24px;
+}
+
 .details-card .service-description {
   width: 388px;
-  margin-top: 9px;
-  line-height: 18px;
+  margin-top: 5px;
+  line-height: 14px;
 }
 
 .model-heading {
@@ -694,7 +753,7 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
   align-items: center;
   justify-content: space-between;
   width: 388px;
-  margin-top: 15px;
+  margin-top: 49px;
 }
 
 .model-heading h4 {
@@ -711,7 +770,7 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
   justify-content: space-between;
   width: 388px;
   height: 48px;
-  margin-top: 9px;
+  margin-top: 13px;
   padding: 0 13px;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
@@ -722,15 +781,16 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
 }
 
 .model-row code {
-  color: #6b7280;
+  color: #2563eb;
   font-family: inherit;
   font-size: 10px;
 }
 
 .service-action {
+  width: 112px;
   height: 40px;
   margin-top: 21px;
-  padding: 0 14px;
+  padding: 0;
   border: 0;
   border-radius: 8px;
   color: #fff;
@@ -748,14 +808,14 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
   display: flex;
   justify-content: space-between;
   color: #6b7280;
-  font-size: 12px;
-  line-height: 16px;
+  font-size: 10px;
+  line-height: 14px;
 }
 
 .progress-track {
   width: 388px;
   height: 4px;
-  margin-top: 9px;
+  margin-top: 8px;
   overflow: hidden;
   border-radius: 999px;
   background: #e5e7eb;
@@ -812,7 +872,7 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
 .service-divider {
   position: absolute;
   right: 19px;
-  bottom: 82px;
+  bottom: 83px;
   left: 19px;
 }
 
@@ -830,9 +890,9 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
   border: 0;
   color: #2563eb;
   background: transparent;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
-  line-height: 14px;
+  line-height: 18px;
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -840,20 +900,20 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
 .management-link-icon {
   margin-left: 4px;
   color: #2563eb;
-  font-size: 11px;
-  line-height: 14px;
+  font-size: 12px;
+  line-height: 18px;
 }
 
 .management-link:hover { text-decoration-thickness: 2px; }
 
 .management-help {
   position: absolute;
-  bottom: 20px;
+  bottom: 19px;
   left: 19px;
   margin: 0;
   color: #6b7280;
-  font-size: 10px;
-  line-height: 14px;
+  font-size: 12px;
+  line-height: 18px;
 }
 
 .advanced-page {
@@ -861,9 +921,9 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
   padding: 30px 40px;
 }
 
-.advanced-intro { width: 880px; height: 59px; }
-.advanced-intro h2 { font-size: 26px; line-height: 34px; }
-.advanced-intro p { margin-top: 8px; line-height: 17px; }
+.advanced-intro { width: 880px; height: 60px; }
+.advanced-intro h2 { font-size: 24px; line-height: 32px; }
+.advanced-intro p { margin-top: 8px; line-height: 20px; }
 
 .advanced-card {
   width: 880px;
@@ -871,20 +931,20 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
   padding: 22px 23px;
 }
 
-.behavior-card { height: 254px; }
+.behavior-card { height: 258px; }
 .sites-card { height: 347px; }
 
 .card-heading h3,
 .sites-card h3 {
-  font-size: 15px;
-  line-height: 20px;
+  font-size: 16px;
+  line-height: 24px;
 }
 
 .card-heading p,
 .sites-description {
   margin: 5px 0 0;
   color: #6b7280;
-  font-size: 11px;
+  font-size: 13px;
   line-height: 16px;
 }
 
@@ -896,10 +956,10 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
   height: 72px;
 }
 
-.behavior-setting:first-of-type { margin-top: 12px; }
-.behavior-setting .setting-copy { padding-top: 1px; }
+.behavior-card > .card-heading + .behavior-setting { margin-top: 24px; }
+.behavior-setting .setting-copy { padding-top: 0; }
 .behavior-setting h4 {
-  font-size: 13px;
+  font-size: 15px;
   line-height: 18px;
 }
 
@@ -907,7 +967,7 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
   width: 772px;
   margin: 5px 0 0;
   color: #6b7280;
-  font-size: 11px;
+  font-size: 13px;
   line-height: 16px;
 }
 
@@ -933,6 +993,10 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
   line-height: 16px;
 }
 
+.sites-card {
+  padding: 23px;
+}
+
 .sites-textarea {
   display: block;
   width: 832px;
@@ -940,20 +1004,20 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
   margin-top: 16px;
   padding: 12px 14px;
   resize: none;
-  border: 1px solid #e5e7eb;
+  border: 1px solid #d8e1ee;
   border-radius: 8px;
   outline: 0;
-  color: #111827;
-  background: #fff;
-  font-size: 12px;
-  line-height: 18px;
+  color: #475569;
+  background: #f8fafc;
+  font-size: 13px;
+  line-height: 16px;
 }
 
 .sites-card > .card-divider { margin-top: 16px; }
 .registered-heading {
   margin-top: 14px !important;
   color: #111827;
-  font-size: 13px !important;
+  font-size: 15px !important;
   line-height: 18px !important;
 }
 
@@ -967,15 +1031,16 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
 .site-chip {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 0;
   height: 40px;
-  padding: 0 12px 0 16px;
-  border: 1px solid #dbe4f4;
-  border-radius: 999px;
-  color: #344054;
-  background: #f8fafd;
-  font-size: 12px;
-  line-height: 16px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 20px;
+  color: #2563eb;
+  background: #eaf2ff;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
 }
 
 .site-chip button {
@@ -1010,8 +1075,8 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
 
 .data-pane { width: 100%; }
 .data-intro { height: 59px; }
-.data-intro h2 { font-size: 28px; line-height: 34px; }
-.data-intro p { margin-top: 4px; font-size: 14px; line-height: 17px; }
+.data-intro h2 { font-size: 24px; line-height: 32px; }
+.data-intro p { margin-top: 6px; font-size: 13px; line-height: 20px; }
 .reset-intro p { display: none; }
 
 .data-card {
@@ -1030,9 +1095,9 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
 }
 
 .data-card h3 {
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 700;
-  line-height: 20px;
+  line-height: 24px;
 }
 
 .data-card > p {
