@@ -3,6 +3,7 @@ import {computed, onMounted, onUnmounted, ref} from 'vue';
 import {t} from '../../i18n/index.js';
 import {ChromeTranslateProvider} from '../../translation/chrome-provider.js';
 import {MODEL_STATE} from '../../translation/model-state.js';
+import {isTranslationCancelled} from '../../translation/provider.js';
 import {openModelManagement} from '../model-management.js';
 
 const props = defineProps({
@@ -16,6 +17,9 @@ const progress = ref(null);
 const refreshing = ref(true);
 const downloading = ref(false);
 const error = ref('');
+let disposed = false;
+let operationSequence = 0;
+let operationController = null;
 
 const statusLabel = computed(() => {
   switch (modelState.value) {
@@ -59,53 +63,92 @@ function createProvider() {
   return provider.value;
 }
 
-async function refreshModelState() {
-  refreshing.value = true;
-  error.value = '';
-  try {
-    const nextProvider = createProvider();
-    modelState.value = await nextProvider.getModelState();
-    progress.value = modelState.value === MODEL_STATE.AVAILABLE ? 1 : null;
-  } catch (cause) {
-    modelState.value = MODEL_STATE.UNAVAILABLE;
-    progress.value = null;
-    error.value = cause?.message || t('serviceStateCheckFailed');
-  } finally {
-    refreshing.value = false;
-  }
+function beginOperation() {
+  operationController?.abort();
+  operationController = new AbortController();
+  return {id: ++operationSequence, signal: operationController.signal};
 }
 
-async function downloadModel() {
-  if (downloading.value || props.disabled) return;
+function isCurrentOperation(id, nextProvider) {
+  return !disposed && id === operationSequence && provider.value === nextProvider;
+}
+
+function updateDownloadState({state, progress: nextProgress}) {
+  modelState.value = state;
+  if (Number.isFinite(nextProgress)) progress.value = nextProgress;
+  else if (state === MODEL_STATE.AVAILABLE) progress.value = 1;
+}
+
+async function prepareDownloading(nextProvider, {id, signal, retry = false}) {
   downloading.value = true;
-  error.value = '';
   progress.value = 0;
-  const shouldRetry = modelState.value === MODEL_STATE.DOWNLOAD_FAILED;
-  modelState.value = MODEL_STATE.DOWNLOADING;
-  const nextProvider = createProvider();
   try {
     await nextProvider.prepare({
-      retry: shouldRetry,
-      onStateChange: ({state, progress: nextProgress}) => {
-        modelState.value = state;
-        if (Number.isFinite(nextProgress)) progress.value = nextProgress;
+      retry,
+      signal,
+      onStateChange: (event) => {
+        if (!isCurrentOperation(id, nextProvider)) return;
+        updateDownloadState(event);
       }
     });
+    if (!isCurrentOperation(id, nextProvider)) return;
     modelState.value = MODEL_STATE.AVAILABLE;
     progress.value = 1;
   } catch (cause) {
+    if (!isCurrentOperation(id, nextProvider) || isTranslationCancelled(cause)) return;
     modelState.value = cause?.code === 'UNAVAILABLE'
       ? MODEL_STATE.UNAVAILABLE
       : MODEL_STATE.DOWNLOAD_FAILED;
     progress.value = null;
     error.value = cause?.message || t('serviceDownloadFailedDescription');
   } finally {
-    downloading.value = false;
+    if (isCurrentOperation(id, nextProvider)) downloading.value = false;
   }
 }
 
-onMounted(refreshModelState);
-onUnmounted(() => provider.value?.close?.());
+async function refreshModelState() {
+  refreshing.value = true;
+  error.value = '';
+  const {id, signal} = beginOperation();
+  const nextProvider = createProvider();
+  try {
+    const nextState = await nextProvider.getModelState();
+    if (!isCurrentOperation(id, nextProvider)) return;
+    modelState.value = nextState;
+    progress.value = nextState === MODEL_STATE.AVAILABLE ? 1 : null;
+    if (nextState === MODEL_STATE.DOWNLOADING) {
+      await prepareDownloading(nextProvider, {id, signal});
+    }
+  } catch (cause) {
+    if (!isCurrentOperation(id, nextProvider) || isTranslationCancelled(cause)) return;
+    modelState.value = MODEL_STATE.UNAVAILABLE;
+    progress.value = null;
+    error.value = cause?.message || t('serviceStateCheckFailed');
+  } finally {
+    if (isCurrentOperation(id, nextProvider)) refreshing.value = false;
+  }
+}
+
+async function downloadModel() {
+  if (downloading.value || props.disabled) return;
+  const {id, signal} = beginOperation();
+  downloading.value = true;
+  refreshing.value = false;
+  error.value = '';
+  progress.value = 0;
+  const shouldRetry = modelState.value === MODEL_STATE.DOWNLOAD_FAILED;
+  modelState.value = MODEL_STATE.DOWNLOADING;
+  const nextProvider = createProvider();
+  await prepareDownloading(nextProvider, {id, signal, retry: shouldRetry});
+}
+
+onMounted(() => { void refreshModelState(); });
+onUnmounted(() => {
+  disposed = true;
+  operationSequence += 1;
+  operationController?.abort();
+  provider.value?.close?.();
+});
 </script>
 
 <template>

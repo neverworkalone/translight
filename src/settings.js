@@ -290,7 +290,12 @@ export function validateSettingsDocument(value) {
 
 function storageArea(storage) {
   if (!storage) return null;
-  return storage.local ?? storage;
+  if (storage.local || storage.sync) return storage.local ?? null;
+  return storage;
+}
+
+function legacyStorageArea(storage) {
+  return storage?.sync ?? null;
 }
 
 function readArea(area, key) {
@@ -346,12 +351,38 @@ function writeArea(area, value) {
 
 export async function loadSettings({ storage = globalThis.chrome?.storage } = {}) {
   const area = storageArea(storage);
+  let values = {};
   try {
-    const values = await readArea(area, SETTINGS_KEY);
-    return normalizeSettings(migrateSettings(values[SETTINGS_KEY]));
+    values = await readArea(area, SETTINGS_KEY);
   } catch {
-    return createDefaultSettings();
+    values = {};
   }
+
+  if (isRecord(values[SETTINGS_KEY])) {
+    return normalizeSettings(migrateSettings(values[SETTINGS_KEY]));
+  }
+
+  const legacyArea = legacyStorageArea(storage);
+  if (legacyArea && legacyArea !== area) {
+    try {
+      const legacyValues = await readArea(legacyArea, SETTINGS_KEY);
+      if (isRecord(legacyValues[SETTINGS_KEY])) {
+        const migrated = normalizeSettings(migrateSettings(legacyValues[SETTINGS_KEY]));
+        // Stage 2 stored this key in sync. Keep the migration one-way so all
+        // later reads and storage change events use the local-area contract.
+        try {
+          await writeArea(area, {[SETTINGS_KEY]: migrated});
+        } catch {
+          // Keep the migrated value for this session even if persistence fails.
+        }
+        return migrated;
+      }
+    } catch {
+      // Fall through to defaults when neither storage area is readable.
+    }
+  }
+
+  return createDefaultSettings();
 }
 
 export async function saveSettings(settings, { storage = globalThis.chrome?.storage } = {}) {

@@ -228,7 +228,6 @@ async function handleAction(tab) {
   const tabId = tab?.id;
   if (typeof tabId !== 'number') return;
   const state = getState(tabId);
-  if (state.status === TAB_STATUS.SKIPPED) return;
   if (isBusyOrActive(state)) {
     await stopTranslation(tabId, state);
   } else {
@@ -320,7 +319,8 @@ async function handleContentNavigation(message, sender) {
 
   const state = getState(tabId);
   if (state.documentToken && state.documentToken !== message.documentToken) return;
-  if (state.status === TAB_STATUS.SKIPPED) return;
+  // SKIPPED only describes the last route. A SPA can replace a target-language
+  // view with a foreign-language view without creating a new document.
   if (isBusyOrActive(state)) return;
 
   const settings = await loadSettings();
@@ -418,7 +418,6 @@ async function syncAutomaticTranslationRules() {
     if (typeof tab?.id !== 'number' || typeof tab.url !== 'string') continue;
     const state = getState(tab.id);
     const shouldTranslate = matchesAutoTranslateSite(hostnameForUrl(tab.url), settings.autoTranslateSites);
-    if (state.status === TAB_STATUS.SKIPPED) continue;
     if (shouldTranslate && !isBusyOrActive(state) &&
         (state.activation !== TAB_ACTIVATION.MANUAL || state.status === TAB_STATUS.ERROR)) {
       void enqueueTabOperation(tab.id, () => startTranslation(tab, {

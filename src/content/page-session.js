@@ -69,9 +69,12 @@ export class PageSession {
     this.generation = generation;
     this.document = document;
     this.sendStatus = sendStatus ?? (() => {});
-    this.provider = provider ?? new ChromeTranslateProvider();
     this.concurrency = concurrency;
     this.settings = normalizeSettings(settings ?? createDefaultSettings());
+    this.usesDefaultProvider = provider == null;
+    this.provider = provider ?? new ChromeTranslateProvider({
+      targetLanguage: this.settings.targetLanguage
+    });
     // Sessions created by older embedders did not pass the new title toggle.
     // Keep that API backwards-compatible while extension-created sessions use
     // the explicit setting from storage.
@@ -405,9 +408,20 @@ export class PageSession {
   }
 
   applySettings(settings) {
+    const previousTargetLanguage = this.settings.targetLanguage;
     const wasTranslatingTitle = this.settings.translatePageTitle || this.legacyTranslatePageTitle;
     this.legacyTranslatePageTitle = false;
     this.settings = normalizeSettings({...this.settings, ...settings});
+
+    if (this.usesDefaultProvider && previousTargetLanguage !== this.settings.targetLanguage) {
+      const shouldRestart = this.running || Boolean(this.controller);
+      this.stop({notify: false});
+      this.provider = new ChromeTranslateProvider({targetLanguage: this.settings.targetLanguage});
+      this.translationCache.clear();
+      if (shouldRestart) this.start();
+      return;
+    }
+
     this.renderer?.updatePresentation(this.settings);
     const shouldTranslateTitle = this.settings.translatePageTitle;
     if (wasTranslatingTitle && !shouldTranslateTitle) {

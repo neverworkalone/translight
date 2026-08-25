@@ -68,6 +68,18 @@ describe('PageSession', () => {
     session.stop({notify: false});
   });
 
+  it('creates the default provider with the session target language', () => {
+    const session = new PageSession({
+      generation: 12,
+      document,
+      settings: {targetLanguage: 'ko'}
+    });
+
+    expect(session.provider.targetLanguage).toBe('ko');
+    expect(session.provider.pair).toBe('en:ko');
+    session.stop({notify: false});
+  });
+
   it('does not insert late results after cancellation', async () => {
     document.body.innerHTML = '<p>Pending paragraph.</p>';
     const resolvers = [];

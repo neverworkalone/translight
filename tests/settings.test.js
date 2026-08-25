@@ -1,6 +1,7 @@
 import {describe, expect, it} from 'vitest';
 import {
   DEFAULT_SETTINGS,
+  SETTINGS_KEY,
   TRANSLATION_MODES,
   TRANSLATION_STYLES,
   loadSettings,
@@ -80,6 +81,46 @@ describe('settings normalization', () => {
     unsubscribe();
     expect(changes).toHaveLength(1);
     expect(changes[0].displayStyle).toBe(TRANSLATION_STYLES.BACKGROUND);
+  });
+
+  it('migrates legacy sync settings into local storage when local is empty', async () => {
+    let localStored = {};
+    let syncReads = 0;
+    const storage = {
+      local: {
+        get(_key, callback) {
+          callback(localStored);
+        },
+        set(value, callback) {
+          localStored = value;
+          callback?.();
+        }
+      },
+      sync: {
+        get(_key, callback) {
+          syncReads += 1;
+          callback({
+            [SETTINGS_KEY]: {
+              schemaVersion: 1,
+              displayStyle: TRANSLATION_STYLES.BACKGROUND,
+              autoTranslateSameSite: false
+            }
+          });
+        }
+      }
+    };
+
+    await expect(loadSettings({storage})).resolves.toMatchObject({
+      displayStyle: TRANSLATION_STYLES.BACKGROUND,
+      autoTranslateSameSite: false,
+      schemaVersion: DEFAULT_SETTINGS.schemaVersion
+    });
+    expect(syncReads).toBe(1);
+    expect(localStored[SETTINGS_KEY]).toMatchObject({
+      displayStyle: TRANSLATION_STYLES.BACKGROUND,
+      autoTranslateSameSite: false,
+      schemaVersion: DEFAULT_SETTINGS.schemaVersion
+    });
   });
 
   it('round-trips schema versions and rejects invalid import values', () => {
