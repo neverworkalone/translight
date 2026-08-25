@@ -18,6 +18,7 @@ export const HIDDEN_PLACEMENT_ATTRIBUTE = 'data-translight-hidden-placement';
 const GENERATED_VALUE = 'true';
 const STYLE_ATTRIBUTE = 'data-translight-style';
 const MODE_ATTRIBUTE = 'data-translight-mode';
+const BLOCK_SELECTOR = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,figcaption,div';
 const LAYOUT_DISPLAYS = new Set(['flex', 'inline-flex', 'grid', 'inline-grid']);
 const ATTRIBUTE_NAMES = [
   SOURCE_ATTRIBUTE,
@@ -50,7 +51,24 @@ function shouldInsertInside(element) {
   return LAYOUT_DISPLAYS.has(getDisplay(element.parentElement));
 }
 
-function insertAtSafeLocation(element, translation) {
+function insertAtSafeLocation(element, translation, mixedContent = false) {
+  if (mixedContent) {
+    if (element.tagName?.toLowerCase() === 'li') {
+      const nestedList = getDirectNestedList(element);
+      if (nestedList) {
+        element.insertBefore(translation, nestedList);
+        return 'inside-before-first-block';
+      }
+    }
+    const firstNestedBlock = Array.from(element.children ?? []).find((child) =>
+      child.matches?.(BLOCK_SELECTOR) || child.querySelector?.(BLOCK_SELECTOR)
+    );
+    if (firstNestedBlock) {
+      element.insertBefore(translation, firstNestedBlock);
+      return 'inside-before-first-block';
+    }
+  }
+
   if (!shouldInsertInside(element)) {
     element.parentNode.insertBefore(translation, element.nextSibling);
     return 'sibling';
@@ -79,6 +97,15 @@ function restorePlacement(record) {
     const nestedList = getDirectNestedList(element);
     if (nestedList) {
       element.insertBefore(translation, nestedList);
+      return;
+    }
+  }
+  if (placement === 'inside-before-first-block') {
+    const firstNestedBlock = Array.from(element.children ?? []).find((child) =>
+      child.matches?.(BLOCK_SELECTOR) || child.querySelector?.(BLOCK_SELECTOR)
+    );
+    if (firstNestedBlock) {
+      element.insertBefore(translation, firstNestedBlock);
       return;
     }
   }
@@ -145,6 +172,7 @@ function styleText(sessionId, presentation) {
       white-space: pre-wrap !important;
       word-break: normal !important;
       overflow-wrap: anywhere !important;
+      visibility: visible !important;
     }
 
     ${selector}[${STYLE_ATTRIBUTE}="${TRANSLATION_STYLES.LEFT_BORDER}"] {
@@ -198,6 +226,10 @@ function styleText(sessionId, presentation) {
     ${hiddenSelector}[${HIDDEN_PLACEMENT_ATTRIBUTE}="inside"] > ${TRANSLATION_TAG} {
       visibility: visible !important;
     }
+    ${hiddenSelector}[${HIDDEN_PLACEMENT_ATTRIBUTE}="mixed"] {
+      display: block !important;
+      visibility: hidden !important;
+    }
   `;
 }
 
@@ -248,6 +280,7 @@ export class TranslationRenderer {
       }
       element.setAttribute(HIDDEN_ATTRIBUTE, GENERATED_VALUE);
       if (record.placement === 'sibling') element.removeAttribute(HIDDEN_PLACEMENT_ATTRIBUTE);
+      else if (record.mixedContent) element.setAttribute(HIDDEN_PLACEMENT_ATTRIBUTE, 'mixed');
       else element.setAttribute(HIDDEN_PLACEMENT_ATTRIBUTE, 'inside');
     } else if (record.originalHiddenAttributeCaptured) {
       restoreAttribute(element, HIDDEN_ATTRIBUTE, record.originalHiddenAttribute);
@@ -258,7 +291,7 @@ export class TranslationRenderer {
     }
   }
 
-  insert({element, sourceId, sourceHash, translatedText}) {
+  insert({element, sourceId, sourceHash, translatedText, mixedContent = false}) {
     if (!element?.parentNode || !sourceId) return null;
     const existing = this.records.get(sourceId);
     const pendingHash = element.getAttribute(PENDING_SOURCE_HASH_ATTRIBUTE);
@@ -266,6 +299,12 @@ export class TranslationRenderer {
     if (existing) {
       const currentHash = element.getAttribute(SOURCE_HASH_ATTRIBUTE);
       if (currentHash && sourceHash && currentHash !== sourceHash && !pendingHash) return null;
+      const nextMixedContent = Boolean(mixedContent);
+      if (existing.mixedContent !== nextMixedContent) {
+        existing.translation.parentNode?.removeChild(existing.translation);
+        existing.mixedContent = nextMixedContent;
+        existing.placement = insertAtSafeLocation(element, existing.translation, nextMixedContent);
+      }
       existing.translation.textContent = String(translatedText ?? '');
       existing.sourceHash = sourceHash ?? existing.sourceHash;
       if (sourceHash) element.setAttribute(SOURCE_HASH_ATTRIBUTE, sourceHash);
@@ -288,7 +327,8 @@ export class TranslationRenderer {
       translation,
       sourceId,
       sourceHash: sourceHash ?? '',
-      placement: insertAtSafeLocation(element, translation),
+      mixedContent: Boolean(mixedContent),
+      placement: insertAtSafeLocation(element, translation, mixedContent),
       originalAttributes: getOriginalAttributes(element),
       originalHiddenAttributeCaptured: false,
       originalHiddenAttribute: null

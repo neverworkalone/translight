@@ -9,7 +9,10 @@ import {
 } from './tab-state.js';
 import { t } from '../i18n/index.js';
 import { loadSettings, hostnameForUrl, matchesAutoTranslateSite, originForUrl } from '../settings.js';
-import { shouldContinueManualTranslation as shouldContinueAfterNavigation } from './navigation.js';
+import {
+  isNavigationStateCurrent,
+  shouldContinueManualTranslation as shouldContinueAfterNavigation
+} from './navigation.js';
 
 const STORAGE_KEY = 'translight.tabStates';
 const DEFAULT_ICON_PATHS = Object.freeze({
@@ -45,6 +48,7 @@ const ERROR_MESSAGE_KEYS = Object.freeze({
 
 let tabStates = {};
 let generationSequence = Date.now();
+const tabOperationChains = new Map();
 
 function getSessionStorage() {
   return globalThis.chrome?.storage?.session ?? null;
@@ -75,6 +79,21 @@ function nextGeneration() {
 
 function getState(tabId) {
   return tabStates[String(tabId)] ?? createTabState();
+}
+
+function enqueueTabOperation(tabId, operation) {
+  const key = String(tabId);
+  const previous = tabOperationChains.get(key) ?? Promise.resolve();
+  const current = previous.catch(() => {}).then(operation).catch((error) => {
+    console.error('Translight tab operation failed.', error);
+  });
+  tabOperationChains.set(key, current);
+  void current.then(() => {
+    if (tabOperationChains.get(key) === current) tabOperationChains.delete(key);
+  }, () => {
+    if (tabOperationChains.get(key) === current) tabOperationChains.delete(key);
+  });
+  return current;
 }
 
 function getLocalizedError(state) {
@@ -147,7 +166,11 @@ function isBusyOrActive(state) {
   return state.status === TAB_STATUS.ACTIVE || BUSY_STATUSES.has(state.status);
 }
 
-async function startTranslation(tab, {activation = TAB_ACTIVATION.MANUAL, url = tab?.url, documentToken} = {}) {
+async function startTranslation(tab, {
+  activation = TAB_ACTIVATION.MANUAL,
+  url = tab?.url,
+  documentToken
+} = {}) {
   const tabId = tab?.id;
   if (typeof tabId !== 'number') return;
 
@@ -239,9 +262,11 @@ async function handleContentReady(message, sender) {
   const tabId = sender?.tab?.id;
   if (typeof tabId !== 'number' || !message.documentToken) return;
 
-  const state = getState(tabId);
   const url = message.url || sender?.tab?.url || '';
+  const initialState = getState(tabId);
+  if (initialState.documentToken === message.documentToken) return;
   const settings = await loadSettings();
+  const state = getState(tabId);
   const currentHost = hostnameForUrl(url);
   const sameManualSite = shouldContinueAfterNavigation(state, url);
   const autoSite = matchesAutoTranslateSite(currentHost, settings.autoTranslateSites);
@@ -276,72 +301,96 @@ async function handleContentReady(message, sender) {
   const activation = sameManualSite ? TAB_ACTIVATION.MANUAL : TAB_ACTIVATION.AUTO;
   await startTranslation(
     {id: tabId, url},
-    {activation, url, documentToken: message.documentToken}
+    {
+      activation,
+      url,
+      documentToken: message.documentToken
+    }
   );
 }
 
-const ready = hydrate();
+async function handleTabUpdated(tabId, changeInfo) {
+  await ready;
+  let state = getState(tabId);
+  if (state.activation == null && state.status === TAB_STATUS.OFF && state.documentToken == null) return;
 
-chrome.action.onClicked.addListener((tab) => {
-  void handleAction(tab);
-});
-
-chrome.runtime.onMessage.addListener((message, sender) => {
-  if (message?.type === 'TRANSLATION_STATUS') void handleTranslationStatus(message, sender);
-  if (message?.type === 'CONTENT_READY') void handleContentReady(message, sender);
-  return false;
-});
-
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (changeInfo.status !== 'loading') return;
-  void (async () => {
-    await ready;
-    const state = getState(tabId);
-    if (state.activation == null && state.status === TAB_STATUS.OFF && state.documentToken == null) return;
-    let url = changeInfo.url || '';
-    if (!url && chrome.tabs?.get) {
-      try {
-        url = (await chrome.tabs.get(tabId))?.url || '';
-      } catch {
-        url = '';
-      }
+  const initialGeneration = state.generation;
+  const initialDocumentToken = state.documentToken;
+  let url = changeInfo.url || '';
+  if (!url && chrome.tabs?.get) {
+    try {
+      url = (await chrome.tabs.get(tabId))?.url || '';
+    } catch {
+      url = '';
     }
-    const settings = await loadSettings();
-    const sameManualSite = shouldContinueAfterNavigation(state, url);
-    const autoSite = matchesAutoTranslateSite(hostnameForUrl(url), settings.autoTranslateSites);
-    if (!sameManualSite && !autoSite) {
-      await setState(tabId, {
-        status: TAB_STATUS.OFF,
-        generation: nextGeneration(),
-        activation: null,
-        documentToken: null,
-        origin: null,
-        hostname: hostnameForUrl(url) || null,
-        modelState: null,
-        progress: null,
-        errorCode: null,
-        errorMessage: null
-      });
-      await sendStopMessage(tabId, state.generation);
-      return;
-    }
+  }
+  const settings = await loadSettings();
+  const latestState = getState(tabId);
+  if (!isNavigationStateCurrent(
+    {generation: initialGeneration, documentToken: initialDocumentToken},
+    latestState
+  )) return;
+  state = latestState;
+
+  const sameManualSite = shouldContinueAfterNavigation(state, url);
+  const autoSite = matchesAutoTranslateSite(hostnameForUrl(url), settings.autoTranslateSites);
+  if (!sameManualSite && !autoSite) {
     await setState(tabId, {
       status: TAB_STATUS.OFF,
       generation: nextGeneration(),
+      activation: null,
       documentToken: null,
-      activation: sameManualSite ? TAB_ACTIVATION.MANUAL : TAB_ACTIVATION.AUTO,
-      origin: state.origin || originForUrl(url),
-      hostname: hostnameForUrl(url) || state.hostname,
+      origin: null,
+      hostname: hostnameForUrl(url) || null,
       modelState: null,
       progress: null,
       errorCode: null,
       errorMessage: null
     });
     await sendStopMessage(tabId, state.generation);
-  })();
+    return;
+  }
+  await setState(tabId, {
+    status: TAB_STATUS.OFF,
+    generation: nextGeneration(),
+    documentToken: null,
+    activation: sameManualSite ? TAB_ACTIVATION.MANUAL : TAB_ACTIVATION.AUTO,
+    origin: state.origin || originForUrl(url),
+    hostname: hostnameForUrl(url) || state.hostname,
+    modelState: null,
+    progress: null,
+    errorCode: null,
+    errorMessage: null
+  });
+  await sendStopMessage(tabId, state.generation);
+}
+
+const ready = hydrate();
+
+chrome.action.onClicked.addListener((tab) => {
+  const tabId = tab?.id;
+  if (typeof tabId === 'number') void enqueueTabOperation(tabId, () => handleAction(tab));
+  else void handleAction(tab);
+});
+
+chrome.runtime.onMessage.addListener((message, sender) => {
+  const tabId = sender?.tab?.id;
+  if (message?.type === 'TRANSLATION_STATUS' && typeof tabId === 'number') {
+    void enqueueTabOperation(tabId, () => handleTranslationStatus(message, sender));
+  }
+  if (message?.type === 'CONTENT_READY' && typeof tabId === 'number') {
+    void enqueueTabOperation(tabId, () => handleContentReady(message, sender));
+  }
+  return false;
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status !== 'loading') return;
+  void enqueueTabOperation(tabId, () => handleTabUpdated(tabId, changeInfo));
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   tabStates = removeTabState(tabStates, tabId);
+  tabOperationChains.delete(String(tabId));
   void persist();
 });

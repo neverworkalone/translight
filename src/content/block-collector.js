@@ -58,6 +58,15 @@ function textFromNode(node, root) {
   return Array.from(node.childNodes, (child) => textFromNode(child, root)).join('');
 }
 
+function directTextFromNode(node, root) {
+  if (node.nodeType === 3) return node.nodeValue ?? '';
+  if (!isElement(node)) return '';
+  if (node !== root && node.matches(EXCLUDED_CONTENT_SELECTOR)) return '';
+  if (node !== root && node.matches(GENERATED_SELECTOR)) return '';
+  if (node !== root && node.matches(BLOCK_SELECTOR)) return '';
+  return Array.from(node.childNodes, (child) => directTextFromNode(child, root)).join('');
+}
+
 export function normalizeSourceText(value) {
   return String(value ?? '')
     .replace(/\u00a0/g, ' ')
@@ -94,11 +103,6 @@ function hasBlockDescendant(element, candidateSet) {
   return Array.from(element.querySelectorAll(BLOCK_SELECTOR)).some((descendant) => candidateSet.has(descendant));
 }
 
-function hasMeaningfulText(element) {
-  const text = normalizeSourceText(textFromNode(element, element));
-  return text.length >= 2 && hasLettersOrNumbers(text);
-}
-
 export function collectTranslationBlocks(root = globalThis.document?.body) {
   if (!root || typeof root.querySelectorAll !== 'function') return [];
 
@@ -112,10 +116,12 @@ export function collectTranslationBlocks(root = globalThis.document?.body) {
     const existingSourceId = element.getAttribute(SOURCE_ID_ATTRIBUTE);
     const isExistingSource = Boolean(existingSourceId);
     if (isHidden(element) && !isExistingSource) continue;
-    if (hasBlockDescendant(element, candidateSet)) continue;
+    const hasNestedBlocks = hasBlockDescendant(element, candidateSet);
+    const directText = hasNestedBlocks ? normalizeSourceText(directTextFromNode(element, element)) : '';
+    if (hasNestedBlocks && !directText) continue;
 
-    const text = normalizeSourceText(textFromNode(element, element));
-    if (!hasMeaningfulText(element) || isNavigationLike(element, text)) continue;
+    const text = hasNestedBlocks ? directText : normalizeSourceText(textFromNode(element, element));
+    if (text.length < 2 || !hasLettersOrNumbers(text) || isNavigationLike(element, text)) continue;
     const sourceHash = hashSourceText(text);
     if (isExistingSource && !element.getAttribute(SOURCE_HASH_ATTRIBUTE)) continue;
     if (isExistingSource && element.getAttribute(SOURCE_HASH_ATTRIBUTE) === sourceHash) continue;
@@ -125,7 +131,8 @@ export function collectTranslationBlocks(root = globalThis.document?.body) {
       element,
       text,
       sourceId: existingSourceId || `source-${++sourceSequence}`,
-      sourceHash
+      sourceHash,
+      mixedContent: hasNestedBlocks
     });
   }
 

@@ -82,6 +82,8 @@ export class PageSession {
     this.mutationTimer = null;
     this.pendingMutationRoots = new Set();
     this.navigationHandler = null;
+    this.scrollHandler = null;
+    this.priorityTimer = null;
     this.lastUrl = this.document?.location?.href ?? '';
     this.originalTitle = null;
     this.translatedTitle = null;
@@ -165,7 +167,7 @@ export class PageSession {
       const blocks = collectTranslationBlocks(this.document.body);
       this.notify('TRANSLATING', {count: blocks.length});
       this.installObservers();
-      await this.queue.enqueue(blocks);
+      await this.queue.enqueueAll(blocks);
       if (!this.isCurrent()) throw new TranslationCancelledError();
       await this.translateTitle(signal);
       if (!this.isCurrent()) throw new TranslationCancelledError();
@@ -197,6 +199,8 @@ export class PageSession {
       concurrency: this.concurrency,
       cache: this.translationCache,
       document: this.document,
+      getViewport: () => getView(this.document),
+      cacheKey: (text) => `${this.provider?.pair ?? 'default'}\u0000${text}`,
       signal,
       isCurrent: () => this.isCurrent(),
       onResult: (block, translatedText) => {
@@ -214,7 +218,7 @@ export class PageSession {
 
   async translateBlocks(blocks, signal) {
     if (!this.queue) this.createQueue(signal ?? this.controller?.signal);
-    await this.queue.enqueue(blocks);
+    await this.queue.enqueueAll(blocks);
     if (this.translatedCount === 0 && this.firstError) throw this.firstError;
     return {
       translatedCount: this.translatedCount,
@@ -225,7 +229,7 @@ export class PageSession {
   async enqueueBlocks(blocks) {
     if (!this.isCurrent() || !this.queue || !blocks.length) return;
     this.notify('TRANSLATING', {count: blocks.length});
-    await this.queue.enqueue(blocks);
+    await this.queue.enqueueAll(blocks);
   }
 
   installObservers() {
@@ -246,6 +250,15 @@ export class PageSession {
     view?.addEventListener?.(NAVIGATION_EVENT, this.navigationHandler);
     view?.addEventListener?.('popstate', this.navigationHandler);
     view?.addEventListener?.('hashchange', this.navigationHandler);
+    this.scrollHandler = () => {
+      if (this.priorityTimer != null) return;
+      this.priorityTimer = setTimeout(() => {
+        this.priorityTimer = null;
+        this.queue?.reprioritize();
+      }, 50);
+    };
+    view?.addEventListener?.('scroll', this.scrollHandler, {passive: true});
+    view?.addEventListener?.('resize', this.scrollHandler, {passive: true});
 
     const title = this.document.querySelector?.('title');
     if (title && typeof MutationObserverClass === 'function') {
@@ -263,6 +276,8 @@ export class PageSession {
     this.titleObserver = null;
     if (this.mutationTimer != null) clearTimeout(this.mutationTimer);
     this.mutationTimer = null;
+    if (this.priorityTimer != null) clearTimeout(this.priorityTimer);
+    this.priorityTimer = null;
     this.pendingMutationRoots.clear();
     const view = getView(this.document);
     if (this.navigationHandler) {
@@ -271,6 +286,11 @@ export class PageSession {
       view?.removeEventListener?.('hashchange', this.navigationHandler);
     }
     this.navigationHandler = null;
+    if (this.scrollHandler) {
+      view?.removeEventListener?.('scroll', this.scrollHandler);
+      view?.removeEventListener?.('resize', this.scrollHandler);
+    }
+    this.scrollHandler = null;
   }
 
   handleMutations(records) {

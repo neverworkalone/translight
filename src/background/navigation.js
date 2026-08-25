@@ -6,6 +6,11 @@ import {
 } from '../settings.js';
 import {TAB_ACTIVATION} from './tab-state.js';
 
+export function isNavigationStateCurrent(before, after) {
+  return before?.generation === after?.generation &&
+    before?.documentToken === after?.documentToken;
+}
+
 export function shouldContinueManualTranslation(state, url) {
   return state?.activation === TAB_ACTIVATION.MANUAL &&
     Boolean(state.origin) &&

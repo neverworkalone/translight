@@ -1,5 +1,9 @@
 import {describe, expect, it} from 'vitest';
-import {classifyNavigation, shouldContinueManualTranslation} from '../src/background/navigation.js';
+import {
+  classifyNavigation,
+  isNavigationStateCurrent,
+  shouldContinueManualTranslation
+} from '../src/background/navigation.js';
 import {TAB_ACTIVATION} from '../src/background/tab-state.js';
 
 describe('navigation activation rules', () => {
@@ -17,5 +21,16 @@ describe('navigation activation rules', () => {
       autoTranslateSites: ['https://example.com/path', 'example.com']
     });
     expect(result).toMatchObject({translate: true, activation: TAB_ACTIVATION.AUTO, hostname: 'news.example.com'});
+  });
+
+  it('rejects a loading update that was made stale while awaiting settings', () => {
+    expect(isNavigationStateCurrent(
+      {generation: 10, documentToken: 'old-document'},
+      {generation: 10, documentToken: 'old-document'}
+    )).toBe(true);
+    expect(isNavigationStateCurrent(
+      {generation: 10, documentToken: 'old-document'},
+      {generation: 11, documentToken: 'new-document'}
+    )).toBe(false);
   });
 });

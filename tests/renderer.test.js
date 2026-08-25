@@ -109,4 +109,36 @@ describe('TranslationRenderer', () => {
     renderer.removeAll();
     expect(document.body.innerHTML).toBe('<p id="source">Original text</p>');
   });
+
+  it('keeps mixed parent and nested block translations visible in translation-only mode', () => {
+    document.body.innerHTML = '<div id="mixed">Direct text.<p id="nested">Nested text.</p></div>';
+    const mixed = document.querySelector('#mixed');
+    const nested = document.querySelector('#nested');
+    const renderer = new TranslationRenderer({
+      document,
+      sessionId: 'mixed-session',
+      settings: {translationMode: TRANSLATION_MODES.TRANSLATION_ONLY}
+    });
+
+    renderer.insert({
+      element: mixed,
+      sourceId: 'mixed-source',
+      sourceHash: 'mixed-hash',
+      mixedContent: true,
+      translatedText: 'Direct translation.'
+    });
+    renderer.insert({
+      element: nested,
+      sourceId: 'nested-source',
+      sourceHash: 'nested-hash',
+      translatedText: 'Nested translation.'
+    });
+
+    expect(mixed.getAttribute('data-translight-hidden-placement')).toBe('mixed');
+    expect(mixed.querySelector('translight-translation').textContent).toBe('Direct translation.');
+    expect(mixed.querySelectorAll('translight-translation')).toHaveLength(2);
+
+    renderer.removeAll();
+    expect(document.body.innerHTML).toBe('<div id="mixed">Direct text.<p id="nested">Nested text.</p></div>');
+  });
 });

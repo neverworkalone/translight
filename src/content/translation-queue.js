@@ -1,5 +1,3 @@
-import { TranslationCancelledError } from '../translation/provider.js';
-
 export const DEFAULT_QUEUE_CONCURRENCY = 3;
 export const DEFAULT_CACHE_LIMIT = 256;
 export const DEFAULT_PENDING_LIMIT = 2048;
@@ -97,6 +95,8 @@ export class TranslationQueue {
     seenLimit = DEFAULT_SEEN_LIMIT,
     document = globalThis.document,
     viewport,
+    getViewport,
+    cacheKey = (text) => text,
     isCurrent = () => true,
     signal
   } = {}) {
@@ -110,6 +110,8 @@ export class TranslationQueue {
     this.seenLimit = Math.max(1, Math.floor(Number(seenLimit) || DEFAULT_SEEN_LIMIT));
     this.document = document;
     this.viewport = viewport;
+    this.getViewport = getViewport ?? (() => this.viewport ?? this.document?.defaultView ?? globalThis.window);
+    this.cacheKey = cacheKey;
     this.isCurrent = isCurrent;
     this.pending = [];
     this.active = 0;
@@ -118,6 +120,8 @@ export class TranslationQueue {
     this.inFlight = new Map();
     this.cancelled = false;
     this.idleResolvers = [];
+    this.batchChain = Promise.resolve();
+    this.viewportVersion = 0;
     this.signal = signal;
     this.abortListener = () => this.cancel();
     signal?.addEventListener?.('abort', this.abortListener, {once: true});
@@ -128,7 +132,7 @@ export class TranslationQueue {
   }
 
   whenIdle() {
-    if (this.isIdle()) return Promise.resolve();
+    if (this.cancelled || this.isIdle()) return Promise.resolve();
     return new Promise((resolve) => this.idleResolvers.push(resolve));
   }
 
@@ -148,15 +152,12 @@ export class TranslationQueue {
       candidates.push(block);
     }
 
-    this.pending.push(...prioritizeBlocks(candidates, {
-      document: this.document,
-      viewport: this.viewport
-    }));
+    this.pending.push(...candidates);
+    this.sortPending();
     if (this.pending.length > this.pendingLimit) {
-      this.pending = prioritizeBlocks(this.pending, {
-        document: this.document,
-        viewport: this.viewport
-      }).slice(0, this.pendingLimit);
+      const dropped = this.pending.slice(this.pendingLimit);
+      this.pending = this.pending.slice(0, this.pendingLimit);
+      for (const block of dropped) this.forgetSeen(blockKey(block));
     }
     this.pump();
     return this.whenIdle();
@@ -164,6 +165,53 @@ export class TranslationQueue {
 
   run(blocks = []) {
     return this.enqueue(blocks);
+  }
+
+  enqueueAll(blocks = []) {
+    const task = this.batchChain.then(async () => {
+      let remaining = prioritizeBlocks(Array.from(blocks), this.currentPriorityOptions());
+      let version = this.viewportVersion;
+      const attempted = new Set();
+      while (!this.cancelled && this.isCurrent() && remaining.length) {
+        const candidates = remaining.filter((block) => !attempted.has(blockKey(block)));
+        if (!candidates.length) break;
+        if (version !== this.viewportVersion) {
+          remaining = prioritizeBlocks(candidates, this.currentPriorityOptions());
+          version = this.viewportVersion;
+        }
+        const ordered = remaining;
+        const batch = ordered.slice(0, this.pendingLimit);
+        for (const block of batch) attempted.add(blockKey(block));
+        await this.enqueue(batch);
+        remaining = ordered.slice(this.pendingLimit);
+      }
+    });
+    this.batchChain = task.catch(() => {});
+    return task;
+  }
+
+  currentPriorityOptions() {
+    return {
+      document: this.document,
+      viewport: this.getViewport?.()
+    };
+  }
+
+  reprioritize() {
+    if (this.cancelled) return;
+    this.viewportVersion += 1;
+    this.sortPending();
+  }
+
+  sortPending() {
+    if (this.pending.length < 2) return;
+    this.pending = prioritizeBlocks(this.pending, this.currentPriorityOptions());
+  }
+
+  forgetSeen(key) {
+    if (!this.seen.delete(key)) return;
+    const index = this.seenOrder.indexOf(key);
+    if (index !== -1) this.seenOrder.splice(index, 1);
   }
 
   cancel() {
@@ -184,6 +232,7 @@ export class TranslationQueue {
 
   pump() {
     while (!this.cancelled && this.isCurrent() && this.active < this.concurrency && this.pending.length) {
+      this.sortPending();
       const block = this.pending.shift();
       this.active += 1;
       void this.process(block).finally(() => {
@@ -203,34 +252,35 @@ export class TranslationQueue {
   async process(block) {
     if (this.cancelled || !this.isCurrent() || this.signal?.aborted) return;
     const text = String(block.text);
-    if (this.cache.has(text)) {
-      if (this.isCurrent() && !this.cancelled) {
-        this.onResult(block, this.cache.get(text), {fromCache: true});
-      }
-      return;
-    }
+    const cacheKey = this.cacheKey(text);
 
     try {
-      let translationPromise = this.inFlight.get(text);
+      if (this.cache.has(cacheKey)) {
+        if (this.isCurrent() && !this.cancelled) {
+          this.onResult(block, this.cache.get(cacheKey), {fromCache: true});
+        }
+        return;
+      }
+      let translationPromise = this.inFlight.get(cacheKey);
       if (!translationPromise) {
         translationPromise = Promise.resolve(this.translate(text, {signal: this.signal}));
-        this.inFlight.set(text, translationPromise);
+        this.inFlight.set(cacheKey, translationPromise);
       }
       let translatedText;
       try {
         translatedText = await translationPromise;
       } finally {
-        if (this.inFlight.get(text) === translationPromise) this.inFlight.delete(text);
+        if (this.inFlight.get(cacheKey) === translationPromise) this.inFlight.delete(cacheKey);
       }
       if (this.cancelled || !this.isCurrent() || this.signal?.aborted) return;
       const normalized = String(translatedText ?? '').trim();
       if (!normalized) return;
-      this.cache.set(text, normalized);
+      this.cache.set(cacheKey, normalized);
       trimCache(this.cache, this.cacheLimit);
       if (this.isCurrent() && !this.cancelled) this.onResult(block, normalized, {fromCache: false});
     } catch (error) {
       if (this.cancelled || !this.isCurrent() || error?.code === 'CANCELLED') return;
-      this.seen.delete(blockKey(block));
+      this.forgetSeen(blockKey(block));
       this.onError(error, block);
     }
   }
