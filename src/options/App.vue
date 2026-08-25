@@ -192,7 +192,7 @@ onUnmounted(() => {
       </div>
     </header>
 
-    <div class="settings-body">
+    <div class="settings-body" :class="'page-' + currentPage">
       <aside class="settings-sidebar" aria-label="Settings navigation">
         <span class="sidebar-label">{{ t('settingsSidebarLabel') }}</span>
         <button

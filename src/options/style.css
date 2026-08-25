@@ -124,6 +124,12 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
   min-height: 772px;
 }
 
+.settings-body.page-appearance,
+.settings-body.page-appearance .settings-sidebar,
+.settings-body.page-appearance .settings-workspace {
+  min-height: 872px;
+}
+
 .settings-sidebar {
   display: flex;
   flex: 0 0 240px;
