@@ -146,6 +146,9 @@ describe('TranslationRenderer', () => {
 
     renderer.updatePresentation({displayStyle: TRANSLATION_STYLES.MINI_HIGHLIGHT});
     expect(renderer.style.textContent).toContain('padding: 0 0.06em !important');
+    expect(renderer.style.textContent).toContain(
+      'linear-gradient(to bottom, transparent 50%, var(--translight-style-color) 50%)'
+    );
     renderer.removeAll();
   });
 

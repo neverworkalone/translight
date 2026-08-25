@@ -145,7 +145,7 @@ fieldset { min-width: 0; padding: 0; border: 0; }
   line-height: 1;
 }
 .preview-style-highlight .preview-translation > span { border-radius: 0.12em; background: var(--preview-style-color); padding: 0 0.12em; }
-.preview-style-mini-highlight .preview-translation > span { border-radius: 0.1em; background: var(--preview-style-color); padding: 0 0.06em; }
+.preview-style-mini-highlight .preview-translation > span { border-radius: 0.1em; background: linear-gradient(to bottom, transparent 50%, var(--preview-style-color) 50%); padding: 0 0.06em; }
 
 .form-actions { display: flex; justify-content: flex-end; gap: 10px; }
 .primary-button, .secondary-button { min-height: 42px; padding: 9px 16px; border-radius: 10px; font-weight: 700; }

@@ -230,7 +230,7 @@ function styleText(sessionId, presentation) {
       padding: 0 0.12em !important;
     }
     ${miniHighlightTextSelector} {
-      background: var(--translight-style-color) !important;
+      background: linear-gradient(to bottom, transparent 50%, var(--translight-style-color) 50%) !important;
       border-radius: 0.1em !important;
       padding: 0 0.06em !important;
     }
