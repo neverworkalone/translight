@@ -84,7 +84,7 @@ export class ChromeTranslateProvider extends TranslationProvider {
     if (initialState === MODEL_STATE.UNAVAILABLE) {
       throw new TranslationProviderError(
         'UNAVAILABLE',
-        'No Chrome Translator model is available for English to Korean translation.'
+        'No Chrome Translator model is available for the configured language pair.'
       );
     }
     if (initialState === MODEL_STATE.DOWNLOAD_FAILED) {

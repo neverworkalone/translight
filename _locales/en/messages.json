@@ -59,7 +59,7 @@
     "message": "Chrome built-in Translator"
   },
   "optionsIntro": {
-    "message": "Translight preserves the original text and adds Korean translations below English paragraphs. Use the T icon in the toolbar to start or stop translation on the current page."
+    "message": "Translight keeps the original text and displays the translation below. Use the T icon in the toolbar to start or stop translation on the current page."
   },
   "optionsNoticeTitle": {
     "message": "Settings page based on TASK 1–5"

@@ -44,4 +44,30 @@ describe('ChromeTranslateProvider', () => {
     const provider = new ChromeTranslateProvider({ api: null });
     await expect(provider.getModelState()).resolves.toBe(MODEL_STATE.UNAVAILABLE);
   });
+
+  it('passes a custom language pair to the Translator API', async () => {
+    let availabilityOptions;
+    let createOptions;
+    const translator = { translate: async (text) => `translated:${text}` };
+    const api = {
+      availability: async (options) => {
+        availabilityOptions = options;
+        return 'available';
+      },
+      create: async (options) => {
+        createOptions = options;
+        return translator;
+      }
+    };
+
+    const provider = new ChromeTranslateProvider({
+      sourceLanguage: 'de',
+      targetLanguage: 'fr',
+      api
+    });
+
+    await expect(provider.prepare()).resolves.toBe(translator);
+    expect(availabilityOptions).toEqual({ sourceLanguage: 'de', targetLanguage: 'fr' });
+    expect(createOptions).toMatchObject({ sourceLanguage: 'de', targetLanguage: 'fr' });
+  });
 });
