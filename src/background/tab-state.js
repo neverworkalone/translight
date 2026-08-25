@@ -4,7 +4,8 @@ export const TAB_STATUS = Object.freeze({
   DOWNLOADING: 'DOWNLOADING',
   TRANSLATING: 'TRANSLATING',
   ACTIVE: 'ACTIVE',
-  ERROR: 'ERROR'
+  ERROR: 'ERROR',
+  SKIPPED: 'SKIPPED'
 });
 
 export const TAB_ACTIVATION = Object.freeze({

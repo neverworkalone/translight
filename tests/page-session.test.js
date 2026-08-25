@@ -41,6 +41,33 @@ describe('PageSession', () => {
     session.stop();
   });
 
+  it('skips a document whose declared language is the target language', async () => {
+    document.documentElement.lang = 'ko-KR';
+    document.body.innerHTML = '<p>한국어 문서는 이미 대상 언어로 작성되어 있습니다.</p>';
+    let calls = 0;
+    const statuses = [];
+    const session = new PageSession({
+      generation: 11,
+      document,
+      provider: makeProvider({
+        translate: async (text) => {
+          calls += 1;
+          return `ko:${text}`;
+        }
+      }),
+      sendStatus: (status) => statuses.push(status)
+    });
+
+    await session.start();
+
+    expect(calls).toBe(0);
+    expect(document.querySelector('p').textContent).toBe('한국어 문서는 이미 대상 언어로 작성되어 있습니다.');
+    expect(document.querySelector('translight-translation')).toBeNull();
+    expect(statuses.at(-1)).toMatchObject({status: 'SKIPPED', reason: 'TARGET_LANGUAGE'});
+    document.documentElement.removeAttribute('lang');
+    session.stop({notify: false});
+  });
+
   it('does not insert late results after cancellation', async () => {
     document.body.innerHTML = '<p>Pending paragraph.</p>';
     const resolvers = [];

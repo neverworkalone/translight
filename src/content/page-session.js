@@ -5,6 +5,7 @@ import { MODEL_STATE } from '../translation/model-state.js';
 import { isTranslationCancelled, TranslationCancelledError } from '../translation/provider.js';
 import { TranslationRenderer } from './translation-renderer.js';
 import { createDefaultSettings, normalizeSettings } from '../settings.js';
+import { isDocumentInLanguage } from './language.js';
 
 const DEFAULT_CONCURRENCY = 3;
 const MUTATION_DEBOUNCE_MS = 100;
@@ -139,6 +140,12 @@ export class PageSession {
   async run() {
     const signal = this.controller.signal;
     try {
+      if (isDocumentInLanguage(this.document, this.settings.targetLanguage)) {
+        this.running = false;
+        this.notify('SKIPPED', {reason: 'TARGET_LANGUAGE'});
+        return;
+      }
+
       this.notify('CHECKING');
       const modelState = await this.provider.getModelState();
       if (!this.isCurrent()) throw new TranslationCancelledError();
