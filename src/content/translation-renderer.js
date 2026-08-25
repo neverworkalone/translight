@@ -251,6 +251,10 @@ function styleText(sessionId, presentation) {
       --translight-text-color: ${presentation.textColor};
       --translight-font-weight: ${weight};
       --translight-font-style: ${fontStyle};
+      box-sizing: border-box !important;
+      border: 0 !important;
+      outline: 0 !important;
+      background: transparent !important;
       color: var(--translight-text-color) !important;
       font-weight: var(--translight-font-weight) !important;
       font-style: var(--translight-font-style) !important;
