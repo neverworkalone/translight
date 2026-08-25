@@ -138,8 +138,14 @@ fieldset { min-width: 0; padding: 0; border: 0; }
 .preview-style-solid-underline .preview-translation { text-decoration: underline solid var(--preview-style-color); text-underline-offset: 4px; }
 .preview-style-separator .preview-translation { border-top: 1px solid var(--preview-style-color); padding-top: 12px; }
 .preview-style-background .preview-translation { background: var(--preview-style-color); padding: 7px 10px; }
-.preview-style-highlight .preview-translation { border-radius: 4px; background: var(--preview-style-color); padding: 4px 7px; }
-.preview-style-mini-highlight .preview-translation { display: inline-block; border-radius: 3px; background: var(--preview-style-color); padding: 1px 4px; }
+.preview-style-highlight .preview-translation > span,
+.preview-style-mini-highlight .preview-translation > span {
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  line-height: 1;
+}
+.preview-style-highlight .preview-translation > span { border-radius: 0.12em; background: var(--preview-style-color); padding: 0 0.12em; }
+.preview-style-mini-highlight .preview-translation > span { border-radius: 0.1em; background: var(--preview-style-color); padding: 0 0.06em; }
 
 .form-actions { display: flex; justify-content: flex-end; gap: 10px; }
 .primary-button, .secondary-button { min-height: 42px; padding: 9px 16px; border-radius: 10px; font-weight: 700; }

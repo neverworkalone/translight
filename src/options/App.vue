@@ -161,7 +161,7 @@ function downloadSettings() {
           <p class="preview-caption">{{ t('settingsPreviewOriginal') }}</p>
           <div class="preview-flow" :class="`preview-style-${settings.displayStyle}`">
             <p v-for="item in previewOrder" :key="item" :class="`preview-${item}`">
-              {{ item === 'original' ? t('settingsPreviewOriginal') : t('settingsPreviewTranslation') }}
+              <span>{{ item === 'original' ? t('settingsPreviewOriginal') : t('settingsPreviewTranslation') }}</span>
             </p>
           </div>
         </div>

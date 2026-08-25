@@ -18,6 +18,7 @@ export const HIDDEN_PLACEMENT_ATTRIBUTE = 'data-translight-hidden-placement';
 const GENERATED_VALUE = 'true';
 const STYLE_ATTRIBUTE = 'data-translight-style';
 const MODE_ATTRIBUTE = 'data-translight-mode';
+const TRANSLATION_TEXT_ATTRIBUTE = 'data-translight-text';
 const BLOCK_SELECTOR = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,figcaption,div';
 const LAYOUT_DISPLAYS = new Set(['flex', 'inline-flex', 'grid', 'inline-grid']);
 const ATTRIBUTE_NAMES = [
@@ -121,6 +122,16 @@ function restoreAttribute(element, name, value) {
   else element.setAttribute(name, value);
 }
 
+function setTranslationText(translation, value) {
+  const text = String(value ?? '');
+  const textNode = translation.querySelector?.(`[${TRANSLATION_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"]`);
+  if (textNode) {
+    textNode.textContent = text;
+    return;
+  }
+  translation.textContent = text;
+}
+
 function normalizePresentation(settings = {}) {
   const mode = Object.values(TRANSLATION_MODES).includes(settings.translationMode)
     ? settings.translationMode
@@ -141,6 +152,8 @@ function normalizePresentation(settings = {}) {
 function styleText(sessionId, presentation) {
   const selector = `${TRANSLATION_TAG}[${SESSION_ATTRIBUTE}="${escapeAttribute(sessionId)}"]`;
   const hiddenSelector = `[${HIDDEN_ATTRIBUTE}="true"][${SESSION_ATTRIBUTE}="${escapeAttribute(sessionId)}"]`;
+  const highlightTextSelector = `${selector}[${STYLE_ATTRIBUTE}="${TRANSLATION_STYLES.HIGHLIGHT}"] > [${TRANSLATION_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"]`;
+  const miniHighlightTextSelector = `${selector}[${STYLE_ATTRIBUTE}="${TRANSLATION_STYLES.MINI_HIGHLIGHT}"] > [${TRANSLATION_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"]`;
   const weight = presentation.bold ? '700' : '400';
   const fontStyle = presentation.italic ? 'italic' : 'normal';
 
@@ -205,16 +218,21 @@ function styleText(sessionId, presentation) {
       background: var(--translight-style-color) !important;
       padding: 0.3em 0.5em !important;
     }
-    ${selector}[${STYLE_ATTRIBUTE}="${TRANSLATION_STYLES.HIGHLIGHT}"] {
-      background: var(--translight-style-color) !important;
-      border-radius: 0.2em !important;
-      padding: 0.15em 0.3em !important;
+    ${highlightTextSelector},
+    ${miniHighlightTextSelector} {
+      -webkit-box-decoration-break: clone !important;
+      box-decoration-break: clone !important;
+      line-height: 1 !important;
     }
-    ${selector}[${STYLE_ATTRIBUTE}="${TRANSLATION_STYLES.MINI_HIGHLIGHT}"] {
-      display: inline-block !important;
+    ${highlightTextSelector} {
       background: var(--translight-style-color) !important;
-      border-radius: 0.18em !important;
-      padding: 0 0.18em !important;
+      border-radius: 0.12em !important;
+      padding: 0 0.12em !important;
+    }
+    ${miniHighlightTextSelector} {
+      background: var(--translight-style-color) !important;
+      border-radius: 0.1em !important;
+      padding: 0 0.06em !important;
     }
     ${hiddenSelector} {
       display: none !important;
@@ -313,7 +331,7 @@ export class TranslationRenderer {
         existing.mixedContent = nextMixedContent;
         existing.placement = insertAtSafeLocation(element, existing.translation, nextMixedContent);
       }
-      existing.translation.textContent = String(translatedText ?? '');
+      setTranslationText(existing.translation, translatedText);
       existing.sourceHash = sourceHash ?? existing.sourceHash;
       if (sourceHash) element.setAttribute(SOURCE_HASH_ATTRIBUTE, sourceHash);
       element.removeAttribute(PENDING_SOURCE_HASH_ATTRIBUTE);
@@ -329,7 +347,10 @@ export class TranslationRenderer {
     translation.setAttribute(GENERATED_ATTRIBUTE, GENERATED_VALUE);
     translation.setAttribute(SESSION_ATTRIBUTE, this.sessionId);
     translation.setAttribute(SOURCE_ATTRIBUTE, sourceId);
-    translation.textContent = String(translatedText ?? '');
+    const translationText = this.document.createElement('span');
+    translationText.setAttribute(TRANSLATION_TEXT_ATTRIBUTE, GENERATED_VALUE);
+    translationText.textContent = String(translatedText ?? '');
+    translation.appendChild(translationText);
     const record = {
       element,
       translation,
