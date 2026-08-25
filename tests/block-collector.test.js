@@ -34,7 +34,7 @@ describe('collectTranslationBlocks', () => {
   it('does not include generated nodes or source nodes already marked by Translight', () => {
     document.body.innerHTML = `
       <p data-translight-source-id="source-1">Already translated</p>
-      <translight-translation data-translight-generated="true">이미 번역됨</translight-translation>
+      <translight-translation data-translight-generated="true">Already translated</translight-translation>
       <p>Fresh paragraph</p>
     `;
 

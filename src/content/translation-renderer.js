@@ -83,7 +83,7 @@ function insertAtSafeLocation(element, translation) {
 
 export class TranslationRenderer {
   constructor({ document = globalThis.document, sessionId }) {
-    if (!document) throw new Error('TranslationRenderer에는 document가 필요합니다.');
+    if (!document) throw new Error('TranslationRenderer requires a document.');
     this.document = document;
     this.sessionId = sessionId;
     this.records = new Map();

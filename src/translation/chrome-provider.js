@@ -59,7 +59,7 @@ export class ChromeTranslateProvider extends TranslationProvider {
       });
       return normalizeModelState(state);
     } catch (error) {
-      throw toProviderError(error, 'AVAILABILITY_FAILED', 'Chrome Translator 모델 상태를 확인하지 못했습니다.');
+      throw toProviderError(error, 'AVAILABILITY_FAILED', 'Chrome Translator model availability could not be checked.');
     }
   }
 
@@ -74,7 +74,7 @@ export class ChromeTranslateProvider extends TranslationProvider {
     if (!this.api || typeof this.api.create !== 'function') {
       throw new TranslationProviderError(
         'UNAVAILABLE',
-        '이 Chrome 환경에서는 Translator API를 사용할 수 없습니다.'
+        'Chrome Translator is unavailable in this environment.'
       );
     }
 
@@ -84,13 +84,13 @@ export class ChromeTranslateProvider extends TranslationProvider {
     if (initialState === MODEL_STATE.UNAVAILABLE) {
       throw new TranslationProviderError(
         'UNAVAILABLE',
-        '영어에서 한국어로 번역할 수 있는 Chrome Translator 모델이 없습니다.'
+        'No Chrome Translator model is available for the configured language pair.'
       );
     }
     if (initialState === MODEL_STATE.DOWNLOAD_FAILED) {
       throw new TranslationProviderError(
         'DOWNLOAD_FAILED',
-        'Chrome Translator 모델 다운로드에 실패했습니다.',
+        'The Chrome Translator model download failed.',
         { recoverable: true }
       );
     }
@@ -117,7 +117,7 @@ export class ChromeTranslateProvider extends TranslationProvider {
       });
     } catch (error) {
       if (operation !== this.operation || signal?.aborted) throw new TranslationCancelledError();
-      throw toProviderError(error, 'DOWNLOAD_FAILED', 'Chrome Translator 모델을 준비하지 못했습니다.');
+      throw toProviderError(error, 'DOWNLOAD_FAILED', 'The Chrome Translator model could not be prepared.');
     }
 
     if (operation !== this.operation || signal?.aborted) {
@@ -133,7 +133,7 @@ export class ChromeTranslateProvider extends TranslationProvider {
   async translate(text, { signal } = {}) {
     throwIfAborted(signal);
     if (!this.translator || typeof this.translator.translate !== 'function') {
-      throw new TranslationProviderError('NOT_READY', '번역 모델이 아직 준비되지 않았습니다.');
+      throw new TranslationProviderError('NOT_READY', 'The translation model is not ready.');
     }
 
     try {
@@ -142,7 +142,7 @@ export class ChromeTranslateProvider extends TranslationProvider {
       return String(translated ?? '');
     } catch (error) {
       if (error instanceof TranslationCancelledError) throw error;
-      throw toProviderError(error, 'TRANSLATE_FAILED', '텍스트를 번역하지 못했습니다.');
+      throw toProviderError(error, 'TRANSLATE_FAILED', 'The text could not be translated.');
     }
   }
 

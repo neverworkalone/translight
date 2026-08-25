@@ -8,7 +8,7 @@ export class TranslationProviderError extends Error {
 }
 
 export class TranslationCancelledError extends TranslationProviderError {
-  constructor(message = '번역 작업이 취소되었습니다.') {
+  constructor(message = 'The translation was cancelled.') {
     super('CANCELLED', message, { recoverable: true });
     this.name = 'TranslationCancelledError';
   }
@@ -16,15 +16,15 @@ export class TranslationCancelledError extends TranslationProviderError {
 
 export class TranslationProvider {
   async getModelState() {
-    throw new Error('TranslationProvider.getModelState()를 구현해야 합니다.');
+    throw new Error('TranslationProvider.getModelState() must be implemented.');
   }
 
   async prepare() {
-    throw new Error('TranslationProvider.prepare()를 구현해야 합니다.');
+    throw new Error('TranslationProvider.prepare() must be implemented.');
   }
 
   async translate() {
-    throw new Error('TranslationProvider.translate()를 구현해야 합니다.');
+    throw new Error('TranslationProvider.translate() must be implemented.');
   }
 
   cancel() {}

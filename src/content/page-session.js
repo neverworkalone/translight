@@ -10,7 +10,7 @@ let sessionSequence = 0;
 function errorPayload(error) {
   return {
     errorCode: error?.code ?? 'TRANSLATION_FAILED',
-    errorMessage: error?.message ?? '페이지를 번역하지 못했습니다.'
+    errorMessage: error?.message ?? 'The page could not be translated.'
   };
 }
 
@@ -69,7 +69,7 @@ export class PageSession {
       this.notify('CHECKING', { modelState });
 
       if (modelState === MODEL_STATE.UNAVAILABLE) {
-        const error = new Error('Chrome Translator API를 사용할 수 없습니다.');
+        const error = new Error('Chrome Translator is unavailable in this environment.');
         error.code = 'UNAVAILABLE';
         error.openOptions = true;
         throw error;

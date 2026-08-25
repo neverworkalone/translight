@@ -49,7 +49,7 @@ describe('PageSession', () => {
     const run = session.start();
     await Promise.resolve();
     session.stop();
-    for (const resolve of resolvers) resolve('늦은 번역');
+    for (const resolve of resolvers) resolve('Late translation');
     await run;
 
     expect(document.querySelector('translight-translation')).toBeNull();
