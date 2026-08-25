@@ -268,7 +268,7 @@ async function handleContentReady(message, sender) {
   const settings = await loadSettings();
   const state = getState(tabId);
   const currentHost = hostnameForUrl(url);
-  const sameManualSite = shouldContinueAfterNavigation(state, url);
+  const sameManualSite = shouldContinueAfterNavigation(state, url, settings.autoTranslateSameSite);
   const autoSite = matchesAutoTranslateSite(currentHost, settings.autoTranslateSites);
 
   if (state.documentToken === message.documentToken) return;
@@ -332,7 +332,7 @@ async function handleTabUpdated(tabId, changeInfo) {
   )) return;
   state = latestState;
 
-  const sameManualSite = shouldContinueAfterNavigation(state, url);
+  const sameManualSite = shouldContinueAfterNavigation(state, url, settings.autoTranslateSameSite);
   const autoSite = matchesAutoTranslateSite(hostnameForUrl(url), settings.autoTranslateSites);
   if (!sameManualSite && !autoSite) {
     await setState(tabId, {
@@ -366,6 +366,40 @@ async function handleTabUpdated(tabId, changeInfo) {
 }
 
 const ready = hydrate();
+
+async function syncAutomaticTranslationRules() {
+  if (!chrome.tabs?.query) return;
+  const settings = await loadSettings();
+  let tabs = [];
+  try {
+    tabs = await chrome.tabs.query({});
+  } catch {
+    return;
+  }
+
+  for (const tab of tabs) {
+    if (typeof tab?.id !== 'number' || typeof tab.url !== 'string') continue;
+    const state = getState(tab.id);
+    const shouldTranslate = matchesAutoTranslateSite(hostnameForUrl(tab.url), settings.autoTranslateSites);
+    if (shouldTranslate && !isBusyOrActive(state) &&
+        (state.activation !== TAB_ACTIVATION.MANUAL || state.status === TAB_STATUS.ERROR)) {
+      void enqueueTabOperation(tab.id, () => startTranslation(tab, {
+        activation: TAB_ACTIVATION.AUTO,
+        url: tab.url
+      }));
+      continue;
+    }
+    if (!shouldTranslate && state.activation === TAB_ACTIVATION.AUTO && state.status !== TAB_STATUS.OFF) {
+      void enqueueTabOperation(tab.id, () => stopTranslation(tab.id, state));
+    }
+  }
+}
+
+chrome.storage?.onChanged?.addListener((changes, areaName) => {
+  if (areaName && areaName !== 'local') return;
+  if (!changes?.['translight.settings.v1']) return;
+  void ready.then(() => syncAutomaticTranslationRules());
+});
 
 chrome.action.onClicked.addListener((tab) => {
   const tabId = tab?.id;

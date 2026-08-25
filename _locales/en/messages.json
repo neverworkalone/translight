@@ -150,5 +150,247 @@
   },
   "settingsInvalid": {
     "message": "Some values were invalid and were reset to safe defaults."
+  },
+  "optionsProductName": {
+    "message": "Translight · Light Translation"
+  },
+  "settingsSaveShort": {
+    "message": "Save"
+  },
+  "settingsSaving": {
+    "message": "Saving"
+  },
+  "settingsUnsaved": {
+    "message": "Unsaved"
+  },
+  "settingsSidebarLabel": {
+    "message": "Settings"
+  },
+  "settingsNavAppearance": {
+    "message": "Appearance"
+  },
+  "settingsNavService": {
+    "message": "Translation service"
+  },
+  "settingsNavAdvanced": {
+    "message": "Advanced settings"
+  },
+  "settingsNavData": {
+    "message": "Settings data"
+  },
+  "appearancePageTitle": {
+    "message": "Appearance"
+  },
+  "appearancePageDescription": {
+    "message": "Configure how translations appear on the page."
+  },
+  "settingsTranslationModeDescription": {
+    "message": "Choose how the original and translated text are displayed."
+  },
+  "settingsPreviewLabel": {
+    "message": "Preview"
+  },
+  "settingsColorInvalid": {
+    "message": "Enter colors as six-digit hexadecimal values, such as #F0F6FF."
+  },
+  "servicePageTitle": {
+    "message": "Translation service"
+  },
+  "servicePageDescription": {
+    "message": "Configure the target language and translation service."
+  },
+  "serviceTargetLanguage": {
+    "message": "Target language"
+  },
+  "serviceTargetLanguageDescription": {
+    "message": "Translations are generated in the selected language."
+  },
+  "serviceKorean": {
+    "message": "Korean"
+  },
+  "serviceProviderTitle": {
+    "message": "Choose a service"
+  },
+  "serviceProviderDescription": {
+    "message": "Select the service used for translation."
+  },
+  "serviceProviderChrome": {
+    "message": "Chrome built-in translation"
+  },
+  "serviceProviderChromeDescription": {
+    "message": "Translator API · Free"
+  },
+  "serviceProviderActive": {
+    "message": "Active"
+  },
+  "serviceProviderError": {
+    "message": "Error"
+  },
+  "serviceDetailsTitle": {
+    "message": "Details"
+  },
+  "serviceDetailsDescription": {
+    "message": "Check and manage the Chrome translation model."
+  },
+  "serviceChromeDescription": {
+    "message": "Chrome's built-in Translator API runs on-device without an internet connection or usage limits after the model is downloaded. Korean models download automatically the first time they are needed."
+  },
+  "serviceModelTitle": {
+    "message": "Translation model"
+  },
+  "serviceModelPair": {
+    "message": "English → Korean"
+  },
+  "serviceStatusChecking": {
+    "message": "Checking"
+  },
+  "serviceStatusDownloadable": {
+    "message": "Download required"
+  },
+  "serviceStatusDownloading": {
+    "message": "Downloading"
+  },
+  "serviceStatusAvailable": {
+    "message": "Available"
+  },
+  "serviceStatusDownloadFailed": {
+    "message": "Download failed"
+  },
+  "serviceStatusUnavailable": {
+    "message": "Unavailable"
+  },
+  "serviceDownload": {
+    "message": "Download"
+  },
+  "serviceRetry": {
+    "message": "Retry"
+  },
+  "serviceDownloading": {
+    "message": "Downloading model"
+  },
+  "serviceAvailableDescription": {
+    "message": "The English to Korean model is ready to use."
+  },
+  "serviceUnavailableTitle": {
+    "message": "Chrome Translator is unavailable"
+  },
+  "serviceUnavailableDescription": {
+    "message": "This browser does not provide the built-in Translator API for this language pair."
+  },
+  "serviceDownloadFailedDescription": {
+    "message": "The model could not be downloaded. Try again."
+  },
+  "serviceStateCheckFailed": {
+    "message": "The model state could not be checked."
+  },
+  "serviceManagementLink": {
+    "message": "Manage translation models"
+  },
+  "serviceManagementHelp": {
+    "message": "Open Chrome's on-device translation management page."
+  },
+  "advancedPageTitle": {
+    "message": "Advanced settings"
+  },
+  "advancedPageDescription": {
+    "message": "Configure translation behavior and automatic translation sites."
+  },
+  "advancedBehaviorTitle": {
+    "message": "Translation behavior"
+  },
+  "advancedBehaviorDescription": {
+    "message": "Choose how translation continues in the current tab."
+  },
+  "advancedSameSiteTitle": {
+    "message": "Translate the same site automatically"
+  },
+  "advancedSameSiteDescription": {
+    "message": "Continue translating when you navigate to another page on the same site."
+  },
+  "advancedPageTitleToggle": {
+    "message": "Translate page titles"
+  },
+  "advancedPageTitleDescription": {
+    "message": "Translate the title shown in the browser tab."
+  },
+  "advancedSitesTitle": {
+    "message": "Automatic translation sites"
+  },
+  "advancedSitesDescription": {
+    "message": "Pages on registered sites are translated automatically in every tab. Enter one site per line or separate sites with commas or semicolons."
+  },
+  "advancedSitesPlaceholder": {
+    "message": "notion.so, chatgpt.com"
+  },
+  "advancedRegisteredSites": {
+    "message": "Registered sites"
+  },
+  "advancedRemoveSite": {
+    "message": "Remove $site$",
+    "placeholders": {
+      "site": {
+        "content": "$1"
+      }
+    }
+  },
+  "advancedNoSites": {
+    "message": "No automatic translation sites yet."
+  },
+  "dataPageTitle": {
+    "message": "Settings data"
+  },
+  "dataPageDescription": {
+    "message": "Back up or restore your Translight settings."
+  },
+  "dataBackupTitle": {
+    "message": "Backup and restore"
+  },
+  "dataBackupDescription": {
+    "message": "Export a JSON backup or import settings from a previous backup."
+  },
+  "dataExportTitle": {
+    "message": "Export settings"
+  },
+  "dataExportDescription": {
+    "message": "Save all current settings as a JSON file."
+  },
+  "dataExportButton": {
+    "message": "Export"
+  },
+  "dataImportTitle": {
+    "message": "Import settings"
+  },
+  "dataImportDescription": {
+    "message": "Restore settings from a Translight JSON file."
+  },
+  "dataImportButton": {
+    "message": "Import"
+  },
+  "dataResetTitle": {
+    "message": "Reset"
+  },
+  "dataDangerBadge": {
+    "message": "Danger zone"
+  },
+  "dataResetHeading": {
+    "message": "Reset all settings"
+  },
+  "dataResetDescription": {
+    "message": "All saved appearance, behavior, and service settings will be deleted. This action cannot be undone."
+  },
+  "dataResetButton": {
+    "message": "Reset all settings"
+  },
+  "dataResetConfirm": {
+    "message": "Reset all Translight settings? This action cannot be undone."
+  },
+  "settingsSaveFailed": {
+    "message": "Settings could not be saved. Try again."
+  },
+  "settingsLoadFailed": {
+    "message": "Settings could not be loaded. Safe defaults are being used."
+  },
+  "settingsImportInvalid": {
+    "message": "This file is invalid or uses an unsupported settings format. Existing settings were not changed."
   }
 }

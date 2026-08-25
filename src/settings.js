@@ -1,5 +1,6 @@
 export const SETTINGS_KEY = 'translight.settings.v1';
-export const SETTINGS_SCHEMA_VERSION = 1;
+export const SETTINGS_SCHEMA_VERSION = 2;
+export const SUPPORTED_SETTINGS_SCHEMA_VERSIONS = Object.freeze([1, SETTINGS_SCHEMA_VERSION]);
 
 export const TRANSLATION_MODES = Object.freeze({
   ORIGINAL_TRANSLATION: 'original-translation',
@@ -20,10 +21,34 @@ export const TRANSLATION_STYLES = Object.freeze({
   MINI_HIGHLIGHT: 'mini-highlight'
 });
 
+export const TRANSLATION_PROVIDERS = Object.freeze({
+  CHROME: 'chrome'
+});
+
+export const TARGET_LANGUAGES = Object.freeze({
+  KOREAN: 'ko'
+});
+
 const MODE_VALUES = new Set(Object.values(TRANSLATION_MODES));
 const STYLE_VALUES = new Set(Object.values(TRANSLATION_STYLES));
-const DEFAULT_STYLE_COLOR = '#4DB6AC';
-const DEFAULT_TEXT_COLOR = '#35515C';
+const PROVIDER_VALUES = new Set(Object.values(TRANSLATION_PROVIDERS));
+const TARGET_LANGUAGE_VALUES = new Set(Object.values(TARGET_LANGUAGES));
+const DEFAULT_STYLE_COLOR = '#F0F6FF';
+const DEFAULT_TEXT_COLOR = '#111827';
+const SETTINGS_FIELDS = new Set([
+  'schemaVersion',
+  'translationMode',
+  'displayStyle',
+  'styleColor',
+  'textColor',
+  'bold',
+  'italic',
+  'targetLanguage',
+  'translationProvider',
+  'autoTranslateSameSite',
+  'translatePageTitle',
+  'autoTranslateSites'
+]);
 
 export const DEFAULT_SETTINGS = Object.freeze({
   schemaVersion: SETTINGS_SCHEMA_VERSION,
@@ -33,6 +58,10 @@ export const DEFAULT_SETTINGS = Object.freeze({
   textColor: DEFAULT_TEXT_COLOR,
   bold: false,
   italic: false,
+  targetLanguage: TARGET_LANGUAGES.KOREAN,
+  translationProvider: TRANSLATION_PROVIDERS.CHROME,
+  autoTranslateSameSite: true,
+  translatePageTitle: false,
   autoTranslateSites: []
 });
 
@@ -59,6 +88,10 @@ function normalizeString(value, fallback = '') {
   if (typeof value !== 'string') return fallback;
   const normalized = value.trim();
   return normalized || fallback;
+}
+
+export function isValidColor(value) {
+  return typeof value === 'string' && /^#[0-9A-Fa-f]{6}$/.test(value.trim());
 }
 
 export function normalizeColor(value, fallback) {
@@ -106,6 +139,7 @@ export function normalizeHostnameList(value) {
     seen.add(hostname);
     result.push(hostname);
   }
+
   return result;
 }
 
@@ -141,10 +175,31 @@ export function matchesAutoTranslateSite(hostname, sites) {
   return normalizeHostnameList(sites).some((site) => host === site || host.endsWith(`.${site}`));
 }
 
+function sourceSchemaVersion(source) {
+  return Number.isInteger(source?.schemaVersion) ? source.schemaVersion : SETTINGS_SCHEMA_VERSION;
+}
+
+export function migrateSettings(value) {
+  if (!isRecord(value)) return createDefaultSettings();
+  const version = sourceSchemaVersion(value);
+  if (version === 1) {
+    return {
+      ...value,
+      schemaVersion: SETTINGS_SCHEMA_VERSION,
+      targetLanguage: value.targetLanguage ?? TARGET_LANGUAGES.KOREAN,
+      translationProvider: value.translationProvider ?? TRANSLATION_PROVIDERS.CHROME,
+      autoTranslateSameSite: value.autoTranslateSameSite ?? true,
+      translatePageTitle: value.translatePageTitle ?? true
+    };
+  }
+  return {...value, schemaVersion: SETTINGS_SCHEMA_VERSION};
+}
+
 export function normalizeSettings(value) {
   const source = isRecord(value) ? value : {};
   const mode = normalizeString(source.translationMode, DEFAULT_SETTINGS.translationMode);
   const style = normalizeString(source.displayStyle, DEFAULT_SETTINGS.displayStyle);
+  const schemaVersion = sourceSchemaVersion(source);
 
   return {
     schemaVersion: SETTINGS_SCHEMA_VERSION,
@@ -154,6 +209,20 @@ export function normalizeSettings(value) {
     textColor: normalizeColor(source.textColor, DEFAULT_SETTINGS.textColor),
     bold: normalizeBoolean(source.bold, DEFAULT_SETTINGS.bold),
     italic: normalizeBoolean(source.italic, DEFAULT_SETTINGS.italic),
+    targetLanguage: TARGET_LANGUAGE_VALUES.has(source.targetLanguage)
+      ? source.targetLanguage
+      : DEFAULT_SETTINGS.targetLanguage,
+    translationProvider: PROVIDER_VALUES.has(source.translationProvider)
+      ? source.translationProvider
+      : DEFAULT_SETTINGS.translationProvider,
+    autoTranslateSameSite: normalizeBoolean(
+      source.autoTranslateSameSite ?? source.sameSiteAutoTranslate,
+      DEFAULT_SETTINGS.autoTranslateSameSite
+    ),
+    translatePageTitle: normalizeBoolean(
+      source.translatePageTitle ?? source.translateTitle,
+      schemaVersion < SETTINGS_SCHEMA_VERSION ? true : DEFAULT_SETTINGS.translatePageTitle
+    ),
     autoTranslateSites: normalizeHostnameList(source.autoTranslateSites)
   };
 }
@@ -162,8 +231,66 @@ export function createDefaultSettings() {
   return clone(DEFAULT_SETTINGS);
 }
 
+function invalidField(field, message) {
+  const error = new Error(`${field}: ${message}`);
+  error.code = 'INVALID_SETTINGS';
+  error.field = field;
+  return error;
+}
+
+/**
+ * Validate an imported/exported settings document without changing the
+ * current settings. Missing settings fields are completed from defaults.
+ */
+export function validateSettingsDocument(value) {
+  if (!isRecord(value)) throw invalidField('root', 'settings must be an object');
+
+  const unknownFields = Object.keys(value).filter((key) => !SETTINGS_FIELDS.has(key));
+  if (unknownFields.length) throw invalidField(unknownFields[0], 'unsupported field');
+
+  if (value.schemaVersion != null &&
+      (!Number.isInteger(value.schemaVersion) || !SUPPORTED_SETTINGS_SCHEMA_VERSIONS.includes(value.schemaVersion))) {
+    throw invalidField('schemaVersion', 'unsupported schema version');
+  }
+  if (value.translationMode != null && !MODE_VALUES.has(value.translationMode)) {
+    throw invalidField('translationMode', 'unsupported translation mode');
+  }
+  if (value.displayStyle != null && !STYLE_VALUES.has(value.displayStyle)) {
+    throw invalidField('displayStyle', 'unsupported display style');
+  }
+  for (const field of ['styleColor', 'textColor']) {
+    if (value[field] != null && !isValidColor(value[field])) {
+      throw invalidField(field, 'expected a six-digit hex color');
+    }
+  }
+  for (const field of ['bold', 'italic', 'autoTranslateSameSite', 'translatePageTitle']) {
+    if (value[field] != null && typeof value[field] !== 'boolean') {
+      throw invalidField(field, 'expected a boolean');
+    }
+  }
+  if (value.targetLanguage != null && !TARGET_LANGUAGE_VALUES.has(value.targetLanguage)) {
+    throw invalidField('targetLanguage', 'unsupported target language');
+  }
+  if (value.translationProvider != null && !PROVIDER_VALUES.has(value.translationProvider)) {
+    throw invalidField('translationProvider', 'unsupported translation provider');
+  }
+  if (value.autoTranslateSites != null) {
+    if (!Array.isArray(value.autoTranslateSites)) {
+      throw invalidField('autoTranslateSites', 'expected an array');
+    }
+    for (const entry of value.autoTranslateSites) {
+      if (typeof entry !== 'string' || !normalizeHostname(entry)) {
+        throw invalidField('autoTranslateSites', 'contains an invalid hostname');
+      }
+    }
+  }
+
+  return normalizeSettings(value);
+}
+
 function storageArea(storage) {
-  return storage?.sync ?? storage ?? null;
+  if (!storage) return null;
+  return storage.local ?? storage;
 }
 
 function readArea(area, key) {
@@ -221,21 +348,21 @@ export async function loadSettings({ storage = globalThis.chrome?.storage } = {}
   const area = storageArea(storage);
   try {
     const values = await readArea(area, SETTINGS_KEY);
-    return normalizeSettings(values[SETTINGS_KEY]);
+    return normalizeSettings(migrateSettings(values[SETTINGS_KEY]));
   } catch {
     return createDefaultSettings();
   }
 }
 
 export async function saveSettings(settings, { storage = globalThis.chrome?.storage } = {}) {
-  const normalized = normalizeSettings(settings);
+  const normalized = validateSettingsDocument(settings);
   await writeArea(storageArea(storage), {[SETTINGS_KEY]: normalized});
   return normalized;
 }
 
 export function subscribeToSettings(callback, { storage = globalThis.chrome?.storage } = {}) {
   const listener = (changes, areaName) => {
-    if (areaName && areaName !== 'sync') return;
+    if (areaName && areaName !== 'local') return;
     if (!changes?.[SETTINGS_KEY]) return;
     callback(normalizeSettings(changes[SETTINGS_KEY].newValue));
   };
@@ -249,5 +376,9 @@ export function serializeSettings(settings) {
 
 export function parseSettings(value) {
   const parsed = typeof value === 'string' ? JSON.parse(value) : value;
-  return normalizeSettings(parsed);
+  return validateSettingsDocument(parsed);
+}
+
+export function settingsFingerprint(settings) {
+  return JSON.stringify(normalizeSettings(settings));
 }

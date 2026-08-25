@@ -3,10 +3,15 @@ import {
   DEFAULT_SETTINGS,
   TRANSLATION_MODES,
   TRANSLATION_STYLES,
+  loadSettings,
   matchesAutoTranslateSite,
   normalizeHostname,
   normalizeHostnameList,
-  normalizeSettings
+  normalizeSettings,
+  parseSettings,
+  saveSettings,
+  serializeSettings,
+  subscribeToSettings
 } from '../src/settings.js';
 
 describe('settings normalization', () => {
@@ -34,5 +39,73 @@ describe('settings normalization', () => {
       .toBe(TRANSLATION_MODES.TRANSLATION_ONLY);
     expect(normalizeSettings({displayStyle: TRANSLATION_STYLES.SEPARATOR}).displayStyle)
       .toBe(TRANSLATION_STYLES.SEPARATOR);
+  });
+
+  it('uses chrome.storage.local and synchronizes local-area changes', async () => {
+    let stored = {};
+    let localListener;
+    const storage = {
+      local: {
+        get(_key, callback) {
+          callback(stored);
+        },
+        set(value, callback) {
+          stored = value;
+          callback?.();
+        }
+      },
+      sync: {
+        set() {
+          throw new Error('sync storage should not be used');
+        }
+      },
+      onChanged: {
+        addListener(listener) {
+          localListener = listener;
+        },
+        removeListener() {}
+      }
+    };
+
+    const next = {...DEFAULT_SETTINGS, displayStyle: TRANSLATION_STYLES.BACKGROUND};
+    await saveSettings(next, {storage});
+    await expect(loadSettings({storage})).resolves.toMatchObject({
+      displayStyle: TRANSLATION_STYLES.BACKGROUND
+    });
+
+    const changes = [];
+    const unsubscribe = subscribeToSettings((value) => changes.push(value), {storage});
+    localListener({["translight.settings.v1"]: {newValue: next}}, 'local');
+    localListener({["translight.settings.v1"]: {newValue: DEFAULT_SETTINGS}}, 'sync');
+    unsubscribe();
+    expect(changes).toHaveLength(1);
+    expect(changes[0].displayStyle).toBe(TRANSLATION_STYLES.BACKGROUND);
+  });
+
+  it('round-trips schema versions and rejects invalid import values', () => {
+    const serialized = serializeSettings({
+      ...DEFAULT_SETTINGS,
+      autoTranslateSameSite: false,
+      autoTranslateSites: ['https://www.example.com/path']
+    });
+    expect(parseSettings(serialized)).toMatchObject({
+      autoTranslateSameSite: false,
+      autoTranslateSites: ['example.com']
+    });
+    expect(parseSettings(JSON.stringify({
+      schemaVersion: DEFAULT_SETTINGS.schemaVersion,
+      displayStyle: TRANSLATION_STYLES.SEPARATOR
+    }))).toMatchObject({
+      displayStyle: TRANSLATION_STYLES.SEPARATOR,
+      styleColor: DEFAULT_SETTINGS.styleColor
+    });
+    expect(() => parseSettings(JSON.stringify({
+      schemaVersion: DEFAULT_SETTINGS.schemaVersion,
+      styleColor: 'red'
+    }))).toThrow();
+    expect(() => parseSettings(JSON.stringify({
+      schemaVersion: 999,
+      displayStyle: TRANSLATION_STYLES.NONE
+    }))).toThrow();
   });
 });

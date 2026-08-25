@@ -60,7 +60,7 @@ export class PageSession {
     sendStatus,
     provider,
     concurrency = DEFAULT_CONCURRENCY,
-    settings = createDefaultSettings(),
+    settings,
     translationCache = new Map(),
     isGenerationCurrent = () => true,
     observe = true
@@ -70,7 +70,11 @@ export class PageSession {
     this.sendStatus = sendStatus ?? (() => {});
     this.provider = provider ?? new ChromeTranslateProvider();
     this.concurrency = concurrency;
-    this.settings = normalizeSettings(settings);
+    this.settings = normalizeSettings(settings ?? createDefaultSettings());
+    // Sessions created by older embedders did not pass the new title toggle.
+    // Keep that API backwards-compatible while extension-created sessions use
+    // the explicit setting from storage.
+    this.legacyTranslatePageTitle = settings == null;
     this.translationCache = translationCache;
     this.isGenerationCurrent = isGenerationCurrent;
     this.observe = observe;
@@ -169,7 +173,9 @@ export class PageSession {
       this.installObservers();
       await this.queue.enqueueAll(blocks);
       if (!this.isCurrent()) throw new TranslationCancelledError();
-      await this.translateTitle(signal);
+      if (this.settings.translatePageTitle || this.legacyTranslatePageTitle) {
+        await this.translateTitle(signal);
+      }
       if (!this.isCurrent()) throw new TranslationCancelledError();
       if (this.translatedCount === 0 && this.firstError) throw this.firstError;
 
@@ -260,13 +266,20 @@ export class PageSession {
     view?.addEventListener?.('scroll', this.scrollHandler, {passive: true});
     view?.addEventListener?.('resize', this.scrollHandler, {passive: true});
 
+    this.installTitleObserver();
+  }
+
+  installTitleObserver() {
+    if (!this.observe || this.titleObserver ||
+        !(this.settings.translatePageTitle || this.legacyTranslatePageTitle)) return;
+    const view = getView(this.document);
+    const MutationObserverClass = view?.MutationObserver ?? globalThis.MutationObserver;
     const title = this.document.querySelector?.('title');
-    if (title && typeof MutationObserverClass === 'function') {
-      this.titleObserver = new MutationObserverClass(() => {
-        if (!this.updatingTitle) void this.translateTitle(this.controller.signal);
-      });
-      this.titleObserver.observe(title, {childList: true, characterData: true, subtree: true});
-    }
+    if (!title || typeof MutationObserverClass !== 'function') return;
+    this.titleObserver = new MutationObserverClass(() => {
+      if (!this.updatingTitle) void this.translateTitle(this.controller.signal);
+    });
+    this.titleObserver.observe(title, {childList: true, characterData: true, subtree: true});
   }
 
   disconnectObservers() {
@@ -340,13 +353,17 @@ export class PageSession {
     if (!currentUrl || currentUrl === this.lastUrl) return;
     this.lastUrl = currentUrl;
     this.renderer?.pruneDisconnected?.();
-    await this.translateTitle(this.controller.signal, {force: true});
+    if (this.settings.translatePageTitle || this.legacyTranslatePageTitle) {
+      await this.translateTitle(this.controller.signal, {force: true});
+    }
     const blocks = collectTranslationBlocks(this.document.body);
     await this.enqueueBlocks(blocks);
   }
 
   async translateTitle(signal, {force = false} = {}) {
-    if (!this.isCurrent() || !isMeaningfulTitle(this.document.title)) return;
+    if (!this.isCurrent() ||
+        (!(this.settings.translatePageTitle || this.legacyTranslatePageTitle)) ||
+        !isMeaningfulTitle(this.document.title)) return;
     const currentTitle = this.document.title;
     if (!force && currentTitle === this.translatedTitle) return;
     if (currentTitle !== this.translatedTitle) this.originalTitle = currentTitle;
@@ -377,7 +394,19 @@ export class PageSession {
   }
 
   applySettings(settings) {
+    const wasTranslatingTitle = this.settings.translatePageTitle || this.legacyTranslatePageTitle;
+    this.legacyTranslatePageTitle = false;
     this.settings = normalizeSettings({...this.settings, ...settings});
     this.renderer?.updatePresentation(this.settings);
+    const shouldTranslateTitle = this.settings.translatePageTitle;
+    if (wasTranslatingTitle && !shouldTranslateTitle) {
+      this.titleObserver?.disconnect();
+      this.titleObserver = null;
+      this.restoreTitle();
+    }
+    if (!wasTranslatingTitle && shouldTranslateTitle && this.isCurrent()) {
+      this.installTitleObserver();
+      void this.translateTitle(this.controller.signal, {force: true});
+    }
   }
 }

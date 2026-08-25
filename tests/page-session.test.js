@@ -162,6 +162,26 @@ describe('PageSession', () => {
     expect(document.querySelector('p').hasAttribute('data-translight-original-hidden')).toBe(false);
   });
 
+  it('respects the page-title setting and applies it to an open session', async () => {
+    document.title = 'Untitled page';
+    document.body.innerHTML = '<p>Title setting.</p>';
+    const session = new PageSession({
+      generation: 51,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider()
+    });
+
+    await session.start();
+    expect(document.title).toBe('Untitled page');
+    session.applySettings({translatePageTitle: true});
+    await wait(20);
+    expect(document.title).toBe('ko:Untitled page');
+    session.applySettings({translatePageTitle: false});
+    expect(document.title).toBe('Untitled page');
+    session.stop();
+  });
+
   it('starts with visible blocks, then adjacent blocks, then document-order blocks', async () => {
     document.title = '';
     document.body.innerHTML = `
