@@ -54,6 +54,29 @@ describe('TranslationRenderer', () => {
     expect(source.hasAttribute(SESSION_ATTRIBUTE)).toBe(false);
   });
 
+  it('does not duplicate a source element when a re-scan assigns a new source id', () => {
+    const source = document.querySelector('#source');
+    const renderer = new TranslationRenderer({ document, sessionId: 'rescan-session' });
+    const first = renderer.insert({
+      element: source,
+      sourceId: 'source-before-rescan',
+      translatedText: 'First translation'
+    });
+    const second = renderer.insert({
+      element: source,
+      sourceId: 'source-after-rescan',
+      translatedText: 'Updated translation'
+    });
+
+    expect(second).toBe(first);
+    expect(document.querySelectorAll('translight-translation')).toHaveLength(1);
+    expect(second.textContent).toBe('Updated translation');
+    expect(source.getAttribute(SOURCE_ATTRIBUTE)).toBe('source-after-rescan');
+
+    renderer.removeAll();
+    expect(document.body.innerHTML).toBe('<p id="source">Original text</p>');
+  });
+
   it('keeps list items structurally inside their list', () => {
     document.body.innerHTML = '<ul><li id="source">List item</li></ul>';
     const source = document.querySelector('#source');

@@ -239,6 +239,7 @@ export class TranslationRenderer {
     this.document = document;
     this.sessionId = sessionId;
     this.records = new Map();
+    this.recordsByElement = new WeakMap();
     this.presentation = normalizePresentation(settings);
     this.style = document.createElement('style');
     this.style.setAttribute(GENERATED_ATTRIBUTE, GENERATED_VALUE);
@@ -293,12 +294,19 @@ export class TranslationRenderer {
 
   insert({element, sourceId, sourceHash, translatedText, mixedContent = false}) {
     if (!element?.parentNode || !sourceId) return null;
-    const existing = this.records.get(sourceId);
+    const existing = this.recordsByElement.get(element) ?? this.records.get(sourceId);
     const pendingHash = element.getAttribute(PENDING_SOURCE_HASH_ATTRIBUTE);
     if (pendingHash && sourceHash !== pendingHash) return null;
+    const currentHash = element.getAttribute(SOURCE_HASH_ATTRIBUTE);
+    if (existing && currentHash && sourceHash && currentHash !== sourceHash && !pendingHash) return null;
     if (existing) {
-      const currentHash = element.getAttribute(SOURCE_HASH_ATTRIBUTE);
-      if (currentHash && sourceHash && currentHash !== sourceHash && !pendingHash) return null;
+      if (existing.sourceId !== sourceId) {
+        this.records.delete(existing.sourceId);
+        existing.sourceId = sourceId;
+        this.records.set(sourceId, existing);
+      }
+      element.setAttribute(SOURCE_ATTRIBUTE, sourceId);
+      existing.translation.setAttribute(SOURCE_ATTRIBUTE, sourceId);
       const nextMixedContent = Boolean(mixedContent);
       if (existing.mixedContent !== nextMixedContent) {
         existing.translation.parentNode?.removeChild(existing.translation);
@@ -340,6 +348,7 @@ export class TranslationRenderer {
     element.setAttribute(TRANSLATED_ATTRIBUTE, GENERATED_VALUE);
     element.setAttribute(SESSION_ATTRIBUTE, this.sessionId);
     this.records.set(sourceId, record);
+    this.recordsByElement.set(element, record);
     this.applyRecordPresentation(record);
     return translation;
   }
@@ -351,6 +360,7 @@ export class TranslationRenderer {
       if (record.element?.getAttribute(SESSION_ATTRIBUTE) === this.sessionId) {
         for (const name of ATTRIBUTE_NAMES) restoreAttribute(record.element, name, record.originalAttributes[name]);
       }
+      this.recordsByElement.delete(record.element);
       this.records.delete(sourceId);
     }
   }
@@ -361,6 +371,7 @@ export class TranslationRenderer {
       translation?.parentNode?.removeChild(translation);
       if (element?.getAttribute(SESSION_ATTRIBUTE) !== this.sessionId) continue;
       for (const name of ATTRIBUTE_NAMES) restoreAttribute(element, name, originalAttributes[name]);
+      this.recordsByElement.delete(element);
     }
 
     const generatedNodes = this.document.querySelectorAll(`[${SESSION_ATTRIBUTE}]`);
