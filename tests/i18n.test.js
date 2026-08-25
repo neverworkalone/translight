@@ -7,6 +7,8 @@ describe('Chrome i18n messages', () => {
   it('keeps English and Korean message keys in sync', () => {
     expect(Object.keys(koreanMessages).sort()).toEqual(Object.keys(englishMessages).sort());
     expect(Object.keys(englishMessages)).not.toHaveLength(0);
+    expect(englishMessages.badgeActive.message).toBe('•');
+    expect(koreanMessages.badgeActive.message).toBe('•');
   });
 
   it('uses Chrome i18n when it is available', () => {
