@@ -464,8 +464,8 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
   padding: 0 9px;
   color: var(--tile-text-color, #111827);
   font-size: 11px;
-  font-weight: inherit;
-  font-style: inherit;
+  font-weight: 400;
+  font-style: normal;
   line-height: 18px;
 }
 
@@ -809,19 +809,35 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
   left: 19px;
 }
 
-.management-link {
+.management-link-row {
   position: absolute;
   bottom: 48px;
   left: 19px;
+  display: flex;
+  align-items: baseline;
+}
+
+.management-link {
+  margin: 0;
+  padding: 0;
+  border: 0;
   color: #2563eb;
+  background: transparent;
   font-size: 11px;
   font-weight: 500;
   line-height: 14px;
-  text-decoration: none;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
-.management-link span { margin-left: 4px; }
-.management-link:hover { text-decoration: underline; }
+.management-link-icon {
+  margin-left: 4px;
+  color: #2563eb;
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.management-link:hover { text-decoration-thickness: 2px; }
 
 .management-help {
   position: absolute;

@@ -3,6 +3,7 @@ import {computed, onMounted, onUnmounted, ref} from 'vue';
 import {t} from '../../i18n/index.js';
 import {ChromeTranslateProvider} from '../../translation/chrome-provider.js';
 import {MODEL_STATE} from '../../translation/model-state.js';
+import {openModelManagement} from '../model-management.js';
 
 const props = defineProps({
   settings: {type: Object, required: true},
@@ -184,9 +185,12 @@ onUnmounted(() => provider.value?.close?.());
           <p v-if="error" class="field-error" role="alert">{{ error }}</p>
 
           <div class="service-divider" />
-          <a class="management-link" href="chrome://on-device-translation-internals/" target="_blank" rel="noreferrer">
-            {{ t('serviceManagementLink') }} <span aria-hidden="true">↗</span>
-          </a>
+          <div class="management-link-row">
+            <button type="button" class="management-link" @click="openModelManagement()">
+              {{ t('serviceManagementLink') }}
+            </button>
+            <span class="management-link-icon" aria-hidden="true">↗</span>
+          </div>
           <p class="management-help">{{ t('serviceManagementHelp') }}</p>
         </section>
       </div>

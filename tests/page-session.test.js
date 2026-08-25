@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { PageSession } from '../src/content/page-session.js';
+import { TRANSLATION_MODES } from '../src/settings.js';
 
 function makeProvider({ translate = async (text) => `ko:${text}` } = {}) {
   return {
@@ -187,6 +188,27 @@ describe('PageSession', () => {
     session.applySettings({translatePageTitle: false});
     expect(document.title).toBe('Untitled page');
     session.stop();
+  });
+
+  it('keeps page titles translation-only even in translation-original mode', async () => {
+    document.title = 'Original title';
+    document.body.innerHTML = '<p>Title mode.</p>';
+    const session = new PageSession({
+      generation: 52,
+      document,
+      settings: {
+        translationMode: TRANSLATION_MODES.TRANSLATION_ORIGINAL,
+        translatePageTitle: true
+      },
+      provider: makeProvider()
+    });
+
+    await session.start();
+
+    expect(document.title).toBe('ko:Original title');
+    expect(document.title).not.toContain('Original title\n');
+    session.stop();
+    expect(document.title).toBe('Original title');
   });
 
   it('starts with visible blocks, then adjacent blocks, then document-order blocks', async () => {

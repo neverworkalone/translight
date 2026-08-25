@@ -166,9 +166,7 @@ function updateText(field, event) {
             :disabled="disabled"
             :style="{
               '--tile-style-color': isStyleColorValid ? props.settings.styleColor : '#F0F6FF',
-              '--tile-text-color': isTextColorValid ? props.settings.textColor : '#111827',
-              fontWeight: props.settings.bold ? '700' : '400',
-              fontStyle: props.settings.italic ? 'italic' : 'normal'
+              '--tile-text-color': isTextColorValid ? props.settings.textColor : '#111827'
             }"
             @click="props.settings.displayStyle = option.value"
           >
@@ -176,7 +174,14 @@ function updateText(field, event) {
               <span class="style-radio" aria-hidden="true">{{ props.settings.displayStyle === option.value ? '●' : '○' }}</span>
               <span>{{ t(option.label) }}</span>
             </span>
-            <span class="style-preview" :class="`preview-style-${option.value}`">
+            <span
+              class="style-preview"
+              :class="`preview-style-${option.value}`"
+              :style="{
+                fontWeight: props.settings.bold ? '700' : '400',
+                fontStyle: props.settings.italic ? 'italic' : 'normal'
+              }"
+            >
               <span>{{ t('settingsPreviewTranslation') }}</span>
             </span>
           </button>
