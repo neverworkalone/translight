@@ -122,15 +122,9 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
 
 .settings-body {
   display: flex;
-  align-items: flex-start;
+  align-items: stretch;
   width: 100%;
   min-height: 772px;
-}
-
-.settings-body.page-appearance,
-.settings-body.page-appearance .settings-sidebar,
-.settings-body.page-appearance .settings-workspace {
-  min-height: 872px;
 }
 
 .settings-sidebar {
@@ -225,7 +219,7 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
 }
 
 .appearance-page {
-  min-height: 960px;
+  min-height: 772px;
   padding: 40px 64px;
 }
 
@@ -854,7 +848,7 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
 }
 
 .advanced-page {
-  min-height: 860px;
+  min-height: 772px;
   padding: 30px 40px;
 }
 
@@ -994,7 +988,7 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
 }
 
 .data-page {
-  min-height: 860px;
+  min-height: 772px;
   padding: 30px 40px;
 }
 
