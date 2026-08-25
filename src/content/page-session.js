@@ -5,6 +5,7 @@ import { MODEL_STATE } from '../translation/model-state.js';
 import { isTranslationCancelled, TranslationCancelledError } from '../translation/provider.js';
 import { TranslationRenderer } from './translation-renderer.js';
 import { createDefaultSettings, normalizeSettings } from '../settings.js';
+import { isDocumentInLanguage } from './language.js';
 
 const DEFAULT_CONCURRENCY = 3;
 const MUTATION_DEBOUNCE_MS = 100;
@@ -60,7 +61,7 @@ export class PageSession {
     sendStatus,
     provider,
     concurrency = DEFAULT_CONCURRENCY,
-    settings = createDefaultSettings(),
+    settings,
     translationCache = new Map(),
     isGenerationCurrent = () => true,
     observe = true
@@ -68,9 +69,16 @@ export class PageSession {
     this.generation = generation;
     this.document = document;
     this.sendStatus = sendStatus ?? (() => {});
-    this.provider = provider ?? new ChromeTranslateProvider();
     this.concurrency = concurrency;
-    this.settings = normalizeSettings(settings);
+    this.settings = normalizeSettings(settings ?? createDefaultSettings());
+    this.usesDefaultProvider = provider == null;
+    this.provider = provider ?? new ChromeTranslateProvider({
+      targetLanguage: this.settings.targetLanguage
+    });
+    // Sessions created by older embedders did not pass the new title toggle.
+    // Keep that API backwards-compatible while extension-created sessions use
+    // the explicit setting from storage.
+    this.legacyTranslatePageTitle = settings == null;
     this.translationCache = translationCache;
     this.isGenerationCurrent = isGenerationCurrent;
     this.observe = observe;
@@ -135,6 +143,12 @@ export class PageSession {
   async run() {
     const signal = this.controller.signal;
     try {
+      if (isDocumentInLanguage(this.document, this.settings.targetLanguage)) {
+        this.running = false;
+        this.notify('SKIPPED', {reason: 'TARGET_LANGUAGE'});
+        return;
+      }
+
       this.notify('CHECKING');
       const modelState = await this.provider.getModelState();
       if (!this.isCurrent()) throw new TranslationCancelledError();
@@ -167,9 +181,13 @@ export class PageSession {
       const blocks = collectTranslationBlocks(this.document.body);
       this.notify('TRANSLATING', {count: blocks.length});
       this.installObservers();
-      await this.queue.enqueueAll(blocks);
+      // Translate the title before the document queue so a long page cannot
+      // leave the browser tab showing the original title for a long time.
+      if (this.settings.translatePageTitle || this.legacyTranslatePageTitle) {
+        await this.translateTitle(signal);
+      }
       if (!this.isCurrent()) throw new TranslationCancelledError();
-      await this.translateTitle(signal);
+      await this.queue.enqueueAll(blocks);
       if (!this.isCurrent()) throw new TranslationCancelledError();
       if (this.translatedCount === 0 && this.firstError) throw this.firstError;
 
@@ -260,13 +278,22 @@ export class PageSession {
     view?.addEventListener?.('scroll', this.scrollHandler, {passive: true});
     view?.addEventListener?.('resize', this.scrollHandler, {passive: true});
 
-    const title = this.document.querySelector?.('title');
-    if (title && typeof MutationObserverClass === 'function') {
-      this.titleObserver = new MutationObserverClass(() => {
-        if (!this.updatingTitle) void this.translateTitle(this.controller.signal);
-      });
-      this.titleObserver.observe(title, {childList: true, characterData: true, subtree: true});
-    }
+    this.installTitleObserver();
+  }
+
+  installTitleObserver() {
+    if (!this.observe || this.titleObserver ||
+        !(this.settings.translatePageTitle || this.legacyTranslatePageTitle)) return;
+    const view = getView(this.document);
+    const MutationObserverClass = view?.MutationObserver ?? globalThis.MutationObserver;
+    const titleRoot = this.document.head ?? this.document.documentElement;
+    if (!titleRoot || typeof MutationObserverClass !== 'function') return;
+    this.titleObserver = new MutationObserverClass(() => {
+      if (!this.updatingTitle) void this.translateTitle(this.controller.signal);
+    });
+    // Observe the head rather than only the initial <title> node. SPA sites
+    // commonly replace the node itself when updating their document title.
+    this.titleObserver.observe(titleRoot, {childList: true, characterData: true, subtree: true});
   }
 
   disconnectObservers() {
@@ -340,13 +367,17 @@ export class PageSession {
     if (!currentUrl || currentUrl === this.lastUrl) return;
     this.lastUrl = currentUrl;
     this.renderer?.pruneDisconnected?.();
-    await this.translateTitle(this.controller.signal, {force: true});
+    if (this.settings.translatePageTitle || this.legacyTranslatePageTitle) {
+      await this.translateTitle(this.controller.signal, {force: true});
+    }
     const blocks = collectTranslationBlocks(this.document.body);
     await this.enqueueBlocks(blocks);
   }
 
   async translateTitle(signal, {force = false} = {}) {
-    if (!this.isCurrent() || !isMeaningfulTitle(this.document.title)) return;
+    if (!this.isCurrent() ||
+        (!(this.settings.translatePageTitle || this.legacyTranslatePageTitle)) ||
+        !isMeaningfulTitle(this.document.title)) return;
     const currentTitle = this.document.title;
     if (!force && currentTitle === this.translatedTitle) return;
     if (currentTitle !== this.translatedTitle) this.originalTitle = currentTitle;
@@ -377,7 +408,33 @@ export class PageSession {
   }
 
   applySettings(settings) {
+    const previousTargetLanguage = this.settings.targetLanguage;
+    const wasTranslatingTitle = this.settings.translatePageTitle || this.legacyTranslatePageTitle;
+    this.legacyTranslatePageTitle = false;
     this.settings = normalizeSettings({...this.settings, ...settings});
+
+    if (this.usesDefaultProvider && previousTargetLanguage !== this.settings.targetLanguage) {
+      const shouldRestart = this.running || Boolean(this.controller);
+      this.stop({notify: false});
+      this.provider = new ChromeTranslateProvider({targetLanguage: this.settings.targetLanguage});
+      this.translationCache.clear();
+      if (shouldRestart) this.start();
+      return;
+    }
+
     this.renderer?.updatePresentation(this.settings);
+    const shouldTranslateTitle = this.settings.translatePageTitle;
+    if (wasTranslatingTitle && !shouldTranslateTitle) {
+      this.titleObserver?.disconnect();
+      this.titleObserver = null;
+      this.restoreTitle();
+    }
+    if (!wasTranslatingTitle && shouldTranslateTitle && this.isCurrent()) {
+      this.installTitleObserver();
+      // During startup the provider may not be prepared yet. The main run
+      // translates the title after preparation; avoid recording a spurious
+      // NOT_READY error from this settings update.
+      if (this.renderer) void this.translateTitle(this.controller.signal, {force: true});
+    }
   }
 }

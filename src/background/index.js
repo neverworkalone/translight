@@ -10,8 +10,8 @@ import {
 import { t } from '../i18n/index.js';
 import { loadSettings, hostnameForUrl, matchesAutoTranslateSite, originForUrl } from '../settings.js';
 import {
-  isNavigationStateCurrent,
-  shouldContinueManualTranslation as shouldContinueAfterNavigation
+  classifyNavigation,
+  isNavigationStateCurrent
 } from './navigation.js';
 
 const STORAGE_KEY = 'translight.tabStates';
@@ -268,8 +268,12 @@ async function handleContentReady(message, sender) {
   const settings = await loadSettings();
   const state = getState(tabId);
   const currentHost = hostnameForUrl(url);
-  const sameManualSite = shouldContinueAfterNavigation(state, url);
-  const autoSite = matchesAutoTranslateSite(currentHost, settings.autoTranslateSites);
+  const navigation = classifyNavigation({
+    state,
+    url,
+    autoTranslateSites: settings.autoTranslateSites,
+    autoTranslateSameSite: settings.autoTranslateSameSite
+  });
 
   if (state.documentToken === message.documentToken) return;
   if (state.documentToken == null && BUSY_STATUSES.has(state.status)) {
@@ -281,7 +285,7 @@ async function handleContentReady(message, sender) {
     return;
   }
 
-  if (!sameManualSite && !autoSite) {
+  if (!navigation.translate) {
     const next = await setState(tabId, {
       status: TAB_STATUS.OFF,
       generation: nextGeneration(),
@@ -298,12 +302,41 @@ async function handleContentReady(message, sender) {
     return;
   }
 
-  const activation = sameManualSite ? TAB_ACTIVATION.MANUAL : TAB_ACTIVATION.AUTO;
   await startTranslation(
     {id: tabId, url},
     {
-      activation,
+      activation: navigation.activation,
       url,
+      documentToken: message.documentToken
+    }
+  );
+}
+
+async function handleContentNavigation(message, sender) {
+  await ready;
+  const tabId = sender?.tab?.id;
+  if (typeof tabId !== 'number' || !message.documentToken || !message.url) return;
+
+  const state = getState(tabId);
+  if (state.documentToken && state.documentToken !== message.documentToken) return;
+  // SKIPPED only describes the last route. A SPA can replace a target-language
+  // view with a foreign-language view without creating a new document.
+  if (isBusyOrActive(state)) return;
+
+  const settings = await loadSettings();
+  const navigation = classifyNavigation({
+    state,
+    url: message.url,
+    autoTranslateSites: settings.autoTranslateSites,
+    autoTranslateSameSite: settings.autoTranslateSameSite
+  });
+  if (!navigation.translate) return;
+
+  await startTranslation(
+    {id: tabId, url: message.url},
+    {
+      activation: navigation.activation,
+      url: message.url,
       documentToken: message.documentToken
     }
   );
@@ -312,8 +345,6 @@ async function handleContentReady(message, sender) {
 async function handleTabUpdated(tabId, changeInfo) {
   await ready;
   let state = getState(tabId);
-  if (state.activation == null && state.status === TAB_STATUS.OFF && state.documentToken == null) return;
-
   const initialGeneration = state.generation;
   const initialDocumentToken = state.documentToken;
   let url = changeInfo.url || '';
@@ -324,6 +355,7 @@ async function handleTabUpdated(tabId, changeInfo) {
       url = '';
     }
   }
+  if (!url) return;
   const settings = await loadSettings();
   const latestState = getState(tabId);
   if (!isNavigationStateCurrent(
@@ -332,9 +364,14 @@ async function handleTabUpdated(tabId, changeInfo) {
   )) return;
   state = latestState;
 
-  const sameManualSite = shouldContinueAfterNavigation(state, url);
-  const autoSite = matchesAutoTranslateSite(hostnameForUrl(url), settings.autoTranslateSites);
-  if (!sameManualSite && !autoSite) {
+  const navigation = classifyNavigation({
+    state,
+    url,
+    autoTranslateSites: settings.autoTranslateSites,
+    autoTranslateSameSite: settings.autoTranslateSameSite
+  });
+  if (!navigation.translate) {
+    if (state.activation == null && state.status === TAB_STATUS.OFF && state.documentToken == null) return;
     await setState(tabId, {
       status: TAB_STATUS.OFF,
       generation: nextGeneration(),
@@ -354,9 +391,9 @@ async function handleTabUpdated(tabId, changeInfo) {
     status: TAB_STATUS.OFF,
     generation: nextGeneration(),
     documentToken: null,
-    activation: sameManualSite ? TAB_ACTIVATION.MANUAL : TAB_ACTIVATION.AUTO,
+    activation: navigation.activation,
     origin: state.origin || originForUrl(url),
-    hostname: hostnameForUrl(url) || state.hostname,
+    hostname: navigation.hostname || state.hostname,
     modelState: null,
     progress: null,
     errorCode: null,
@@ -366,6 +403,45 @@ async function handleTabUpdated(tabId, changeInfo) {
 }
 
 const ready = hydrate();
+
+async function syncAutomaticTranslationRules() {
+  if (!chrome.tabs?.query) return;
+  const settings = await loadSettings();
+  let tabs = [];
+  try {
+    tabs = await chrome.tabs.query({});
+  } catch {
+    return;
+  }
+
+  for (const tab of tabs) {
+    if (typeof tab?.id !== 'number' || typeof tab.url !== 'string') continue;
+    const state = getState(tab.id);
+    const shouldTranslate = matchesAutoTranslateSite(hostnameForUrl(tab.url), settings.autoTranslateSites);
+    if (shouldTranslate && !isBusyOrActive(state) &&
+        (state.activation !== TAB_ACTIVATION.MANUAL || state.status === TAB_STATUS.ERROR)) {
+      void enqueueTabOperation(tab.id, () => startTranslation(tab, {
+        activation: TAB_ACTIVATION.AUTO,
+        url: tab.url
+      }));
+      continue;
+    }
+    if (!shouldTranslate && state.activation === TAB_ACTIVATION.AUTO && state.status !== TAB_STATUS.OFF) {
+      void enqueueTabOperation(tab.id, () => stopTranslation(tab.id, state));
+    }
+  }
+}
+
+chrome.storage?.onChanged?.addListener((changes, areaName) => {
+  if (areaName && areaName !== 'local') return;
+  if (!changes?.['translight.settings.v1']) return;
+  void ready.then(() => syncAutomaticTranslationRules());
+});
+
+// Re-apply saved rules when the service worker wakes up after an extension
+// reload or browser restart. CONTENT_READY handles new documents, while this
+// pass also covers already-open tabs whose content script is still present.
+void ready.then(() => syncAutomaticTranslationRules());
 
 chrome.action.onClicked.addListener((tab) => {
   const tabId = tab?.id;
@@ -380,6 +456,9 @@ chrome.runtime.onMessage.addListener((message, sender) => {
   }
   if (message?.type === 'CONTENT_READY' && typeof tabId === 'number') {
     void enqueueTabOperation(tabId, () => handleContentReady(message, sender));
+  }
+  if (message?.type === 'CONTENT_NAVIGATION' && typeof tabId === 'number') {
+    void enqueueTabOperation(tabId, () => handleContentNavigation(message, sender));
   }
   return false;
 });

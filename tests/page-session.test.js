@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { PageSession } from '../src/content/page-session.js';
+import { TRANSLATION_MODES } from '../src/settings.js';
 
 function makeProvider({ translate = async (text) => `ko:${text}` } = {}) {
   return {
@@ -38,6 +39,45 @@ describe('PageSession', () => {
     ]);
     expect(statuses.at(-1).status).toBe('ACTIVE');
     session.stop();
+  });
+
+  it('skips a document whose declared language is the target language', async () => {
+    document.documentElement.lang = 'ko-KR';
+    document.body.innerHTML = '<p>한국어 문서는 이미 대상 언어로 작성되어 있습니다.</p>';
+    let calls = 0;
+    const statuses = [];
+    const session = new PageSession({
+      generation: 11,
+      document,
+      provider: makeProvider({
+        translate: async (text) => {
+          calls += 1;
+          return `ko:${text}`;
+        }
+      }),
+      sendStatus: (status) => statuses.push(status)
+    });
+
+    await session.start();
+
+    expect(calls).toBe(0);
+    expect(document.querySelector('p').textContent).toBe('한국어 문서는 이미 대상 언어로 작성되어 있습니다.');
+    expect(document.querySelector('translight-translation')).toBeNull();
+    expect(statuses.at(-1)).toMatchObject({status: 'SKIPPED', reason: 'TARGET_LANGUAGE'});
+    document.documentElement.removeAttribute('lang');
+    session.stop({notify: false});
+  });
+
+  it('creates the default provider with the session target language', () => {
+    const session = new PageSession({
+      generation: 12,
+      document,
+      settings: {targetLanguage: 'ko'}
+    });
+
+    expect(session.provider.targetLanguage).toBe('ko');
+    expect(session.provider.pair).toBe('en:ko');
+    session.stop({notify: false});
   });
 
   it('does not insert late results after cancellation', async () => {
@@ -155,11 +195,81 @@ describe('PageSession', () => {
     const before = calls;
     session.applySettings({translationMode: 'translation-only', displayStyle: 'solid-border'});
     expect(calls).toBe(before);
-    expect(document.querySelector('[data-translight-original-hidden="true"]')).not.toBeNull();
-    expect(document.querySelector('translight-translation').getAttribute('data-translight-style'))
-      .toBe('solid-border');
+    expect(document.querySelector('p').textContent).toBe('ko:Mode paragraph.');
+    expect(document.querySelector('translight-translation')).toBeNull();
+    expect(document.querySelector('p').getAttribute('data-translight-replaced')).toBe('true');
+    expect(document.querySelector('p').hasAttribute('data-translight-style')).toBe(false);
+    session.applySettings({translationMode: 'translation-original'});
+    expect(document.querySelector('p').textContent).toBe('ko:Mode paragraph.');
+    expect(document.querySelector('p').nextElementSibling?.textContent).toBe('Mode paragraph.');
+    expect(document.querySelector('p').getAttribute('data-translight-style')).toBe('solid-border');
+    await wait();
+    expect(calls).toBe(before);
     session.stop();
-    expect(document.querySelector('p').hasAttribute('data-translight-original-hidden')).toBe(false);
+    expect(document.querySelector('p').textContent).toBe('Mode paragraph.');
+  });
+
+  it('respects the page-title setting and applies it to an open session', async () => {
+    document.title = 'Untitled page';
+    document.body.innerHTML = '<p>Title setting.</p>';
+    const session = new PageSession({
+      generation: 51,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider()
+    });
+
+    await session.start();
+    expect(document.title).toBe('Untitled page');
+    session.applySettings({translatePageTitle: true});
+    await wait(20);
+    expect(document.title).toBe('ko:Untitled page');
+    session.applySettings({translatePageTitle: false});
+    expect(document.title).toBe('Untitled page');
+    session.stop();
+  });
+
+  it('keeps page titles translation-only even in translation-original mode', async () => {
+    document.title = 'Original title';
+    document.body.innerHTML = '<p>Title mode.</p>';
+    const session = new PageSession({
+      generation: 52,
+      document,
+      settings: {
+        translationMode: TRANSLATION_MODES.TRANSLATION_ORIGINAL,
+        translatePageTitle: true
+      },
+      provider: makeProvider()
+    });
+
+    await session.start();
+
+    expect(document.title).toBe('ko:Original title');
+    expect(document.title).not.toContain('Original title\n');
+    session.stop();
+    expect(document.title).toBe('Original title');
+  });
+
+  it('retranslates a title when a site replaces the title element', async () => {
+    document.title = 'First title';
+    document.body.innerHTML = '<p>Title replacement.</p>';
+    const session = new PageSession({
+      generation: 53,
+      document,
+      settings: {translatePageTitle: true},
+      provider: makeProvider()
+    });
+
+    await session.start();
+    expect(document.title).toBe('ko:First title');
+
+    const replacement = document.createElement('title');
+    replacement.textContent = 'Second title';
+    document.head.replaceChild(replacement, document.querySelector('title'));
+    await wait();
+
+    expect(document.title).toBe('ko:Second title');
+    session.stop();
   });
 
   it('starts with visible blocks, then adjacent blocks, then document-order blocks', async () => {

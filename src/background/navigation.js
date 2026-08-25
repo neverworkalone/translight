@@ -11,8 +11,9 @@ export function isNavigationStateCurrent(before, after) {
     before?.documentToken === after?.documentToken;
 }
 
-export function shouldContinueManualTranslation(state, url) {
-  return state?.activation === TAB_ACTIVATION.MANUAL &&
+export function shouldContinueManualTranslation(state, url, enabled = true) {
+  return enabled !== false &&
+    state?.activation === TAB_ACTIVATION.MANUAL &&
     Boolean(state.origin) &&
     isSameOrigin(state.origin, url);
 }
@@ -22,10 +23,10 @@ export function shouldAutoTranslate(url, sites) {
   return Boolean(hostname && matchesAutoTranslateSite(hostname, normalizeHostnameList(sites)));
 }
 
-export function classifyNavigation({state, url, autoTranslateSites = []} = {}) {
+export function classifyNavigation({state, url, autoTranslateSites = [], autoTranslateSameSite = true} = {}) {
   const hostname = hostnameForUrl(url);
   if (!hostname) return {translate: false, activation: null, hostname: ''};
-  if (shouldContinueManualTranslation(state, url)) {
+  if (shouldContinueManualTranslation(state, url, autoTranslateSameSite)) {
     return {translate: true, activation: TAB_ACTIVATION.MANUAL, hostname};
   }
   if (shouldAutoTranslate(url, autoTranslateSites)) {

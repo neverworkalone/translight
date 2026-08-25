@@ -150,5 +150,247 @@
   },
   "settingsInvalid": {
     "message": "일부 값이 올바르지 않아 안전한 기본값으로 되돌렸습니다."
+  },
+  "optionsProductName": {
+    "message": "Translight · 빛번역"
+  },
+  "settingsSaveShort": {
+    "message": "저장"
+  },
+  "settingsSaving": {
+    "message": "저장 중"
+  },
+  "settingsUnsaved": {
+    "message": "저장되지 않음"
+  },
+  "settingsSidebarLabel": {
+    "message": "설정"
+  },
+  "settingsNavAppearance": {
+    "message": "모양"
+  },
+  "settingsNavService": {
+    "message": "번역 서비스"
+  },
+  "settingsNavAdvanced": {
+    "message": "고급 설정"
+  },
+  "settingsNavData": {
+    "message": "설정 데이터"
+  },
+  "appearancePageTitle": {
+    "message": "모양"
+  },
+  "appearancePageDescription": {
+    "message": "번역문이 페이지에 표시되는 방식과 모양을 설정합니다."
+  },
+  "settingsTranslationModeDescription": {
+    "message": "원문과 번역문을 표시하는 방식을 선택합니다."
+  },
+  "settingsPreviewLabel": {
+    "message": "미리보기"
+  },
+  "settingsColorInvalid": {
+    "message": "#F0F6FF와 같은 6자리 16진수 색상값을 입력하세요."
+  },
+  "servicePageTitle": {
+    "message": "번역 서비스"
+  },
+  "servicePageDescription": {
+    "message": "번역 도착어와 사용할 서비스를 설정합니다."
+  },
+  "serviceTargetLanguage": {
+    "message": "번역 도착어"
+  },
+  "serviceTargetLanguageDescription": {
+    "message": "선택한 언어로 번역됩니다."
+  },
+  "serviceKorean": {
+    "message": "한국어"
+  },
+  "serviceProviderTitle": {
+    "message": "서비스 선택"
+  },
+  "serviceProviderDescription": {
+    "message": "번역에 사용할 서비스를 선택합니다."
+  },
+  "serviceProviderChrome": {
+    "message": "Chrome 내장 번역"
+  },
+  "serviceProviderChromeDescription": {
+    "message": "Translator API · 무료"
+  },
+  "serviceProviderActive": {
+    "message": "사용 중"
+  },
+  "serviceProviderError": {
+    "message": "오류"
+  },
+  "serviceDetailsTitle": {
+    "message": "세부 설정"
+  },
+  "serviceDetailsDescription": {
+    "message": "Chrome 번역 모델의 상태를 확인하고 관리합니다."
+  },
+  "serviceChromeDescription": {
+    "message": "Chrome 내장 Translator API는 모델을 다운로드하면 인터넷 연결이나 사용량 제한 없이 기기에서 무료로 작동하는 온디바이스 번역 기능입니다. 한국어 모델은 최초 사용 시 자동으로 다운로드됩니다."
+  },
+  "serviceModelTitle": {
+    "message": "번역 모델"
+  },
+  "serviceModelPair": {
+    "message": "영어 → 한국어"
+  },
+  "serviceStatusChecking": {
+    "message": "확인 중"
+  },
+  "serviceStatusDownloadable": {
+    "message": "다운로드 필요"
+  },
+  "serviceStatusDownloading": {
+    "message": "다운로드 중"
+  },
+  "serviceStatusAvailable": {
+    "message": "사용 가능"
+  },
+  "serviceStatusDownloadFailed": {
+    "message": "다운로드 실패"
+  },
+  "serviceStatusUnavailable": {
+    "message": "사용 불가"
+  },
+  "serviceDownload": {
+    "message": "다운로드"
+  },
+  "serviceRetry": {
+    "message": "다시 시도"
+  },
+  "serviceDownloading": {
+    "message": "모델 다운로드 중"
+  },
+  "serviceAvailableDescription": {
+    "message": "영어 → 한국어 모델을 사용할 수 있습니다."
+  },
+  "serviceUnavailableTitle": {
+    "message": "Chrome Translator를 사용할 수 없습니다"
+  },
+  "serviceUnavailableDescription": {
+    "message": "이 브라우저에서는 이 언어쌍의 내장 Translator API를 제공하지 않습니다."
+  },
+  "serviceDownloadFailedDescription": {
+    "message": "모델을 다운로드하지 못했습니다. 다시 시도하세요."
+  },
+  "serviceStateCheckFailed": {
+    "message": "모델 상태를 확인하지 못했습니다."
+  },
+  "serviceManagementLink": {
+    "message": "번역 모델 관리"
+  },
+  "serviceManagementHelp": {
+    "message": "Chrome 온디바이스 번역 관리 페이지를 엽니다."
+  },
+  "advancedPageTitle": {
+    "message": "고급 설정"
+  },
+  "advancedPageDescription": {
+    "message": "번역 동작과 자동 번역 사이트를 설정합니다."
+  },
+  "advancedBehaviorTitle": {
+    "message": "번역 동작"
+  },
+  "advancedBehaviorDescription": {
+    "message": "현재 탭에서 번역이 이어지는 방식을 정합니다."
+  },
+  "advancedSameSiteTitle": {
+    "message": "같은 사이트 자동 번역"
+  },
+  "advancedSameSiteDescription": {
+    "message": "페이지를 번역한 뒤 현재 탭에서 같은 사이트로 이동하면 계속 번역합니다."
+  },
+  "advancedPageTitleToggle": {
+    "message": "페이지 제목 번역"
+  },
+  "advancedPageTitleDescription": {
+    "message": "브라우저 탭에 표시되는 페이지 제목도 함께 번역합니다."
+  },
+  "advancedSitesTitle": {
+    "message": "자동 번역 사이트"
+  },
+  "advancedSitesDescription": {
+    "message": "등록한 사이트에 방문하면 모든 탭에서 페이지를 자동으로 번역합니다. 사이트를 한 줄에 하나씩 입력하거나 쉼표(,), 세미콜론(;)으로 구분하세요."
+  },
+  "advancedSitesPlaceholder": {
+    "message": "notion.so, chatgpt.com"
+  },
+  "advancedRegisteredSites": {
+    "message": "등록된 사이트"
+  },
+  "advancedRemoveSite": {
+    "message": "$site$ 삭제",
+    "placeholders": {
+      "site": {
+        "content": "$1"
+      }
+    }
+  },
+  "advancedNoSites": {
+    "message": "등록된 자동 번역 사이트가 없습니다."
+  },
+  "dataPageTitle": {
+    "message": "설정 데이터"
+  },
+  "dataPageDescription": {
+    "message": "Translight 설정을 백업하거나 복원합니다."
+  },
+  "dataBackupTitle": {
+    "message": "백업 및 복원"
+  },
+  "dataBackupDescription": {
+    "message": "JSON 백업 파일을 내보내거나 이전 백업에서 설정을 가져옵니다."
+  },
+  "dataExportTitle": {
+    "message": "설정 내보내기"
+  },
+  "dataExportDescription": {
+    "message": "현재 모든 설정을 JSON 파일로 저장합니다."
+  },
+  "dataExportButton": {
+    "message": "내보내기"
+  },
+  "dataImportTitle": {
+    "message": "설정 가져오기"
+  },
+  "dataImportDescription": {
+    "message": "Translight JSON 파일에서 설정을 복원합니다."
+  },
+  "dataImportButton": {
+    "message": "가져오기"
+  },
+  "dataResetTitle": {
+    "message": "초기화"
+  },
+  "dataDangerBadge": {
+    "message": "주의 필요"
+  },
+  "dataResetHeading": {
+    "message": "모든 설정 초기화"
+  },
+  "dataResetDescription": {
+    "message": "저장된 모양·동작·서비스 설정이 모두 삭제됩니다. 이 작업은 되돌릴 수 없습니다."
+  },
+  "dataResetButton": {
+    "message": "모든 설정 초기화"
+  },
+  "dataResetConfirm": {
+    "message": "Translight의 모든 설정을 초기화할까요? 이 작업은 되돌릴 수 없습니다."
+  },
+  "settingsSaveFailed": {
+    "message": "설정을 저장하지 못했습니다. 다시 시도하세요."
+  },
+  "settingsLoadFailed": {
+    "message": "설정을 불러오지 못해 안전한 기본값을 사용합니다."
+  },
+  "settingsImportInvalid": {
+    "message": "손상되었거나 지원하지 않는 설정 형식입니다. 기존 설정은 변경되지 않았습니다."
   }
 }

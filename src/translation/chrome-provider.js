@@ -63,7 +63,7 @@ export class ChromeTranslateProvider extends TranslationProvider {
     }
   }
 
-  async prepare({ onStateChange, signal } = {}) {
+  async prepare({ onStateChange, signal, retry = false } = {}) {
     throwIfAborted(signal);
 
     if (this.translator) {
@@ -87,7 +87,7 @@ export class ChromeTranslateProvider extends TranslationProvider {
         'No Chrome Translator model is available for the configured language pair.'
       );
     }
-    if (initialState === MODEL_STATE.DOWNLOAD_FAILED) {
+    if (initialState === MODEL_STATE.DOWNLOAD_FAILED && !retry) {
       throw new TranslationProviderError(
         'DOWNLOAD_FAILED',
         'The Chrome Translator model download failed.',
