@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 const projectRoot = resolve(new URL('..', import.meta.url).pathname);
 const distDir = resolve(projectRoot, 'dist');
 const releaseDir = resolve(projectRoot, 'release');
-const archivePath = resolve(releaseDir, 'translight-1.0.0.zip');
+const archivePath = resolve(releaseDir, 'translight-1.0.zip');
 
 if (!existsSync(resolve(distDir, 'manifest.json'))) {
   throw new Error('Cannot package the extension because dist/manifest.json is missing.');

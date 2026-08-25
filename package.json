@@ -1,6 +1,6 @@
 {
   "name": "translight",
-  "version": "1.0.0",
+  "version": "1.0",
   "private": true,
   "description": "Preserve English web pages and show Korean translations below the original text.",
   "license": "Apache-2.0",

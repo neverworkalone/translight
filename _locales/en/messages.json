@@ -3,7 +3,7 @@
     "message": "Translight"
   },
   "appDescription": {
-    "message": "Preserve English text and show Korean translations directly below it."
+    "message": "Keep the original text and display the translation below."
   },
   "actionStartTitle": {
     "message": "Translight: Start translation"

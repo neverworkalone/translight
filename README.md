@@ -24,7 +24,7 @@ npm run build
 npm run package
 ```
 
-`npm run build` 결과는 `dist/`에 생성되고, `npm run package`는 Chrome 개발자 모드에서 압축 해제 확장 프로그램으로 설치할 수 있는 `release/translight-1.0.0.zip`을 생성합니다.
+`npm run build` 결과는 `dist/`에 생성되고, `npm run package`는 Chrome 개발자 모드에서 압축 해제 확장 프로그램으로 설치할 수 있는 `release/translight-1.0.zip`을 생성합니다.
 
 설치 방법:
 

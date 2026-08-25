@@ -1,7 +1,7 @@
 <script setup>
 import { t } from '../i18n/index.js';
 
-const version = '1.0.0';
+const version = '1.0';
 </script>
 
 <template>
