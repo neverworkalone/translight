@@ -25,9 +25,6 @@
   "badgeBusy": {
     "message": "…"
   },
-  "badgeActive": {
-    "message": "•"
-  },
   "badgeError": {
     "message": "!"
   },

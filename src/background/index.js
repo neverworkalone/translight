@@ -12,9 +12,22 @@ import { t } from '../i18n/index.js';
 const STORAGE_KEY = 'translight.tabStates';
 const badgeColors = {
   busy: '#0b9ed1',
-  active: '#18a96b',
   error: '#d94a4a'
 };
+
+const DEFAULT_ICON_PATHS = Object.freeze({
+  16: 'icon16.png',
+  32: 'icon32.png',
+  48: 'icon48.png',
+  128: 'icon128.png'
+});
+
+const ACTIVE_ICON_PATHS = Object.freeze({
+  16: 'icon-active16.png',
+  32: 'icon-active32.png',
+  48: 'icon-active48.png',
+  128: 'icon-active128.png'
+});
 
 const ERROR_MESSAGE_KEYS = Object.freeze({
   AVAILABILITY_FAILED: 'errorAvailabilityFailed',
@@ -74,20 +87,29 @@ async function refreshAction(tabId, state) {
     badgeText = t('badgeBusy');
     title = t('actionCancelTitle');
   } else if (state.status === TAB_STATUS.ACTIVE) {
-    badgeText = t('badgeActive');
     title = t('actionActiveTitle');
-    color = badgeColors.active;
   } else if (state.status === TAB_STATUS.ERROR) {
     badgeText = t('badgeError');
     title = t('actionErrorTitle', getLocalizedError(state));
     color = badgeColors.error;
   }
 
-  await Promise.all([
+  const operations = [
     chrome.action.setBadgeText({ tabId, text: badgeText }),
-    chrome.action.setBadgeBackgroundColor({ tabId, color }),
     chrome.action.setTitle({ tabId, title })
-  ]);
+  ];
+  if (chrome.action.setBadgeBackgroundColor) {
+    operations.push(chrome.action.setBadgeBackgroundColor({ tabId, color }));
+  }
+  if (chrome.action.setIcon) {
+    operations.push(
+      chrome.action.setIcon({
+        tabId,
+        path: state.status === TAB_STATUS.ACTIVE ? ACTIVE_ICON_PATHS : DEFAULT_ICON_PATHS
+      })
+    );
+  }
+  await Promise.all(operations);
 }
 
 async function setState(tabId, patch) {
