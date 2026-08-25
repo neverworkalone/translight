@@ -33,4 +33,31 @@ describe('content navigation notifications', () => {
       url: `${location.origin}/wiki/Well-being#Types`
     });
   });
+
+  it('reports its current location when automatic rules are refreshed', async () => {
+    history.replaceState({}, '', '/wiki/Well-being');
+    const messages = [];
+    let listener;
+    const runtime = {
+      onMessage: {
+        addListener(next) {
+          listener = next;
+        }
+      },
+      sendMessage(message) {
+        messages.push(message);
+        return Promise.resolve();
+      }
+    };
+
+    installContentController({runtime});
+    listener({type: 'TRANSLATION_RULES_CHANGED'}, {}, () => {});
+    await Promise.resolve();
+
+    expect(messages.at(-1)).toMatchObject({
+      type: 'CONTENT_RULES_CHANGED',
+      documentToken: expect.any(String),
+      url: `${location.origin}/wiki/Well-being`
+    });
+  });
 });

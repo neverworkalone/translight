@@ -104,6 +104,13 @@ export function installContentController({
     ...payload
   });
 
+  const sendContentRulesChanged = () => sendRuntimeMessage(runtime, {
+    type: 'CONTENT_RULES_CHANGED',
+    documentToken: controller.documentToken,
+    url: globalThis.location?.href ?? '',
+    origin: globalThis.location?.origin ?? ''
+  });
+
   const startSession = (message) => {
     controller.currentSession?.stop({ notify: false });
     controller.currentSession = createSession({
@@ -134,6 +141,12 @@ export function installContentController({
     if (message?.type === 'TRANSLATION_STOP') {
       stopSession(message);
       sendResponse?.({ ok: true });
+      return false;
+    }
+
+    if (message?.type === 'TRANSLATION_RULES_CHANGED') {
+      sendContentRulesChanged();
+      sendResponse?.({ok: true});
       return false;
     }
 
