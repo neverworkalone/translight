@@ -138,6 +138,9 @@ describe('TranslationRenderer', () => {
     expect(document.body.lastElementChild.getAttribute('data-translight-style')).toBe(TRANSLATION_STYLES.DOTTED_BORDER);
     expect(renderer.style.textContent).toContain('font-weight: 700');
     expect(renderer.style.textContent).toContain('font-style: italic');
+    expect(renderer.style.textContent).toContain(
+      'translight-translation[data-translight-session-id="mode-session"]:not([data-translight-role="original"])[data-translight-style="dotted-border"]'
+    );
 
     renderer.updatePresentation({translationMode: TRANSLATION_MODES.ORIGINAL_TRANSLATION});
     expect(source.textContent).toBe('Original text');

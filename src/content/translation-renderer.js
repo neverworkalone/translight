@@ -204,7 +204,9 @@ function normalizePresentation(settings = {}) {
 function styleText(sessionId, presentation) {
   const selector = `${TRANSLATION_TAG}[${SESSION_ATTRIBUTE}="${escapeAttribute(sessionId)}"]`;
   const replacementSelector = `[${REPLACED_ATTRIBUTE}="${GENERATED_VALUE}"][${STYLED_REPLACEMENT_ATTRIBUTE}="${GENERATED_VALUE}"][${SESSION_ATTRIBUTE}="${escapeAttribute(sessionId)}"]`;
-  const styledSelector = `${selector}:not([${ROLE_ATTRIBUTE}="${ROLE_ORIGINAL}"]), ${replacementSelector}`;
+  const styledSelector = `${selector}:not([${ROLE_ATTRIBUTE}="${ROLE_ORIGINAL}"])`;
+  const styleSelector = (style) =>
+    `${styledSelector}[${STYLE_ATTRIBUTE}="${style}"], ${replacementSelector}[${STYLE_ATTRIBUTE}="${style}"]`;
   const hiddenSelector = `[${HIDDEN_ATTRIBUTE}="true"][${SESSION_ATTRIBUTE}="${escapeAttribute(sessionId)}"]`;
   const highlightTextSelector = `${selector}[${STYLE_ATTRIBUTE}="${TRANSLATION_STYLES.HIGHLIGHT}"] > [${TRANSLATION_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"]`;
   const miniHighlightTextSelector = `${selector}[${STYLE_ATTRIBUTE}="${TRANSLATION_STYLES.MINI_HIGHLIGHT}"] > [${TRANSLATION_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"]`;
@@ -263,33 +265,33 @@ function styleText(sessionId, presentation) {
       margin: 0.45em 0 1em !important;
     }
 
-    ${styledSelector}[${STYLE_ATTRIBUTE}="${TRANSLATION_STYLES.LEFT_BORDER}"] {
+    ${styleSelector(TRANSLATION_STYLES.LEFT_BORDER)} {
       border-left: 3px solid var(--translight-style-color) !important;
       padding-left: 0.7em !important;
     }
-    ${styledSelector}[${STYLE_ATTRIBUTE}="${TRANSLATION_STYLES.DOTTED_BORDER}"] {
+    ${styleSelector(TRANSLATION_STYLES.DOTTED_BORDER)} {
       border: 1px dotted var(--translight-style-color) !important;
       padding: 0.35em 0.6em !important;
     }
-    ${styledSelector}[${STYLE_ATTRIBUTE}="${TRANSLATION_STYLES.SOLID_BORDER}"] {
+    ${styleSelector(TRANSLATION_STYLES.SOLID_BORDER)} {
       border: 1px solid var(--translight-style-color) !important;
       padding: 0.35em 0.6em !important;
     }
-    ${styledSelector}[${STYLE_ATTRIBUTE}="${TRANSLATION_STYLES.DOTTED_UNDERLINE}"] {
+    ${styleSelector(TRANSLATION_STYLES.DOTTED_UNDERLINE)} {
       text-decoration: underline dotted var(--translight-style-color) !important;
       text-decoration-thickness: 2px !important;
       text-underline-offset: 0.2em !important;
     }
-    ${styledSelector}[${STYLE_ATTRIBUTE}="${TRANSLATION_STYLES.SOLID_UNDERLINE}"] {
+    ${styleSelector(TRANSLATION_STYLES.SOLID_UNDERLINE)} {
       text-decoration: underline solid var(--translight-style-color) !important;
       text-decoration-thickness: 2px !important;
       text-underline-offset: 0.2em !important;
     }
-    ${styledSelector}[${STYLE_ATTRIBUTE}="${TRANSLATION_STYLES.SEPARATOR}"] {
+    ${styleSelector(TRANSLATION_STYLES.SEPARATOR)} {
       border-top: 1px solid var(--translight-style-color) !important;
       padding-top: 0.55em !important;
     }
-    ${styledSelector}[${STYLE_ATTRIBUTE}="${TRANSLATION_STYLES.BACKGROUND}"] {
+    ${styleSelector(TRANSLATION_STYLES.BACKGROUND)} {
       background: var(--translight-style-color) !important;
       padding: 0.3em 0.5em !important;
     }
