@@ -9,7 +9,7 @@
     "dev": "vite",
     "build": "vite build && vite build --config vite.content.config.js",
     "icons:active": "node scripts/create-active-icons.mjs",
-    "package": "npm run build && node scripts/package-extension.mjs",
+    "package": "bash pack.sh",
     "test": "vitest run",
     "test:watch": "vitest",
     "check": "npm run test && npm run build"
