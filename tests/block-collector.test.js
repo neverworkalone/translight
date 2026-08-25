@@ -2,6 +2,7 @@
 
 import { beforeEach, describe, expect, it } from 'vitest';
 import { collectTranslationBlocks, resetSourceSequence } from '../src/content/block-collector.js';
+import {hashSourceText} from '../src/content/translation-queue.js';
 
 describe('collectTranslationBlocks', () => {
   beforeEach(() => {
@@ -39,6 +40,18 @@ describe('collectTranslationBlocks', () => {
     `;
 
     expect(collectTranslationBlocks(document.body).map((block) => block.text)).toEqual(['Fresh paragraph']);
+  });
+
+  it('does not re-collect text that the renderer has replaced for presentation', () => {
+    document.body.innerHTML = `
+      <p
+        data-translight-source-id="source-1"
+        data-translight-source-hash="source-hash"
+        data-translight-presentation-hash="${hashSourceText('Presented translation')}"
+      >Presented translation</p>
+    `;
+
+    expect(collectTranslationBlocks(document.body)).toEqual([]);
   });
 
   it('keeps direct parent text when a block child is also present', () => {

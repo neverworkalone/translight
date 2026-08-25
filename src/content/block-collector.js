@@ -9,6 +9,7 @@ const LINK_RATIO_LIMIT = 0.65;
 const SOURCE_ID_ATTRIBUTE = 'data-translight-source-id';
 const SOURCE_HASH_ATTRIBUTE = 'data-translight-source-hash';
 const PENDING_SOURCE_HASH_ATTRIBUTE = 'data-translight-pending-source-hash';
+const PRESENTATION_HASH_ATTRIBUTE = 'data-translight-presentation-hash';
 
 let sourceSequence = 0;
 
@@ -124,6 +125,7 @@ export function collectTranslationBlocks(root = globalThis.document?.body) {
     if (text.length < 2 || !hasLettersOrNumbers(text) || isNavigationLike(element, text)) continue;
     const sourceHash = hashSourceText(text);
     if (isExistingSource && !element.getAttribute(SOURCE_HASH_ATTRIBUTE)) continue;
+    if (isExistingSource && element.getAttribute(PRESENTATION_HASH_ATTRIBUTE) === sourceHash) continue;
     if (isExistingSource && element.getAttribute(SOURCE_HASH_ATTRIBUTE) === sourceHash) continue;
     if (isExistingSource) element.setAttribute(PENDING_SOURCE_HASH_ATTRIBUTE, sourceHash);
 

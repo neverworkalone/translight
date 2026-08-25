@@ -155,11 +155,17 @@ describe('PageSession', () => {
     const before = calls;
     session.applySettings({translationMode: 'translation-only', displayStyle: 'solid-border'});
     expect(calls).toBe(before);
-    expect(document.querySelector('[data-translight-original-hidden="true"]')).not.toBeNull();
-    expect(document.querySelector('translight-translation').getAttribute('data-translight-style'))
-      .toBe('solid-border');
+    expect(document.querySelector('p').textContent).toBe('ko:Mode paragraph.');
+    expect(document.querySelector('translight-translation')).toBeNull();
+    expect(document.querySelector('p').getAttribute('data-translight-replaced')).toBe('true');
+    expect(document.querySelector('p').getAttribute('data-translight-style')).toBe('solid-border');
+    session.applySettings({translationMode: 'translation-original'});
+    expect(document.querySelector('p').textContent).toBe('ko:Mode paragraph.');
+    expect(document.querySelector('p').nextElementSibling?.textContent).toBe('Mode paragraph.');
+    await wait();
+    expect(calls).toBe(before);
     session.stop();
-    expect(document.querySelector('p').hasAttribute('data-translight-original-hidden')).toBe(false);
+    expect(document.querySelector('p').textContent).toBe('Mode paragraph.');
   });
 
   it('respects the page-title setting and applies it to an open session', async () => {
