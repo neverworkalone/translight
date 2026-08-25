@@ -8,6 +8,7 @@ import {
   SESSION_ATTRIBUTE,
   SOURCE_ATTRIBUTE,
   SOURCE_HASH_ATTRIBUTE,
+  STYLED_REPLACEMENT_ATTRIBUTE,
   TRANSLATED_ATTRIBUTE,
   TranslationRenderer
 } from '../src/content/translation-renderer.js';
@@ -119,6 +120,8 @@ describe('TranslationRenderer', () => {
 
     expect(source.textContent).toBe('번역');
     expect(source.getAttribute(REPLACED_ATTRIBUTE)).toBe('true');
+    expect(source.hasAttribute(STYLED_REPLACEMENT_ATTRIBUTE)).toBe(false);
+    expect(source.hasAttribute('data-translight-style')).toBe(false);
     expect(source.getAttribute(SOURCE_HASH_ATTRIBUTE)).toBe('hash-1');
     expect(source.getAttribute(PRESENTATION_HASH_ATTRIBUTE)).toBeTruthy();
     expect(document.body.querySelector('translight-translation')).toBeNull();
@@ -130,6 +133,8 @@ describe('TranslationRenderer', () => {
     expect(document.body.lastElementChild?.textContent).toBe('Original text');
 
     renderer.updatePresentation({displayStyle: TRANSLATION_STYLES.DOTTED_BORDER, bold: true, italic: true});
+    expect(source.getAttribute(STYLED_REPLACEMENT_ATTRIBUTE)).toBe('true');
+    expect(source.getAttribute('data-translight-style')).toBe(TRANSLATION_STYLES.DOTTED_BORDER);
     expect(document.body.lastElementChild.getAttribute('data-translight-style')).toBe(TRANSLATION_STYLES.DOTTED_BORDER);
     expect(renderer.style.textContent).toContain('font-weight: 700');
     expect(renderer.style.textContent).toContain('font-style: italic');

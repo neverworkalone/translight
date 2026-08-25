@@ -17,6 +17,7 @@ export const TRANSLATED_ATTRIBUTE = 'data-translight-translated';
 export const HIDDEN_ATTRIBUTE = 'data-translight-original-hidden';
 export const HIDDEN_PLACEMENT_ATTRIBUTE = 'data-translight-hidden-placement';
 export const REPLACED_ATTRIBUTE = 'data-translight-replaced';
+export const STYLED_REPLACEMENT_ATTRIBUTE = 'data-translight-styled-replacement';
 
 const GENERATED_VALUE = 'true';
 const STYLE_ATTRIBUTE = 'data-translight-style';
@@ -37,6 +38,7 @@ const ATTRIBUTE_NAMES = [
   TRANSLATED_ATTRIBUTE,
   SESSION_ATTRIBUTE,
   REPLACED_ATTRIBUTE,
+  STYLED_REPLACEMENT_ATTRIBUTE,
   STYLE_ATTRIBUTE,
   HIDDEN_ATTRIBUTE,
   HIDDEN_PLACEMENT_ATTRIBUTE
@@ -201,7 +203,7 @@ function normalizePresentation(settings = {}) {
 
 function styleText(sessionId, presentation) {
   const selector = `${TRANSLATION_TAG}[${SESSION_ATTRIBUTE}="${escapeAttribute(sessionId)}"]`;
-  const replacementSelector = `[${REPLACED_ATTRIBUTE}="${GENERATED_VALUE}"][${SESSION_ATTRIBUTE}="${escapeAttribute(sessionId)}"]`;
+  const replacementSelector = `[${REPLACED_ATTRIBUTE}="${GENERATED_VALUE}"][${STYLED_REPLACEMENT_ATTRIBUTE}="${GENERATED_VALUE}"][${SESSION_ATTRIBUTE}="${escapeAttribute(sessionId)}"]`;
   const styledSelector = `${selector}:not([${ROLE_ATTRIBUTE}="${ROLE_ORIGINAL}"]), ${replacementSelector}`;
   const hiddenSelector = `[${HIDDEN_ATTRIBUTE}="true"][${SESSION_ATTRIBUTE}="${escapeAttribute(sessionId)}"]`;
   const highlightTextSelector = `${selector}[${STYLE_ATTRIBUTE}="${TRANSLATION_STYLES.HIGHLIGHT}"] > [${TRANSLATION_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"]`;
@@ -414,11 +416,17 @@ export class TranslationRenderer {
     record.originalText = normalizeSourceText(sourceText ?? currentText);
   }
 
-  applyReplacementAttributes(record) {
+  applyReplacementAttributes(record, {styled = false} = {}) {
     const {element} = record;
     element.setAttribute(REPLACED_ATTRIBUTE, GENERATED_VALUE);
     element.setAttribute(PRESENTATION_HASH_ATTRIBUTE, hashSourceText(normalizeSourceText(record.translatedText)));
-    element.setAttribute(STYLE_ATTRIBUTE, this.presentation.displayStyle);
+    if (styled) {
+      element.setAttribute(STYLED_REPLACEMENT_ATTRIBUTE, GENERATED_VALUE);
+      element.setAttribute(STYLE_ATTRIBUTE, this.presentation.displayStyle);
+    } else {
+      restoreAttribute(element, STYLED_REPLACEMENT_ATTRIBUTE, record.originalAttributes?.[STYLED_REPLACEMENT_ATTRIBUTE]);
+      restoreAttribute(element, STYLE_ATTRIBUTE, record.originalAttributes?.[STYLE_ATTRIBUTE]);
+    }
     element.removeAttribute(HIDDEN_ATTRIBUTE);
     element.removeAttribute(HIDDEN_PLACEMENT_ATTRIBUTE);
   }
@@ -427,6 +435,7 @@ export class TranslationRenderer {
     const {element} = record;
     element.removeAttribute(REPLACED_ATTRIBUTE);
     element.removeAttribute(PRESENTATION_HASH_ATTRIBUTE);
+    restoreAttribute(element, STYLED_REPLACEMENT_ATTRIBUTE, record.originalAttributes?.[STYLED_REPLACEMENT_ATTRIBUTE]);
     restoreAttribute(element, STYLE_ATTRIBUTE, record.originalAttributes?.[STYLE_ATTRIBUTE]);
     restoreAttribute(element, HIDDEN_ATTRIBUTE, record.originalAttributes?.[HIDDEN_ATTRIBUTE]);
     restoreAttribute(element, HIDDEN_PLACEMENT_ATTRIBUTE, record.originalAttributes?.[HIDDEN_PLACEMENT_ATTRIBUTE]);
@@ -457,7 +466,7 @@ export class TranslationRenderer {
       setTranslationText(translation, record.translatedText);
       translation.parentNode?.removeChild(translation);
     }
-    this.applyReplacementAttributes(record);
+    this.applyReplacementAttributes(record, {styled: mode === TRANSLATION_MODES.TRANSLATION_ORIGINAL});
   }
 
   insert({element, sourceId, sourceHash, translatedText, text, mixedContent = false}) {
