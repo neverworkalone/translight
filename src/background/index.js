@@ -1,4 +1,12 @@
-import { BUSY_STATUSES, createTabState, normalizeTabStates, removeTabState, TAB_STATUS, updateTabState } from './tab-state.js';
+import {
+  BUSY_STATUSES,
+  createTabState,
+  normalizeTabStates,
+  reconcileDocumentState,
+  removeTabState,
+  TAB_STATUS,
+  updateTabState
+} from './tab-state.js';
 
 const STORAGE_KEY = 'translight.tabStates';
 const badgeColors = {
@@ -173,6 +181,24 @@ async function handleTranslationStatus(message, sender) {
   }
 }
 
+async function handleContentReady(message, sender) {
+  await ready;
+  const tabId = sender?.tab?.id;
+  if (typeof tabId !== 'number' || !message.documentToken) return;
+
+  const nextStates = reconcileDocumentState(
+    tabStates,
+    tabId,
+    message.documentToken,
+    nextGeneration()
+  );
+  if (nextStates === tabStates) return;
+
+  tabStates = nextStates;
+  await persist();
+  await refreshAction(tabId, tabStates[String(tabId)]);
+}
+
 const ready = hydrate();
 
 chrome.action.onClicked.addListener((tab) => {
@@ -181,7 +207,27 @@ chrome.action.onClicked.addListener((tab) => {
 
 chrome.runtime.onMessage.addListener((message, sender) => {
   if (message?.type === 'TRANSLATION_STATUS') void handleTranslationStatus(message, sender);
+  if (message?.type === 'CONTENT_READY') void handleContentReady(message, sender);
   return false;
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status !== 'loading') return;
+  void (async () => {
+    await ready;
+    const state = getState(tabId);
+    if (state.status === TAB_STATUS.OFF && state.documentToken == null) return;
+    await setState(tabId, {
+      status: TAB_STATUS.OFF,
+      generation: nextGeneration(),
+      documentToken: null,
+      origin: null,
+      modelState: null,
+      progress: null,
+      errorCode: null,
+      errorMessage: null
+    });
+  })();
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {

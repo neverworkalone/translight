@@ -18,6 +18,7 @@ export function createTabState(patch = {}) {
     status: TAB_STATUS.OFF,
     generation: 0,
     origin: null,
+    documentToken: null,
     modelState: null,
     progress: null,
     errorCode: null,
@@ -50,4 +51,30 @@ export function removeTabState(states, tabId) {
   const next = { ...states };
   delete next[String(tabId)];
   return next;
+}
+
+export function reconcileDocumentState(states, tabId, documentToken, generation) {
+  if (!documentToken) return states;
+
+  const key = String(tabId);
+  const current = states[key] ?? createTabState();
+  if (current.documentToken === documentToken) return states;
+
+  // A content script may be dynamically injected into a document whose
+  // static script has not reported ready yet. Associate that first token
+  // without cancelling the action that is already in flight.
+  if (current.documentToken == null) {
+    return updateTabState(states, tabId, { documentToken });
+  }
+
+  return updateTabState(states, tabId, {
+    status: TAB_STATUS.OFF,
+    generation,
+    documentToken,
+    origin: null,
+    modelState: null,
+    progress: null,
+    errorCode: null,
+    errorMessage: null
+  });
 }

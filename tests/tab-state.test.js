@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createTabState,
   normalizeTabStates,
+  reconcileDocumentState,
   removeTabState,
   TAB_STATUS,
   updateTabState
@@ -33,5 +34,37 @@ describe('tab state', () => {
       2: createTabState({ status: TAB_STATUS.ERROR })
     };
     expect(removeTabState(states, 1)).toEqual({ 2: states[2] });
+  });
+
+  it('resets an active tab when a new document token arrives', () => {
+    const states = updateTabState({}, 7, {
+      status: TAB_STATUS.ACTIVE,
+      generation: 10,
+      documentToken: 'old-document'
+    });
+
+    const next = reconcileDocumentState(states, 7, 'new-document', 11);
+
+    expect(next['7']).toMatchObject({
+      status: TAB_STATUS.OFF,
+      generation: 11,
+      documentToken: 'new-document'
+    });
+  });
+
+  it('keeps an in-flight action when the first content-ready token is associated', () => {
+    const states = updateTabState({}, 8, {
+      status: TAB_STATUS.CHECKING,
+      generation: 20,
+      documentToken: null
+    });
+
+    const next = reconcileDocumentState(states, 8, 'first-document', 21);
+
+    expect(next['8']).toMatchObject({
+      status: TAB_STATUS.CHECKING,
+      generation: 20,
+      documentToken: 'first-document'
+    });
   });
 });

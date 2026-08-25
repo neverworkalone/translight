@@ -6,6 +6,7 @@ export const TRANSLATED_ATTRIBUTE = 'data-translight-translated';
 
 const GENERATED_VALUE = 'true';
 const STYLE_ATTRIBUTE = 'data-translight-style';
+const LAYOUT_DISPLAYS = new Set(['flex', 'inline-flex', 'grid', 'inline-grid']);
 
 const TRANSLATION_STYLE = `
   ${TRANSLATION_TAG}[${GENERATED_ATTRIBUTE}="true"] {
@@ -44,6 +45,42 @@ function ensureStyle(document, sessionId) {
   return style;
 }
 
+function getDisplay(element) {
+  const view = element?.ownerDocument?.defaultView;
+  return view?.getComputedStyle?.(element)?.display || element?.style?.display || '';
+}
+
+function getDirectNestedList(element) {
+  return Array.from(element.children ?? []).find((child) => {
+    const tagName = child.tagName?.toLowerCase();
+    return tagName === 'ul' || tagName === 'ol';
+  });
+}
+
+function shouldInsertInside(element) {
+  if (element.tagName?.toLowerCase() === 'li') return true;
+  const parent = element.parentElement;
+  return LAYOUT_DISPLAYS.has(getDisplay(parent));
+}
+
+function insertAtSafeLocation(element, translation) {
+  if (!shouldInsertInside(element)) {
+    element.parentNode.insertBefore(translation, element.nextSibling);
+    return 'sibling';
+  }
+
+  if (element.tagName?.toLowerCase() === 'li') {
+    const nestedList = getDirectNestedList(element);
+    if (nestedList) {
+      element.insertBefore(translation, nestedList);
+      return 'inside-before-nested-list';
+    }
+  }
+
+  element.appendChild(translation);
+  return 'inside';
+}
+
 export class TranslationRenderer {
   constructor({ document = globalThis.document, sessionId }) {
     if (!document) throw new Error('TranslationRenderer에는 document가 필요합니다.');
@@ -68,9 +105,9 @@ export class TranslationRenderer {
     element.setAttribute(SOURCE_ATTRIBUTE, sourceId);
     element.setAttribute(TRANSLATED_ATTRIBUTE, GENERATED_VALUE);
     element.setAttribute(SESSION_ATTRIBUTE, this.sessionId);
-    element.parentNode.insertBefore(translation, element.nextSibling);
+    const placement = insertAtSafeLocation(element, translation);
 
-    this.records.set(sourceId, { element, translation });
+    this.records.set(sourceId, { element, translation, placement });
     return translation;
   }
 
