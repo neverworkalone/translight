@@ -145,8 +145,8 @@ function blendPixel(pixels, width, x, y, coverage) {
 }
 
 function addStatusLight(image) {
-  const radius = Math.max(2, image.width * 0.16);
-  const margin = Math.max(1, image.width * 0.04);
+  const radius = Math.max(2, image.width * 0.18);
+  const margin = Math.max(0.5, image.width * 0.02);
   const center = image.width - radius - margin;
   const start = Math.floor(center - radius - 1);
   const end = Math.ceil(center + radius + 1);
