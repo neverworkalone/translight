@@ -25,8 +25,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         options: `${projectRoot}/options.html`,
-        background: `${projectRoot}/src/background/index.js`,
-        content: `${projectRoot}/src/content/index.js`
+        background: `${projectRoot}/src/background/index.js`
       },
       output: {
         format: 'es',

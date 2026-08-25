@@ -54,6 +54,29 @@ describe('TranslationRenderer', () => {
     expect(source.hasAttribute(SESSION_ATTRIBUTE)).toBe(false);
   });
 
+  it('does not duplicate a source element when a re-scan assigns a new source id', () => {
+    const source = document.querySelector('#source');
+    const renderer = new TranslationRenderer({ document, sessionId: 'rescan-session' });
+    const first = renderer.insert({
+      element: source,
+      sourceId: 'source-before-rescan',
+      translatedText: 'First translation'
+    });
+    const second = renderer.insert({
+      element: source,
+      sourceId: 'source-after-rescan',
+      translatedText: 'Updated translation'
+    });
+
+    expect(second).toBe(first);
+    expect(document.querySelectorAll('translight-translation')).toHaveLength(1);
+    expect(second.textContent).toBe('Updated translation');
+    expect(source.getAttribute(SOURCE_ATTRIBUTE)).toBe('source-after-rescan');
+
+    renderer.removeAll();
+    expect(document.body.innerHTML).toBe('<p id="source">Original text</p>');
+  });
+
   it('keeps list items structurally inside their list', () => {
     document.body.innerHTML = '<ul><li id="source">List item</li></ul>';
     const source = document.querySelector('#source');
@@ -108,6 +131,25 @@ describe('TranslationRenderer', () => {
 
     renderer.removeAll();
     expect(document.body.innerHTML).toBe('<p id="source">Original text</p>');
+  });
+
+  it('keeps highlight backgrounds at text height with half-size mini highlight padding', () => {
+    const source = document.querySelector('#source');
+    const renderer = new TranslationRenderer({document, sessionId: 'highlight-session'});
+    renderer.insert({element: source, sourceId: 'highlight-source', translatedText: 'Highlighted text'});
+
+    renderer.updatePresentation({displayStyle: TRANSLATION_STYLES.HIGHLIGHT});
+    expect(document.querySelector('[data-translight-text="true"]')).not.toBeNull();
+    expect(renderer.style.textContent).toContain('padding: 0 0.12em !important');
+    expect(renderer.style.textContent).toContain('box-decoration-break: clone !important');
+    expect(renderer.style.textContent).toContain('line-height: 1 !important');
+
+    renderer.updatePresentation({displayStyle: TRANSLATION_STYLES.MINI_HIGHLIGHT});
+    expect(renderer.style.textContent).toContain('padding: 0 0.06em !important');
+    expect(renderer.style.textContent).toContain(
+      'linear-gradient(to bottom, transparent 50%, var(--translight-style-color) 50%)'
+    );
+    renderer.removeAll();
   });
 
   it('keeps mixed parent and nested block translations visible in translation-only mode', () => {
