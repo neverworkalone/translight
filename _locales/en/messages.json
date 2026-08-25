@@ -65,6 +65,90 @@
     "message": "Settings page based on TASK 1–5"
   },
   "optionsNotice": {
-    "message": "Appearance, automatic translation, and settings data will be connected in a later task. If translation is unsupported, use this page to check Chrome built-in Translator support."
+    "message": "Change the translation mode, display style, colors, and automatic-translation hostnames here. Updates are applied to open translated pages immediately."
+  },
+  "settingsSave": {
+    "message": "Save settings"
+  },
+  "settingsSaved": {
+    "message": "Saved"
+  },
+  "settingsAppearance": {
+    "message": "Translation appearance"
+  },
+  "settingsTranslationMode": {
+    "message": "Translation mode"
+  },
+  "settingsModeOriginalTranslation": {
+    "message": "Original + translation"
+  },
+  "settingsModeTranslationOriginal": {
+    "message": "Translation + original"
+  },
+  "settingsModeTranslationOnly": {
+    "message": "Translation only"
+  },
+  "settingsDisplayStyle": {
+    "message": "Display style"
+  },
+  "settingsStyleNone": {
+    "message": "None"
+  },
+  "settingsStyleLeftBorder": {
+    "message": "Left border"
+  },
+  "settingsStyleDottedBorder": {
+    "message": "Dotted border"
+  },
+  "settingsStyleSolidBorder": {
+    "message": "Solid border"
+  },
+  "settingsStyleDottedUnderline": {
+    "message": "Dotted underline"
+  },
+  "settingsStyleSolidUnderline": {
+    "message": "Solid underline"
+  },
+  "settingsStyleSeparator": {
+    "message": "Separator"
+  },
+  "settingsStyleBackground": {
+    "message": "Background"
+  },
+  "settingsStyleHighlight": {
+    "message": "Highlighter"
+  },
+  "settingsStyleMiniHighlight": {
+    "message": "Mini highlighter"
+  },
+  "settingsStyleColor": {
+    "message": "Style color"
+  },
+  "settingsTextColor": {
+    "message": "Text color"
+  },
+  "settingsBold": {
+    "message": "Bold"
+  },
+  "settingsItalic": {
+    "message": "Italic"
+  },
+  "settingsAutoTranslateSites": {
+    "message": "Automatic translation sites"
+  },
+  "settingsAutoTranslateSitesHint": {
+    "message": "One hostname per line. URLs are normalized and duplicate or invalid values are ignored."
+  },
+  "settingsAutoTranslateSitesPlaceholder": {
+    "message": "example.com\nnews.example.org"
+  },
+  "settingsPreviewOriginal": {
+    "message": "Original page text"
+  },
+  "settingsPreviewTranslation": {
+    "message": "Translated text appears here."
+  },
+  "settingsInvalid": {
+    "message": "Some values were invalid and were reset to safe defaults."
   }
 }

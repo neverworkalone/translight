@@ -3,11 +3,14 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   GENERATED_ATTRIBUTE,
+  HIDDEN_ATTRIBUTE,
   SESSION_ATTRIBUTE,
   SOURCE_ATTRIBUTE,
+  SOURCE_HASH_ATTRIBUTE,
   TRANSLATED_ATTRIBUTE,
   TranslationRenderer
 } from '../src/content/translation-renderer.js';
+import {TRANSLATION_MODES, TRANSLATION_STYLES} from '../src/settings.js';
 
 describe('TranslationRenderer', () => {
   beforeEach(() => {
@@ -79,5 +82,63 @@ describe('TranslationRenderer', () => {
     expect(document.body.innerHTML).toBe(
       `<div id="layout" style="display:${display}"><div id="source">Layout child</div></div>`
     );
+  });
+
+  it('reorders or hides original text without retranslating and restores it on cleanup', () => {
+    const source = document.querySelector('#source');
+    const renderer = new TranslationRenderer({
+      document,
+      sessionId: 'mode-session',
+      settings: {translationMode: TRANSLATION_MODES.TRANSLATION_ONLY}
+    });
+    renderer.insert({element: source, sourceId: 'mode-source', sourceHash: 'hash-1', translatedText: '번역'});
+
+    expect(source.hasAttribute(HIDDEN_ATTRIBUTE)).toBe(true);
+    expect(source.getAttribute(SOURCE_HASH_ATTRIBUTE)).toBe('hash-1');
+    expect(document.body.querySelector('translight-translation').textContent).toBe('번역');
+
+    renderer.updatePresentation({translationMode: TRANSLATION_MODES.TRANSLATION_ORIGINAL});
+    expect(source.hasAttribute(HIDDEN_ATTRIBUTE)).toBe(false);
+    expect(document.body.firstElementChild?.tagName.toLowerCase()).toBe('translight-translation');
+
+    renderer.updatePresentation({displayStyle: TRANSLATION_STYLES.DOTTED_BORDER, bold: true, italic: true});
+    expect(document.body.firstElementChild.getAttribute('data-translight-style')).toBe(TRANSLATION_STYLES.DOTTED_BORDER);
+    expect(renderer.style.textContent).toContain('font-weight: 700');
+    expect(renderer.style.textContent).toContain('font-style: italic');
+
+    renderer.removeAll();
+    expect(document.body.innerHTML).toBe('<p id="source">Original text</p>');
+  });
+
+  it('keeps mixed parent and nested block translations visible in translation-only mode', () => {
+    document.body.innerHTML = '<div id="mixed">Direct text.<p id="nested">Nested text.</p></div>';
+    const mixed = document.querySelector('#mixed');
+    const nested = document.querySelector('#nested');
+    const renderer = new TranslationRenderer({
+      document,
+      sessionId: 'mixed-session',
+      settings: {translationMode: TRANSLATION_MODES.TRANSLATION_ONLY}
+    });
+
+    renderer.insert({
+      element: mixed,
+      sourceId: 'mixed-source',
+      sourceHash: 'mixed-hash',
+      mixedContent: true,
+      translatedText: 'Direct translation.'
+    });
+    renderer.insert({
+      element: nested,
+      sourceId: 'nested-source',
+      sourceHash: 'nested-hash',
+      translatedText: 'Nested translation.'
+    });
+
+    expect(mixed.getAttribute('data-translight-hidden-placement')).toBe('mixed');
+    expect(mixed.querySelector('translight-translation').textContent).toBe('Direct translation.');
+    expect(mixed.querySelectorAll('translight-translation')).toHaveLength(2);
+
+    renderer.removeAll();
+    expect(document.body.innerHTML).toBe('<div id="mixed">Direct text.<p id="nested">Nested text.</p></div>');
   });
 });

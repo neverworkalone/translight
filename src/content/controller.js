@@ -1,4 +1,10 @@
 import { PageSession } from './page-session.js';
+import {
+  createDefaultSettings,
+  loadSettings,
+  normalizeSettings,
+  subscribeToSettings
+} from '../settings.js';
 
 export const CONTENT_CONTROLLER_KEY = '__translight_content_controller__';
 export const DOCUMENT_TOKEN_KEY = '__translight_document_token__';
@@ -32,9 +38,31 @@ export function installContentController({
 
   const controller = {
     currentSession: null,
-    documentToken: getDocumentToken()
+    documentToken: getDocumentToken(),
+    settings: createDefaultSettings(),
+    translationCache: new Map(),
+    settingsReady: null,
+    unsubscribeSettings: null,
+    pageLifecycleHandler: null
   };
   globalThis[CONTENT_CONTROLLER_KEY] = controller;
+
+  controller.settingsReady = loadSettings()
+    .then((settings) => {
+      controller.settings = normalizeSettings(settings);
+      controller.currentSession?.applySettings(controller.settings);
+      return controller.settings;
+    })
+    .catch(() => controller.settings);
+  controller.unsubscribeSettings = subscribeToSettings((settings) => {
+    controller.settings = normalizeSettings(settings);
+    controller.currentSession?.applySettings(controller.settings);
+  });
+  controller.pageLifecycleHandler = () => {
+    controller.currentSession?.stop({notify: false});
+    controller.currentSession = null;
+  };
+  globalThis.addEventListener?.('pagehide', controller.pageLifecycleHandler);
 
   const sendStatus = (payload) => sendRuntimeMessage(runtime, {
     type: 'TRANSLATION_STATUS',
@@ -45,7 +73,10 @@ export function installContentController({
     controller.currentSession?.stop({ notify: false });
     controller.currentSession = createSession({
       generation: message.generation,
-      sendStatus
+      sendStatus,
+      settings: controller.settings,
+      translationCache: controller.translationCache,
+      isGenerationCurrent: (generation) => controller.currentSession?.generation === generation
     });
     void controller.currentSession.start();
   };
@@ -76,7 +107,9 @@ export function installContentController({
 
   sendRuntimeMessage(runtime, {
     type: 'CONTENT_READY',
-    documentToken: controller.documentToken
+    documentToken: controller.documentToken,
+    url: globalThis.location?.href ?? '',
+    origin: globalThis.location?.origin ?? ''
   });
 
   return controller;

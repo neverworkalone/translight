@@ -40,4 +40,15 @@ describe('collectTranslationBlocks', () => {
 
     expect(collectTranslationBlocks(document.body).map((block) => block.text)).toEqual(['Fresh paragraph']);
   });
+
+  it('keeps direct parent text when a block child is also present', () => {
+    document.body.innerHTML = `
+      <div id="mixed">Direct <strong>parent</strong> text.<p>Nested block text.</p></div>
+    `;
+
+    expect(collectTranslationBlocks(document.body).map((block) => block.text)).toEqual([
+      'Direct parent text.',
+      'Nested block text.'
+    ]);
+  });
 });

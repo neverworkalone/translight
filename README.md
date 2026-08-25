@@ -9,10 +9,17 @@ Chrome 내장 Translator API를 이용해 영어 페이지의 원문을 보존�
 - 툴바 T 아이콘으로 현재 탭의 번역 시작·취소·해제
 - `chrome.storage.session` 기반 탭별 상태와 action badge
 - Chrome 내장 영어→한국어 Translator API 및 모델 다운로드 진행률
+- viewport 우선순위·제한 동시성·페이지 메모리 캐시를 사용하는 번역 큐
+- 긴 문서의 현재 화면 우선 번역과 세션 generation 기반 늦은 결과 차단
 - 정적 페이지의 제목·문단·목록·인용문·캡션 추출
 - 원문 DOM을 교체하지 않는 `<translight-translation translate="no">` 삽입
+- 원문+번역문·번역문+원문·번역문만 표시 모드
+- 10가지 번역 표시 스타일과 색상·굵기·기울임 설정
+- MutationObserver 기반 동적 subtree·문자열 변경·SPA navigation 대응
+- 같은 origin 수동 번역 지속과 등록 hostname 자동 번역
+- 페이지 제목 번역 및 번역 해제 시 제목 복구
 - 번역 해제 시 Translight가 추가한 노드·속성·스타일만 제거
-- 별도 옵션 페이지의 기본 진입 화면
+- 설정 변경 시 열린 번역 페이지에 즉시 표시 설정 반영
 
 ## 개발
 
@@ -37,8 +44,8 @@ Translator API와 모델은 Chrome이 지원하는 데스크톱 환경에서 동
 
 ## 권한
 
-`<all_urls>`는 사용자가 어느 영어 웹페이지에서든 툴바 액션으로 번역을 실행할 수 있도록 content script를 등록하기 위해 필요합니다. Translight 1.0은 페이지 내용을 외부 서버로 전송하지 않습니다.
+`<all_urls>`는 사용자가 어느 영어 웹페이지에서든 툴바 액션으로 번역을 실행할 수 있도록 content script를 등록하기 위해 필요합니다. 설정은 `chrome.storage.sync`, 탭별 실행 상태는 `chrome.storage.session`에 저장되며 페이지 내용은 외부 서버로 전송하지 않습니다.
 
 ## 라이선스와 고지
 
-이 프로젝트의 자체 코드는 Apache License 2.0으로 배포합니다. 현재 TASK1–5 구현에는 NaverDic 소스 코드를 재사용하지 않았으며, 별도 제3자 고지 파일이 필요한 의존성은 포함하지 않습니다. 상세 조건은 [LICENSE](./LICENSE)를 확인해 주세요.
+이 프로젝트의 자체 코드는 Apache License 2.0으로 배포합니다. NaverDic 소스 코드를 재사용하지 않았으며, 별도 제3자 고지 파일이 필요한 의존성은 포함하지 않습니다. 상세 조건은 [LICENSE](./LICENSE)를 확인해 주세요.

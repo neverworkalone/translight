@@ -7,6 +7,11 @@ export const TAB_STATUS = Object.freeze({
   ERROR: 'ERROR'
 });
 
+export const TAB_ACTIVATION = Object.freeze({
+  MANUAL: 'manual',
+  AUTO: 'auto'
+});
+
 export const BUSY_STATUSES = new Set([
   TAB_STATUS.CHECKING,
   TAB_STATUS.DOWNLOADING,
@@ -17,14 +22,19 @@ export function createTabState(patch = {}) {
   return {
     status: TAB_STATUS.OFF,
     generation: 0,
+    activation: null,
     origin: null,
+    hostname: null,
     documentToken: null,
     modelState: null,
     progress: null,
     errorCode: null,
     errorMessage: null,
     updatedAt: 0,
-    ...patch
+    ...patch,
+    activation: normalizeActivation(patch.activation),
+    origin: typeof patch.origin === 'string' ? patch.origin : null,
+    hostname: typeof patch.hostname === 'string' ? patch.hostname : null
   };
 }
 
@@ -36,6 +46,10 @@ export function normalizeTabStates(value) {
       createTabState(state && typeof state === 'object' ? state : {})
     ])
   );
+}
+
+export function normalizeActivation(value) {
+  return value === TAB_ACTIVATION.MANUAL || value === TAB_ACTIVATION.AUTO ? value : null;
 }
 
 export function updateTabState(states, tabId, patch) {
