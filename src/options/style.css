@@ -27,8 +27,11 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
 }
 
 .settings-app {
+  display: flex;
+  flex-direction: column;
   width: 1200px;
-  min-height: 860px;
+  height: min(860px, max(480px, calc(100vh - 64px)));
+  min-height: 0;
   margin: 24px auto 40px;
   overflow: hidden;
   border: 1px solid rgba(229, 231, 235, .9);
@@ -40,6 +43,7 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
 
 .settings-header {
   display: flex;
+  flex: 0 0 88px;
   align-items: center;
   justify-content: space-between;
   width: 100%;
@@ -122,9 +126,11 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
 
 .settings-body {
   display: flex;
+  flex: 1 1 auto;
   align-items: stretch;
   width: 100%;
-  min-height: 772px;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .settings-sidebar {
@@ -132,7 +138,7 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
   flex: 0 0 240px;
   flex-direction: column;
   gap: 8px;
-  min-height: 772px;
+  min-height: 0;
   padding: 32px 24px 24px;
   border-right: 1px solid #e5e7eb;
   background: #fff;
@@ -173,8 +179,11 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
 }
 
 .settings-workspace {
-  flex: 0 0 960px;
-  min-height: 772px;
+  flex: 1 1 960px;
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
   background: #f7f9fc;
 }
 
@@ -214,7 +223,7 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
 .service-card,
 .data-card {
   border: 1px solid #e5e7eb;
-  border-radius: 10px;
+  border-radius: 12px;
   background: #fff;
 }
 
@@ -1001,8 +1010,8 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
 
 .data-pane { width: 100%; }
 .data-intro { height: 59px; }
-.data-intro h2 { font-size: 26px; line-height: 34px; }
-.data-intro p { margin-top: 4px; line-height: 17px; }
+.data-intro h2 { font-size: 28px; line-height: 34px; }
+.data-intro p { margin-top: 4px; font-size: 14px; line-height: 17px; }
 .reset-intro p { display: none; }
 
 .data-card {
@@ -1014,18 +1023,22 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
 .backup-card { width: 528px; }
 .reset-card {
   width: 328px;
-  padding-top: 28px;
+  position: relative;
+  padding: 0;
+  border-color: #fecaca;
+  background: #fef2f2;
 }
 
 .data-card h3 {
-  font-size: 15px;
+  font-size: 17px;
+  font-weight: 700;
   line-height: 20px;
 }
 
 .data-card > p {
   margin: 10px 0 0;
   color: #6b7280;
-  font-size: 11px;
+  font-size: 13px;
   line-height: 16px;
 }
 
@@ -1038,25 +1051,26 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
 }
 
 .data-action-row h4 {
-  font-size: 13px;
+  font-size: 15px;
+  font-weight: 500;
   line-height: 18px;
 }
 
 .data-action-row p {
   margin: 5px 0 0;
   color: #6b7280;
-  font-size: 11px;
+  font-size: 13px;
   line-height: 16px;
 }
 
 .small-action {
   width: 94px;
   height: 34px;
-  border: 1px solid #bfdbfe;
+  border: 1px solid #d7dee8;
   border-radius: 8px;
   color: #2563eb;
-  background: #eff6ff;
-  font-size: 12px;
+  background: #fff;
+  font-size: 13px;
   font-weight: 500;
 }
 
@@ -1064,44 +1078,61 @@ button:disabled, input:disabled, textarea:disabled, select:disabled {
 
 .danger-badge {
   display: inline-flex;
+  position: absolute;
+  top: 27px;
+  left: 23px;
   align-items: center;
   justify-content: center;
-  width: 78px;
+  min-width: 78px;
   height: 26px;
+  padding: 0 16px;
+  border: 1px solid #fecaca;
   border-radius: 999px;
   color: #dc2626;
-  background: #fef0f0;
+  background: #fff7f7;
   font-size: 11px;
   font-weight: 500;
   line-height: 20px;
+  white-space: nowrap;
 }
 
 .reset-card h3 {
-  margin-top: 22px;
-  font-size: 18px;
+  position: absolute;
+  top: 75px;
+  left: 23px;
+  width: 280px;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
   line-height: 26px;
 }
 
 .reset-card > p {
+  position: absolute;
+  top: 111px;
+  left: 23px;
   width: 280px;
-  margin-top: 10px;
-  font-size: 11px;
+  margin: 0;
+  font-size: 13px;
   line-height: 17px;
 }
 
 .danger-action {
   width: 148px;
   height: 36px;
-  margin-top: 25px;
-  border: 1px solid #fecaca;
+  position: absolute;
+  top: 207px;
+  left: 23px;
+  margin: 0;
+  border: 0;
   border-radius: 8px;
-  color: #dc2626;
-  background: #fff;
-  font-size: 12px;
+  color: #fff;
+  background: #dc2626;
+  font-size: 13px;
   font-weight: 500;
 }
 
-.danger-action:hover { background: #fff7f7; }
+.danger-action:hover { background: #b91c1c; }
 
 .global-error {
   width: 832px;
