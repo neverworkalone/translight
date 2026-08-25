@@ -21,7 +21,7 @@ describe('TranslationRenderer', () => {
     const translation = renderer.insert({
       element: source,
       sourceId: 'source-1',
-      translatedText: '원문 번역'
+      translatedText: 'Translated original'
     });
 
     expect(source.textContent).toBe('Original text');
@@ -36,8 +36,8 @@ describe('TranslationRenderer', () => {
   it('prevents duplicate insertion and completely restores the DOM on cleanup', () => {
     const source = document.querySelector('#source');
     const renderer = new TranslationRenderer({ document, sessionId: 'session-2' });
-    const first = renderer.insert({ element: source, sourceId: 'source-2', translatedText: '첫 번역' });
-    const second = renderer.insert({ element: source, sourceId: 'source-2', translatedText: '두 번역' });
+    const first = renderer.insert({ element: source, sourceId: 'source-2', translatedText: 'First translation' });
+    const second = renderer.insert({ element: source, sourceId: 'source-2', translatedText: 'Second translation' });
 
     expect(second).toBe(first);
     expect(document.querySelectorAll('translight-translation')).toHaveLength(1);
@@ -57,10 +57,10 @@ describe('TranslationRenderer', () => {
     const list = source.parentElement;
     const renderer = new TranslationRenderer({ document, sessionId: 'list-session' });
 
-    renderer.insert({ element: source, sourceId: 'list-source', translatedText: '목록 항목' });
+    renderer.insert({ element: source, sourceId: 'list-source', translatedText: 'List item translation' });
 
     expect(list.children).toHaveLength(1);
-    expect(source.querySelector('translight-translation').textContent).toBe('목록 항목');
+    expect(source.querySelector('translight-translation').textContent).toBe('List item translation');
     renderer.removeAll();
     expect(document.body.innerHTML).toBe('<ul><li id="source">List item</li></ul>');
   });
@@ -71,10 +71,10 @@ describe('TranslationRenderer', () => {
     const layout = document.querySelector('#layout');
     const renderer = new TranslationRenderer({ document, sessionId: `${display}-session` });
 
-    renderer.insert({ element: source, sourceId: `${display}-source`, translatedText: '레이아웃 자식' });
+    renderer.insert({ element: source, sourceId: `${display}-source`, translatedText: 'Layout child translation' });
 
     expect(layout.children).toHaveLength(1);
-    expect(source.querySelector('translight-translation').textContent).toBe('레이아웃 자식');
+    expect(source.querySelector('translight-translation').textContent).toBe('Layout child translation');
     renderer.removeAll();
     expect(document.body.innerHTML).toBe(
       `<div id="layout" style="display:${display}"><div id="source">Layout child</div></div>`

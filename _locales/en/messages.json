@@ -1,0 +1,79 @@
+{
+  "appName": {
+    "message": "Translight"
+  },
+  "appDescription": {
+    "message": "Preserve English text and show Korean translations directly below it."
+  },
+  "actionStartTitle": {
+    "message": "Translight: Start translation"
+  },
+  "actionCancelTitle": {
+    "message": "Translight: Cancel translation"
+  },
+  "actionActiveTitle": {
+    "message": "Translight: Remove translation"
+  },
+  "actionErrorTitle": {
+    "message": "Translight error: $error$",
+    "placeholders": {
+      "error": {
+        "content": "$1"
+      }
+    }
+  },
+  "badgeBusy": {
+    "message": "…"
+  },
+  "badgeActive": {
+    "message": "ON"
+  },
+  "badgeError": {
+    "message": "!"
+  },
+  "errorContentScriptUnavailable": {
+    "message": "The current tab cannot run Translight."
+  },
+  "errorTranslatorUnavailable": {
+    "message": "Chrome Translator is unavailable in this environment."
+  },
+  "errorAvailabilityFailed": {
+    "message": "Chrome Translator model availability could not be checked."
+  },
+  "errorModelDownloadFailed": {
+    "message": "The Chrome Translator model download failed."
+  },
+  "errorTranslatorNotReady": {
+    "message": "The translation model is not ready."
+  },
+  "errorTranslateFailed": {
+    "message": "The text could not be translated."
+  },
+  "errorTranslationFailed": {
+    "message": "The page could not be translated."
+  },
+  "optionsPageTitle": {
+    "message": "Translight Settings"
+  },
+  "optionsBrandLabel": {
+    "message": "TRANSLIGHT"
+  },
+  "optionsHeading": {
+    "message": "Settings"
+  },
+  "optionsCurrentServiceLabel": {
+    "message": "Current translation service"
+  },
+  "optionsTranslatorName": {
+    "message": "Chrome built-in Translator"
+  },
+  "optionsIntro": {
+    "message": "Translight preserves the original text and adds Korean translations below English paragraphs. Use the T icon in the toolbar to start or stop translation on the current page."
+  },
+  "optionsNoticeTitle": {
+    "message": "Settings page based on TASK 1–5"
+  },
+  "optionsNotice": {
+    "message": "Appearance, automatic translation, and settings data will be connected in a later task. If translation is unsupported, use this page to check Chrome built-in Translator support."
+  }
+}

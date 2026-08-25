@@ -7,6 +7,7 @@ import {
   TAB_STATUS,
   updateTabState
 } from './tab-state.js';
+import { t } from '../i18n/index.js';
 
 const STORAGE_KEY = 'translight.tabStates';
 const badgeColors = {
@@ -14,6 +15,16 @@ const badgeColors = {
   active: '#18a96b',
   error: '#d94a4a'
 };
+
+const ERROR_MESSAGE_KEYS = Object.freeze({
+  AVAILABILITY_FAILED: 'errorAvailabilityFailed',
+  CONTENT_SCRIPT_UNAVAILABLE: 'errorContentScriptUnavailable',
+  DOWNLOAD_FAILED: 'errorModelDownloadFailed',
+  NOT_READY: 'errorTranslatorNotReady',
+  TRANSLATE_FAILED: 'errorTranslateFailed',
+  TRANSLATION_FAILED: 'errorTranslationFailed',
+  UNAVAILABLE: 'errorTranslatorUnavailable'
+});
 
 let tabStates = {};
 let generationSequence = Date.now();
@@ -49,22 +60,26 @@ function getState(tabId) {
   return tabStates[String(tabId)] ?? createTabState();
 }
 
+function getLocalizedError(state) {
+  return t(ERROR_MESSAGE_KEYS[state.errorCode] ?? 'errorTranslationFailed');
+}
+
 async function refreshAction(tabId, state) {
   if (!globalThis.chrome?.action) return;
   let badgeText = '';
-  let title = 'Translight: 번역 시작';
+  let title = t('actionStartTitle');
   let color = badgeColors.busy;
 
   if (BUSY_STATUSES.has(state.status)) {
-    badgeText = '…';
-    title = 'Translight: 번역 취소';
+    badgeText = t('badgeBusy');
+    title = t('actionCancelTitle');
   } else if (state.status === TAB_STATUS.ACTIVE) {
-    badgeText = 'ON';
-    title = 'Translight: 번역 해제';
+    badgeText = t('badgeActive');
+    title = t('actionActiveTitle');
     color = badgeColors.active;
   } else if (state.status === TAB_STATUS.ERROR) {
-    badgeText = '!';
-    title = `Translight 오류: ${state.errorMessage ?? '번역 실패'}`;
+    badgeText = t('badgeError');
+    title = t('actionErrorTitle', getLocalizedError(state));
     color = badgeColors.error;
   }
 
@@ -90,7 +105,7 @@ async function sendContentMessage(tabId, message) {
       await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
       return await chrome.tabs.sendMessage(tabId, message);
     } catch (secondError) {
-      const error = new Error('현재 탭에서 Translight를 실행할 수 없습니다.', { cause: secondError ?? firstError });
+      const error = new Error('The current tab cannot run Translight.', { cause: secondError ?? firstError });
       error.code = 'CONTENT_SCRIPT_UNAVAILABLE';
       throw error;
     }
@@ -143,8 +158,7 @@ async function stopTranslation(tabId, state) {
       generation: state.generation
     });
   } catch {
-    // 페이지가 이미 닫혔거나 content script를 실행할 수 없는 경우에도
-    // background 상태는 OFF로 남겨 다음 클릭에서 새 세션을 시작한다.
+    // Keep the background state OFF when the page is gone or the content script cannot run.
   }
 }
 
