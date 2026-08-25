@@ -9,7 +9,7 @@ import {
 } from './tab-state.js';
 import { t } from '../i18n/index.js';
 import { loadSettings, hostnameForUrl, originForUrl } from '../settings.js';
-import { classifyNavigation } from './navigation.js';
+import { classifyNavigation, createLoadingStatePatch } from './navigation.js';
 
 const STORAGE_KEY = 'translight.tabStates';
 const DEFAULT_ICON_PATHS = Object.freeze({
@@ -378,18 +378,7 @@ async function handleTabUpdated(tabId, changeInfo) {
   const state = getState(tabId);
   if (state.status === TAB_STATUS.OFF && state.documentToken == null) return;
 
-  await setState(tabId, {
-    status: TAB_STATUS.OFF,
-    generation: nextGeneration(),
-    documentToken: null,
-    activation: null,
-    origin: null,
-    hostname: null,
-    modelState: null,
-    progress: null,
-    errorCode: null,
-    errorMessage: null
-  });
+  await setState(tabId, createLoadingStatePatch(state, nextGeneration()));
   await sendStopMessage(tabId, state.generation);
 }
 

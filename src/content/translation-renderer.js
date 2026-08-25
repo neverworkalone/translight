@@ -177,10 +177,12 @@ function sourceTextFromNodes(nodes) {
   return Array.from(nodes ?? [], (node) => node.nodeValue ?? '').join('');
 }
 
-function setSourceTextNodes(nodes, value) {
+function setSourceTextNodes(nodes, values) {
   if (!nodes.length) return;
-  nodes[0].nodeValue = String(value ?? '');
-  for (const node of nodes.slice(1)) node.nodeValue = '';
+  const nextValues = Array.isArray(values) ? values : [values];
+  nodes.forEach((node, index) => {
+    node.nodeValue = String(nextValues[index] ?? '');
+  });
 }
 
 function snapshotTextNodes(nodes) {
@@ -206,11 +208,10 @@ function normalizePresentation(settings = {}) {
 
 function styleText(sessionId, presentation) {
   const selector = `${TRANSLATION_TAG}[${SESSION_ATTRIBUTE}="${escapeAttribute(sessionId)}"]`;
-  const replacementSelector = `[${REPLACED_ATTRIBUTE}="${GENERATED_VALUE}"][${STYLED_REPLACEMENT_ATTRIBUTE}="${GENERATED_VALUE}"][${SESSION_ATTRIBUTE}="${escapeAttribute(sessionId)}"]`;
+  const replacementTextSelector = `[${REPLACEMENT_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"][${SESSION_ATTRIBUTE}="${escapeAttribute(sessionId)}"]`;
   const styledSelector = `${selector}:not([${ROLE_ATTRIBUTE}="${ROLE_ORIGINAL}"])`;
   const styleSelector = (style) =>
-    `${styledSelector}[${STYLE_ATTRIBUTE}="${style}"], ${replacementSelector}[${STYLE_ATTRIBUTE}="${style}"]`;
-  const replacementTextSelector = `[${REPLACEMENT_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"][${SESSION_ATTRIBUTE}="${escapeAttribute(sessionId)}"]`;
+    `${styledSelector}[${STYLE_ATTRIBUTE}="${style}"], ${replacementTextSelector}[${STYLE_ATTRIBUTE}="${style}"]`;
   const tableCellSelector = `td > ${selector}, th > ${selector}`;
   const translationTextSelector = `${styledSelector} > [${TRANSLATION_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"]`;
   const textStyleSelector = (style) =>
@@ -255,7 +256,7 @@ function styleText(sessionId, presentation) {
       visibility: visible !important;
     }
 
-    ${replacementSelector} {
+    ${replacementTextSelector} {
       --translight-style-color: ${presentation.styleColor};
       --translight-text-color: ${presentation.textColor};
       --translight-font-weight: ${weight};
@@ -265,9 +266,12 @@ function styleText(sessionId, presentation) {
       outline: 0 !important;
       background: transparent !important;
       color: var(--translight-text-color) !important;
+      font-family: inherit !important;
+      font-size: inherit !important;
       font-weight: var(--translight-font-weight) !important;
       font-style: var(--translight-font-style) !important;
       font-synthesis: style !important;
+      line-height: inherit !important;
     }
     ${translationTextSelector},
     ${replacementTextSelector} {
@@ -419,72 +423,68 @@ export class TranslationRenderer {
     if (!record.replaced) return;
     this.unwrapReplacementText(record);
     const nodes = collectSourceTextNodes(record.element, record.mixedContent);
-    const expectedText = normalizeSourceText(record.presentedText ?? record.translatedText);
-    if (normalizeSourceText(sourceTextFromNodes(nodes)) !== expectedText) {
-      record.sourceTextNodes = nodes;
-      record.originalTextNodeValues = snapshotTextNodes(nodes);
-      record.originalText = normalizeSourceText(sourceTextFromNodes(nodes));
-      record.replaced = false;
-      record.presentedText = null;
-      return;
-    }
-
-    const originalNodes = record.sourceTextNodes ?? [];
-    const canRestoreExact = nodes.length === originalNodes.length &&
-      nodes.every((node, index) => node === originalNodes[index]);
-    if (canRestoreExact) {
-      nodes.forEach((node, index) => {
-        node.nodeValue = record.originalTextNodeValues?.[index] ?? '';
-      });
-    } else {
-      setSourceTextNodes(nodes, record.originalText);
-    }
+    const presentedValues = record.presentedTextNodeValues ?? [record.presentedText ?? record.translatedText];
+    const originalValues = record.originalTextNodeValues ?? [];
+    const siteChanged = nodes.length !== presentedValues.length ||
+      nodes.some((node, index) => (node.nodeValue ?? '') !== (presentedValues[index] ?? ''));
+    const restoredValues = nodes.map((node, index) => {
+      if (!siteChanged || (node.nodeValue ?? '') === (presentedValues[index] ?? '')) {
+        return originalValues[index] ?? '';
+      }
+      return node.nodeValue ?? '';
+    });
+    setSourceTextNodes(nodes, restoredValues);
     record.sourceTextNodes = nodes;
+    record.originalTextNodeValues = snapshotTextNodes(nodes);
+    record.originalText = normalizeSourceText(sourceTextFromNodes(nodes));
     record.replaced = false;
     record.presentedText = null;
+    record.presentedTextNodeValues = null;
   }
 
   replaceSourceText(record, {styled = false} = {}) {
-    if (!styled) this.unwrapReplacementText(record);
+    if (record.replaced) this.restoreSourceText(record);
+    this.unwrapReplacementText(record);
     const nodes = this.currentSourceTextNodes(record);
-    setSourceTextNodes(nodes, record.translatedText);
-    if (styled) this.wrapReplacementText(record, nodes[0]);
+    const originalValues = snapshotTextNodes(nodes);
+    const replacementIndex = Math.max(0, nodes.findIndex((node) => (node.nodeValue ?? '').trim().length > 0));
+    const presentedValues = originalValues.slice();
+    if (nodes.length) presentedValues[replacementIndex] = String(record.translatedText ?? '');
+    setSourceTextNodes(nodes, presentedValues);
+    if (styled) this.wrapReplacementText(record, nodes[replacementIndex]);
     record.replaced = true;
-    record.presentedText = String(record.translatedText ?? '');
+    record.replacementNodeIndex = replacementIndex;
+    record.presentedTextNodeValues = snapshotTextNodes(nodes);
+    record.presentedText = record.presentedTextNodeValues.join('');
   }
 
   refreshOriginalSnapshot(record, sourceText) {
-    if (record.replaced) {
-      this.unwrapReplacementText(record);
-      const nodes = this.currentSourceTextNodes(record);
-      if (sourceText == null) this.restoreSourceText(record);
-      else {
-        setSourceTextNodes(nodes, sourceText);
-        record.sourceTextNodes = nodes;
-        record.replaced = false;
-        record.presentedText = null;
-      }
-    }
+    const wasReplaced = record.replaced;
+    if (wasReplaced) this.restoreSourceText(record);
 
     const nodes = this.currentSourceTextNodes(record);
     const currentText = sourceTextFromNodes(nodes);
     record.sourceTextNodes = nodes;
     record.originalTextNodeValues = snapshotTextNodes(nodes);
-    record.originalText = normalizeSourceText(sourceText ?? currentText);
+    record.originalText = normalizeSourceText(wasReplaced ? currentText : (sourceText ?? currentText));
   }
 
   applyReplacementAttributes(record, {styled = false} = {}) {
     const {element} = record;
     element.setAttribute(REPLACED_ATTRIBUTE, GENERATED_VALUE);
-    element.setAttribute(PRESENTATION_HASH_ATTRIBUTE, hashSourceText(normalizeSourceText(record.translatedText)));
+    element.setAttribute(
+      PRESENTATION_HASH_ATTRIBUTE,
+      hashSourceText(normalizeSourceText(record.presentedText ?? record.translatedText))
+    );
     const replacementWrapper = record.replacementWrapper;
     if (styled) {
       element.setAttribute(STYLED_REPLACEMENT_ATTRIBUTE, GENERATED_VALUE);
-      element.setAttribute(STYLE_ATTRIBUTE, this.presentation.displayStyle);
+      restoreAttribute(element, STYLE_ATTRIBUTE, record.originalAttributes?.[STYLE_ATTRIBUTE]);
       replacementWrapper?.setAttribute(STYLE_ATTRIBUTE, this.presentation.displayStyle);
     } else {
       restoreAttribute(element, STYLED_REPLACEMENT_ATTRIBUTE, record.originalAttributes?.[STYLED_REPLACEMENT_ATTRIBUTE]);
       restoreAttribute(element, STYLE_ATTRIBUTE, record.originalAttributes?.[STYLE_ATTRIBUTE]);
+      replacementWrapper?.removeAttribute(STYLE_ATTRIBUTE);
     }
     element.removeAttribute(HIDDEN_ATTRIBUTE);
     element.removeAttribute(HIDDEN_PLACEMENT_ATTRIBUTE);
@@ -559,8 +559,12 @@ export class TranslationRenderer {
       }
       existing.translatedText = String(translatedText ?? '');
       setTranslationText(existing.translation, translatedText);
-      existing.sourceHash = sourceHash ?? existing.sourceHash;
-      if (sourceHash) element.setAttribute(SOURCE_HASH_ATTRIBUTE, sourceHash);
+      if (sourceChanged || structureChanged) {
+        existing.sourceHash = hashSourceText(existing.originalText);
+      } else {
+        existing.sourceHash = sourceHash ?? existing.sourceHash;
+      }
+      if (existing.sourceHash) element.setAttribute(SOURCE_HASH_ATTRIBUTE, existing.sourceHash);
       element.removeAttribute(PENDING_SOURCE_HASH_ATTRIBUTE);
       this.applyRecordPresentation(existing);
       return existing.translation;
@@ -593,7 +597,9 @@ export class TranslationRenderer {
       originalText: normalizeSourceText(sourceText),
       translatedText: String(translatedText ?? ''),
       replaced: false,
-      presentedText: null
+      presentedText: null,
+      presentedTextNodeValues: null,
+      replacementNodeIndex: null
     };
     record.placement = insertAtSafeLocation(element, translation, mixedContent);
 

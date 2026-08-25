@@ -251,7 +251,9 @@ describe('PageSession', () => {
     session.applySettings({translationMode: 'translation-original'});
     expect(document.querySelector('p').textContent).toBe('ko:Mode paragraph.');
     expect(document.querySelector('p').nextElementSibling?.textContent).toBe('Mode paragraph.');
-    expect(document.querySelector('p').getAttribute('data-translight-style')).toBe('solid-border');
+    expect(document.querySelector('p').hasAttribute('data-translight-style')).toBe(false);
+    expect(document.querySelector('p [data-translight-replacement-text="true"]')
+      ?.getAttribute('data-translight-style')).toBe('solid-border');
     await wait();
     expect(calls).toBe(before);
     session.stop();

@@ -13,7 +13,9 @@ import {
   TRANSLATED_ATTRIBUTE,
   TranslationRenderer
 } from '../src/content/translation-renderer.js';
+import {collectTranslationBlocks} from '../src/content/block-collector.js';
 import {TRANSLATION_MODES, TRANSLATION_STYLES} from '../src/settings.js';
+import {hashSourceText} from '../src/content/translation-queue.js';
 
 describe('TranslationRenderer', () => {
   beforeEach(() => {
@@ -136,7 +138,7 @@ describe('TranslationRenderer', () => {
 
     renderer.updatePresentation({displayStyle: TRANSLATION_STYLES.DOTTED_BORDER, bold: true, italic: true});
     expect(source.getAttribute(STYLED_REPLACEMENT_ATTRIBUTE)).toBe('true');
-    expect(source.getAttribute('data-translight-style')).toBe(TRANSLATION_STYLES.DOTTED_BORDER);
+    expect(source.hasAttribute('data-translight-style')).toBe(false);
     expect(source.querySelector(`[${REPLACEMENT_TEXT_ATTRIBUTE}="true"]`).getAttribute('data-translight-style'))
       .toBe(TRANSLATION_STYLES.DOTTED_BORDER);
     expect(document.body.lastElementChild.hasAttribute('data-translight-style')).toBe(false);
@@ -190,10 +192,44 @@ describe('TranslationRenderer', () => {
     const replacementText = source.querySelector(`[${REPLACEMENT_TEXT_ATTRIBUTE}="true"]`);
     expect(replacementText?.textContent).toBe('번역문');
     expect(replacementText?.getAttribute('data-translight-style')).toBe(TRANSLATION_STYLES.HIGHLIGHT);
-    expect(source.getAttribute('data-translight-style')).toBe(TRANSLATION_STYLES.HIGHLIGHT);
+    expect(source.hasAttribute('data-translight-style')).toBe(false);
 
     renderer.removeAll();
     expect(document.body.innerHTML).toBe('<p id="source">Original text</p>');
+  });
+
+  it('preserves inline text nodes and re-translates changed inline content', () => {
+    document.body.innerHTML = '<p id="source">Visit <a href="https://openai.com">OpenAI</a> docs</p>';
+    const source = document.querySelector('#source');
+    const renderer = new TranslationRenderer({
+      document,
+      sessionId: 'inline-session',
+      settings: {translationMode: TRANSLATION_MODES.TRANSLATION_ORIGINAL}
+    });
+
+    renderer.insert({
+      element: source,
+      sourceId: 'inline-source',
+      sourceHash: hashSourceText('Visit OpenAI docs'),
+      translatedText: '오픈AI 방문'
+    });
+
+    expect(source.querySelector('a')?.textContent).toBe('OpenAI');
+    expect(source.textContent).toBe('오픈AI 방문OpenAI docs');
+    expect(source.querySelector(`[${REPLACEMENT_TEXT_ATTRIBUTE}="true"]`)).not.toBeNull();
+
+    source.querySelector('a').firstChild.data = 'OpenAI team';
+    const changedBlock = collectTranslationBlocks(document.body).find((block) => block.element === source);
+    expect(changedBlock?.text).toBe('오픈AI 방문OpenAI team docs');
+
+    renderer.insert({...changedBlock, translatedText: '오픈AI 팀 방문'});
+    expect(source.querySelector('a')?.textContent).toBe('OpenAI team');
+    expect(source.querySelector(`[${REPLACEMENT_TEXT_ATTRIBUTE}="true"]`)?.textContent).toBe('오픈AI 팀 방문');
+
+    renderer.removeAll();
+    expect(document.body.innerHTML).toBe(
+      '<p id="source">Visit <a href="https://openai.com">OpenAI team</a> docs</p>'
+    );
   });
 
   it('keeps mixed parent and nested block translations visible in translation-only mode', () => {
@@ -250,6 +286,34 @@ describe('TranslationRenderer', () => {
     expect(cell.closest('tr')?.querySelectorAll(':scope > td')).toHaveLength(1);
     expect(translation?.textContent).toBe('Translated cell');
     expect(renderer.style.textContent).toContain('td > translight-translation');
+
+    renderer.removeAll();
+    expect(document.body.innerHTML).toBe('<table><tbody><tr><td id="cell">Original cell</td></tr></tbody></table>');
+  });
+
+  it.each(Object.values(TRANSLATION_STYLES))('styles only the replacement text in table cells for %s', (displayStyle) => {
+    document.body.innerHTML = '<table><tbody><tr><td id="cell">Original cell</td></tr></tbody></table>';
+    const cell = document.querySelector('#cell');
+    const renderer = new TranslationRenderer({
+      document,
+      sessionId: `table-replacement-${displayStyle}`,
+      settings: {
+        translationMode: TRANSLATION_MODES.TRANSLATION_ORIGINAL,
+        displayStyle
+      }
+    });
+
+    renderer.insert({
+      element: cell,
+      sourceId: `table-replacement-${displayStyle}`,
+      sourceHash: `table-replacement-hash-${displayStyle}`,
+      translatedText: 'Translated cell'
+    });
+
+    const replacement = cell.querySelector(`[${REPLACEMENT_TEXT_ATTRIBUTE}="true"]`);
+    expect(replacement?.getAttribute('data-translight-style')).toBe(displayStyle);
+    expect(cell.hasAttribute('data-translight-style')).toBe(false);
+    expect(cell.getAttribute(STYLED_REPLACEMENT_ATTRIBUTE)).toBe('true');
 
     renderer.removeAll();
     expect(document.body.innerHTML).toBe('<table><tbody><tr><td id="cell">Original cell</td></tr></tbody></table>');
