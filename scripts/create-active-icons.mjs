@@ -3,7 +3,10 @@ import { deflateSync, inflateSync } from 'node:zlib';
 
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const ICON_SIZES = [16, 32, 48, 128];
-const ACTIVE_COLOR = [24, 169, 107];
+const STATUS_COLORS = {
+  active: [24, 169, 107],
+  error: [217, 74, 74]
+};
 
 function readChunks(buffer) {
   const chunks = [];
@@ -130,7 +133,7 @@ function encodePng({ width, height, pixels }) {
   ]);
 }
 
-function blendPixel(pixels, width, x, y, coverage) {
+function blendPixel(pixels, width, x, y, coverage, color) {
   if (x < 0 || y < 0 || x >= width) return;
   const offset = (y * width + x) * 4;
   const alpha = Math.round(coverage * 255);
@@ -139,12 +142,12 @@ function blendPixel(pixels, width, x, y, coverage) {
   const sourceAlpha = pixels[offset + 3];
   const outputAlpha = Math.max(sourceAlpha, alpha);
   for (let channel = 0; channel < 3; channel += 1) {
-    pixels[offset + channel] = ACTIVE_COLOR[channel];
+    pixels[offset + channel] = color[channel];
   }
   pixels[offset + 3] = outputAlpha;
 }
 
-function addStatusLight(image) {
+function addStatusLight(image, color) {
   const radius = Math.max(2, image.width * 0.18);
   const margin = Math.max(0.5, image.width * 0.02);
   const center = image.width - radius - margin;
@@ -162,13 +165,16 @@ function addStatusLight(image) {
           if ((pointX - center) ** 2 + (pointY - center) ** 2 <= radius ** 2) samples += 1;
         }
       }
-      blendPixel(image.pixels, image.width, x, y, samples / (samplesPerAxis ** 2));
+      blendPixel(image.pixels, image.width, x, y, samples / (samplesPerAxis ** 2), color);
     }
   }
 }
 
 for (const size of ICON_SIZES) {
-  const image = decodePng(`public/icon${size}.png`);
-  addStatusLight(image);
-  writeFileSync(`public/icon-active${size}.png`, encodePng(image));
+  const sourceImage = decodePng(`public/icon${size}.png`);
+  for (const [status, color] of Object.entries(STATUS_COLORS)) {
+    const image = { ...sourceImage, pixels: Buffer.from(sourceImage.pixels) };
+    addStatusLight(image, color);
+    writeFileSync(`public/icon-${status}${size}.png`, encodePng(image));
+  }
 }

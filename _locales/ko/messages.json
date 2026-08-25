@@ -22,12 +22,6 @@
       }
     }
   },
-  "badgeBusy": {
-    "message": "…"
-  },
-  "badgeError": {
-    "message": "!"
-  },
   "errorContentScriptUnavailable": {
     "message": "현재 탭에서는 Translight를 실행할 수 없습니다."
   },

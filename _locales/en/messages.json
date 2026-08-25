@@ -22,12 +22,6 @@
       }
     }
   },
-  "badgeBusy": {
-    "message": "…"
-  },
-  "badgeError": {
-    "message": "!"
-  },
   "errorContentScriptUnavailable": {
     "message": "The current tab cannot run Translight."
   },
