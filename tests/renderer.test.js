@@ -5,6 +5,7 @@ import {
   GENERATED_ATTRIBUTE,
   PRESENTATION_HASH_ATTRIBUTE,
   REPLACED_ATTRIBUTE,
+  REPLACEMENT_TEXT_ATTRIBUTE,
   SESSION_ATTRIBUTE,
   SOURCE_ATTRIBUTE,
   SOURCE_HASH_ATTRIBUTE,
@@ -131,11 +132,14 @@ describe('TranslationRenderer', () => {
     expect(document.body.firstElementChild).toBe(source);
     expect(document.body.lastElementChild?.tagName.toLowerCase()).toBe('translight-translation');
     expect(document.body.lastElementChild?.textContent).toBe('Original text');
+    expect(document.body.lastElementChild?.hasAttribute('data-translight-style')).toBe(false);
 
     renderer.updatePresentation({displayStyle: TRANSLATION_STYLES.DOTTED_BORDER, bold: true, italic: true});
     expect(source.getAttribute(STYLED_REPLACEMENT_ATTRIBUTE)).toBe('true');
     expect(source.getAttribute('data-translight-style')).toBe(TRANSLATION_STYLES.DOTTED_BORDER);
-    expect(document.body.lastElementChild.getAttribute('data-translight-style')).toBe(TRANSLATION_STYLES.DOTTED_BORDER);
+    expect(source.querySelector(`[${REPLACEMENT_TEXT_ATTRIBUTE}="true"]`).getAttribute('data-translight-style'))
+      .toBe(TRANSLATION_STYLES.DOTTED_BORDER);
+    expect(document.body.lastElementChild.hasAttribute('data-translight-style')).toBe(false);
     expect(renderer.style.textContent).toContain('font-weight: 700');
     expect(renderer.style.textContent).toContain('font-style: italic');
     expect(renderer.style.textContent).toContain(
@@ -167,6 +171,28 @@ describe('TranslationRenderer', () => {
       'linear-gradient(to bottom, transparent 50%, var(--translight-style-color) 50%)'
     );
     renderer.removeAll();
+  });
+
+  it('keeps replacement-mode highlights on translated text instead of the whole source block', () => {
+    const source = document.querySelector('#source');
+    const renderer = new TranslationRenderer({
+      document,
+      sessionId: 'replacement-highlight-session',
+      settings: {
+        translationMode: TRANSLATION_MODES.TRANSLATION_ORIGINAL,
+        displayStyle: TRANSLATION_STYLES.HIGHLIGHT
+      }
+    });
+
+    renderer.insert({element: source, sourceId: 'replacement-highlight-source', translatedText: '번역문'});
+
+    const replacementText = source.querySelector(`[${REPLACEMENT_TEXT_ATTRIBUTE}="true"]`);
+    expect(replacementText?.textContent).toBe('번역문');
+    expect(replacementText?.getAttribute('data-translight-style')).toBe(TRANSLATION_STYLES.HIGHLIGHT);
+    expect(source.getAttribute('data-translight-style')).toBe(TRANSLATION_STYLES.HIGHLIGHT);
+
+    renderer.removeAll();
+    expect(document.body.innerHTML).toBe('<p id="source">Original text</p>');
   });
 
   it('keeps mixed parent and nested block translations visible in translation-only mode', () => {
