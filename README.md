@@ -8,6 +8,7 @@ A Chrome extension for translating English webpages into Korean with Chrome's bu
 - Start, cancel, and stop translation from the toolbar
 - Choose original + translation, translation + original, or translation-only display
 - Translate page titles, paragraphs, lists, quotes, captions, and table cells
+- Detect English content blocks even when a site's UI language is Korean
 - Prioritize visible content on long pages and handle dynamically changing pages
 - Continue manual translation across same-origin navigation
 - Automatically translate registered hostnames
