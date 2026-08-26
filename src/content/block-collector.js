@@ -33,7 +33,7 @@ function isGenerated(element) {
   return isElement(element) && (element.matches(GENERATED_SELECTOR) || Boolean(element.closest(GENERATED_SELECTOR)));
 }
 
-function isExcluded(element) {
+export function isExcluded(element) {
   if (!isElement(element)) return true;
   if (element.matches(EXCLUDED_ANCESTOR_SELECTOR) || element.closest(EXCLUDED_ANCESTOR_SELECTOR)) return true;
   if (element.isContentEditable || element.closest('[contenteditable="true"],[contenteditable=""]')) return true;
@@ -245,7 +245,7 @@ function hasBlockDescendant(element, candidateSet) {
 
 export function collectTranslationBlocks(
   root = globalThis.document?.body,
-  {targetLanguage = 'ko', onExcluded, splitSegments = true} = {}
+  {targetLanguage = 'ko', onExcluded, splitSegments = true, isActiveSource} = {}
 ) {
   if (!root || typeof root.querySelectorAll !== 'function') return [];
 
@@ -256,8 +256,10 @@ export function collectTranslationBlocks(
   const processCandidate = (element, {allowSegmentation = splitSegments} = {}) => {
     if (!isElement(element)) return;
     if (isGenerated(element) || isExcluded(element)) return;
-    const existingSourceId = element.getAttribute(SOURCE_ID_ATTRIBUTE);
-    const isExistingSource = Boolean(existingSourceId);
+    const markedSourceId = element.getAttribute(SOURCE_ID_ATTRIBUTE);
+    const isExistingSource = Boolean(markedSourceId) &&
+      (typeof isActiveSource !== 'function' || isActiveSource(element));
+    const existingSourceId = isExistingSource ? markedSourceId : null;
     const excludeExisting = () => {
       if (isExistingSource) onExcluded?.(element);
     };

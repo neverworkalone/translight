@@ -8,8 +8,10 @@ import {
   SEGMENT_ATTRIBUTE,
   SEGMENT_ID_ATTRIBUTE,
   SEGMENT_SELECTOR,
+  isExcluded,
   isHidden
 } from './block-collector.js';
+import {isTranslatableBlock} from './language.js';
 import {hashSourceText} from './translation-queue.js';
 
 export const TRANSLATION_TAG = 'translight-translation';
@@ -38,6 +40,7 @@ const EXCLUDED_CONTENT_SELECTOR = 'script,style,noscript,code,pre,input,textarea
 const GENERATED_SELECTOR = 'translight-translation,[data-translight-generated="true"]';
 const LAYOUT_DISPLAYS = new Set(['flex', 'inline-flex', 'grid', 'inline-grid']);
 const TABLE_CELL_TAGS = new Set(['td', 'th']);
+const MAX_RECOVERY_ATTEMPTS = 1;
 const ATTRIBUTE_NAMES = [
   SOURCE_ATTRIBUTE,
   SOURCE_HASH_ATTRIBUTE,
@@ -109,6 +112,10 @@ function insertAtSafeLocation(element, translation, mixedContent = false) {
 
   element.appendChild(translation);
   return 'inside';
+}
+
+function hasNestedBlocks(element) {
+  return Boolean(element?.querySelector?.(`${BLOCK_SELECTOR},${SEGMENT_SELECTOR}`));
 }
 
 function restorePlacement(record) {
@@ -676,7 +683,7 @@ export class TranslationRenderer {
       // that mode. Every other presentation needs its generated node to stay
       // connected; hosts such as SPA renderers may remove it while reusing
       // the source element for a new route.
-      const hasLivePresentation = record.replaced || record.translation?.isConnected;
+      const hasLivePresentation = record.replaced || this.getConnectedTranslation(record);
       if (record.element?.isConnected !== false && !hasLivePresentation) {
         missing.push(record.element);
       }
@@ -694,6 +701,7 @@ export class TranslationRenderer {
     record.sourceTextNodes = nodes;
     record.originalTextNodeValues = snapshotTextNodes(nodes);
     record.originalText = normalizeSourceText(wasReplaced ? currentText : (sourceText ?? currentText));
+    record.recoveryAttempts = 0;
   }
 
   applyReplacementAttributes(record, {styled = false} = {}) {
@@ -771,61 +779,87 @@ export class TranslationRenderer {
     this.applyReplacementAttributes(record, {styled: styledReplacement});
   }
 
-  restoreMissingTranslations() {
-    const restored = [];
-    for (const record of this.records.values()) {
-      // A host renderer can temporarily detach a generated child while it
-      // updates the source element. Keep the existing record and put the
-      // translation back when the source itself is still alive. This avoids a
-      // visible blank interval and preserves the cached queue entry.
-      if (record.replaced || record.translation?.isConnected) continue;
-      if (record.element?.isConnected === false) {
-        const replacement = this.document.querySelectorAll(`[${SOURCE_ATTRIBUTE}]`);
-        const nextElement = Array.from(replacement).find((candidate) => {
-          if (candidate === record.element || candidate.matches?.(GENERATED_SELECTOR)) return false;
-          if (!candidate.isConnected || candidate.getAttribute(SESSION_ATTRIBUTE) !== this.sessionId) return false;
-          if (candidate.getAttribute(SOURCE_ATTRIBUTE) !== record.sourceId) return false;
-          return !record.sourceHash || this.isSourceHashCurrent({
-            element: candidate,
-            sourceHash: record.sourceHash,
-            mixedContent: record.mixedContent
-          });
-        });
-        if (!nextElement) continue;
-        this.recordsByElement.delete(record.element);
-        record.element = nextElement;
-        this.recordsByElement.set(nextElement, record);
-        const clonedTranslation = Array.from(nextElement.querySelectorAll?.(TRANSLATION_TAG) ?? [])
-          .find((candidate) => candidate.getAttribute(SOURCE_ATTRIBUTE) === record.sourceId &&
-            candidate.getAttribute(SESSION_ATTRIBUTE) === this.sessionId);
-        if (clonedTranslation) record.translation = clonedTranslation;
-        record.sourceTextNodes = collectSourceTextNodes(nextElement, record.mixedContent);
-        nextElement.setAttribute(SOURCE_ATTRIBUTE, record.sourceId);
-        nextElement.setAttribute(TRANSLATED_ATTRIBUTE, GENERATED_VALUE);
-        nextElement.setAttribute(SESSION_ATTRIBUTE, this.sessionId);
-        if (record.sourceHash) nextElement.setAttribute(SOURCE_HASH_ATTRIBUTE, record.sourceHash);
-        nextElement.removeAttribute(PENDING_SOURCE_HASH_ATTRIBUTE);
-      }
-      if (record.element?.isConnected === false) continue;
-      restorePlacement(record);
-      if (record.translation?.isConnected) restored.push(record.element);
+  hasRecord(element) {
+    return Boolean(element && this.recordsByElement.has(element));
+  }
+
+  resetRecoveryAttempts() {
+    for (const record of this.records.values()) record.recoveryAttempts = 0;
+  }
+
+  getConnectedTranslation(record) {
+    if (record?.translation?.isConnected) return record.translation;
+    const isMatchingTranslation = (candidate) => candidate?.isConnected &&
+      candidate.matches?.(TRANSLATION_TAG) &&
+      candidate.getAttribute?.(SOURCE_ATTRIBUTE) === record?.sourceId &&
+      candidate.getAttribute?.(SESSION_ATTRIBUTE) === this.sessionId;
+    const descendant = Array.from(record?.element?.querySelectorAll?.(TRANSLATION_TAG) ?? [])
+      .find(isMatchingTranslation);
+    if (descendant) return descendant;
+    return Array.from(record?.element?.parentElement?.children ?? []).find(isMatchingTranslation) ?? null;
+  }
+
+  getRecoveryState(record, targetLanguage = 'ko') {
+    if (!record || record.replaced) return 'not-recoverable';
+    if (!record.element?.isConnected) return 'disconnected';
+    const connectedTranslation = this.getConnectedTranslation(record);
+    if (connectedTranslation) {
+      record.translation = connectedTranslation;
+      return 'connected';
     }
-    return restored;
+    if (isExcluded(record.element) || isHidden(record.element)) return 'invalid';
+
+    const sourceTextNodes = collectSourceTextNodes(record.element, record.mixedContent);
+    const sourceText = normalizeSourceText(sourceTextFromNodes(sourceTextNodes));
+    if (!sourceText || !isTranslatableBlock(record.element, sourceText, targetLanguage)) return 'invalid';
+    if (record.sourceHash) {
+      if (hashSourceText(sourceText) !== record.sourceHash) return 'changed';
+    } else if (normalizeSourceText(record.originalText) !== sourceText) {
+      return 'changed';
+    }
+    if (hasNestedBlocks(record.element) !== Boolean(record.mixedContent)) return 'changed';
+    if ((record.recoveryAttempts ?? 0) >= MAX_RECOVERY_ATTEMPTS) return 'exhausted';
+    return 'ready';
+  }
+
+  getMissingTranslations({targetLanguage = 'ko'} = {}) {
+    const missing = [];
+    for (const record of this.records.values()) {
+      const state = this.getRecoveryState(record, targetLanguage);
+      if (state === 'ready' || state === 'invalid' || state === 'changed') {
+        missing.push(record.element);
+      }
+    }
+    return missing;
+  }
+
+  restoreMissingTranslations({elements, targetLanguage = 'ko'} = {}) {
+    const restored = [];
+    const invalid = [];
+    const candidates = elements ?? this.getMissingTranslations({targetLanguage});
+    for (const element of candidates) {
+      const record = this.recordsByElement.get(element);
+      const state = this.getRecoveryState(record, targetLanguage);
+      if (state === 'connected') continue;
+      if (state === 'ready') {
+        record.recoveryAttempts = (record.recoveryAttempts ?? 0) + 1;
+        restorePlacement(record);
+        if (record.translation?.isConnected) restored.push(element);
+        continue;
+      }
+      if (state === 'invalid' || state === 'changed') invalid.push(element);
+    }
+    return {restored, invalid};
   }
 
   insert({element, sourceId, sourceHash, translatedText, text, mixedContent = false}) {
     if (!element?.parentNode || !sourceId) return null;
-    const existing = this.recordsByElement.get(element) ?? this.records.get(sourceId);
+    const existing = this.recordsByElement.get(element);
     const pendingHash = element.getAttribute(PENDING_SOURCE_HASH_ATTRIBUTE);
     if (pendingHash && sourceHash !== pendingHash) return null;
     const currentHash = element.getAttribute(SOURCE_HASH_ATTRIBUTE);
     if (existing && currentHash && sourceHash && currentHash !== sourceHash && !pendingHash) return null;
     if (existing) {
-      if (existing.element !== element) {
-        this.recordsByElement.delete(existing.element);
-        existing.element = element;
-        this.recordsByElement.set(element, existing);
-      }
       if (existing.sourceId !== sourceId) {
         this.records.delete(existing.sourceId);
         existing.sourceId = sourceId;
@@ -891,7 +925,8 @@ export class TranslationRenderer {
       replacementNodeIndex: null,
       replacementNodeIndices: [],
       fallbackMode: null,
-      replacementWrappers: []
+      replacementWrappers: [],
+      recoveryAttempts: 0
     };
     record.placement = insertAtSafeLocation(element, translation, mixedContent);
 

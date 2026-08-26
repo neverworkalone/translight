@@ -658,7 +658,9 @@ describe('PageSession', () => {
     const generated = source.nextElementSibling;
     expect(generated?.tagName.toLowerCase()).toBe('translight-translation');
     generated.remove();
-    await wait();
+    await wait(20);
+    expect(source.nextElementSibling).toBeNull();
+    await wait(500);
 
     expect(source.nextElementSibling?.textContent).toBe('ko:A reusable post body.');
     expect(calls).toEqual(['A reusable post body.']);
@@ -685,6 +687,8 @@ describe('PageSession', () => {
     const generated = source.querySelector('translight-translation');
     source.innerHTML = 'A reusable list item.';
     await wait(20);
+    expect(source.querySelector('translight-translation')).toBeNull();
+    await wait(500);
 
     expect(source.querySelector('translight-translation')).toBe(generated);
     expect(source.querySelector('translight-translation')?.textContent)
@@ -693,7 +697,7 @@ describe('PageSession', () => {
     session.stop();
   });
 
-  it('restores a translation when a host replaces a marked source element', async () => {
+  it('recollects a completely new source element and reuses the translation cache', async () => {
     document.body.innerHTML = '<ul><li id="source">A reusable list item.</li></ul>';
     const calls = [];
     const session = new PageSession({
@@ -711,16 +715,123 @@ describe('PageSession', () => {
     await session.start();
     const source = document.querySelector('#source');
     const generated = source.querySelector('translight-translation');
-    const replacement = source.cloneNode(false);
+    const replacement = document.createElement('li');
+    replacement.id = 'source';
     replacement.textContent = 'A reusable list item.';
     source.replaceWith(replacement);
-    await wait(20);
+    await wait(220);
 
-    expect(replacement.querySelector('translight-translation')).toBe(generated);
+    expect(replacement.querySelector('translight-translation')).not.toBe(generated);
     expect(replacement.querySelector('translight-translation')?.textContent)
       .toBe('ko:A reusable list item.');
     expect(calls).toEqual(['A reusable list item.']);
+    expect(document.querySelectorAll('translight-translation')).toHaveLength(1);
     session.stop();
+  });
+
+  it('stops recovering a translation after the host removes it twice', async () => {
+    document.body.innerHTML = '<p id="source">A stable post body.</p>';
+    const calls = [];
+    const session = new PageSession({
+      generation: 414,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    await session.start();
+    const source = document.querySelector('#source');
+    source.nextElementSibling.remove();
+    await wait(500);
+    expect(source.nextElementSibling?.tagName.toLowerCase()).toBe('translight-translation');
+
+    source.nextElementSibling.remove();
+    await wait(500);
+    expect(source.nextElementSibling).toBeNull();
+
+    const added = document.createElement('p');
+    added.textContent = 'A later post body.';
+    document.body.appendChild(added);
+    await wait(220);
+
+    expect(added.nextElementSibling?.textContent).toBe('ko:A later post body.');
+    expect(calls).toEqual(['A stable post body.', 'A later post body.']);
+    expect(session.running).toBe(true);
+    session.stop();
+  });
+
+  it('waits for the final DOM in a burst of SPA renders', async () => {
+    document.body.innerHTML = '<p id="source">Initial post body.</p>';
+    const calls = [];
+    const session = new PageSession({
+      generation: 415,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    await session.start();
+    const source = document.querySelector('#source');
+    for (const text of ['First interim body.', 'Second interim body.', 'Final post body.']) {
+      source.textContent = text;
+      await wait(20);
+    }
+    await wait(220);
+
+    expect(source.nextElementSibling?.textContent).toBe('ko:Final post body.');
+    expect(calls).toEqual(['Initial post body.', 'Final post body.']);
+    session.stop();
+  });
+
+  it('clears pending translation recovery when a session stops', async () => {
+    document.body.innerHTML = '<p id="source">A pending post body.</p>';
+    const session = new PageSession({
+      generation: 416,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider()
+    });
+
+    await session.start();
+    document.querySelector('#source').nextElementSibling.remove();
+    await wait(20);
+    expect(session.recoveryTimer).not.toBeNull();
+
+    session.stop({notify: false});
+    expect(session.recoveryTimer).toBeNull();
+    expect(session.pendingRecoveryElements.size).toBe(0);
+    await wait(500);
+    expect(document.querySelector('translight-translation')).toBeNull();
+  });
+
+  it('clears pending translation recovery when a route starts', async () => {
+    document.body.innerHTML = '<p id="source">A route-bound post body.</p>';
+    const session = new PageSession({
+      generation: 417,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider()
+    });
+
+    await session.start();
+    document.querySelector('#source').nextElementSibling.remove();
+    await wait(20);
+    expect(session.recoveryTimer).not.toBeNull();
+
+    expect(session.beginRouteChange({routeGeneration: 1})).toBe(true);
+    expect(session.recoveryTimer).toBeNull();
+    expect(session.pendingRecoveryElements.size).toBe(0);
+    session.applyRouteDecision({routeGeneration: 1, continueTranslation: false});
   });
 
   it('translates Korean-to-English changes and removes English-to-Korean translations', async () => {

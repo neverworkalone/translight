@@ -99,7 +99,7 @@ describe('TranslationRenderer', () => {
     expect(document.body.innerHTML).toBe('<ul><li id="source">List item</li></ul>');
   });
 
-  it('reattaches a translation when a host replaces a source with its marked clone', () => {
+  it('limits recovery to one attempt when a host repeatedly removes a translation', () => {
     document.body.innerHTML = '<ul><li id="source">List item</li></ul>';
     const source = document.querySelector('#source');
     const renderer = new TranslationRenderer({document, sessionId: 'rebind-session'});
@@ -110,12 +110,48 @@ describe('TranslationRenderer', () => {
       translatedText: '목록 항목'
     });
 
-    const replacement = source.cloneNode(false);
+    translation.remove();
+    expect(renderer.getMissingTranslations()).toEqual([source]);
+    expect(renderer.restoreMissingTranslations({elements: [source]})).toEqual({
+      restored: [source],
+      invalid: []
+    });
+    expect(source.querySelector('translight-translation')).toBe(translation);
+
+    translation.remove();
+    expect(renderer.getMissingTranslations()).toEqual([]);
+    expect(renderer.restoreMissingTranslations({elements: [source]})).toEqual({
+      restored: [],
+      invalid: []
+    });
+
+    renderer.resetRecoveryAttempts();
+    expect(renderer.getMissingTranslations()).toEqual([source]);
+
+    renderer.removeAll();
+    expect(document.body.innerHTML).toBe('<ul><li id="source">List item</li></ul>');
+  });
+
+  it('does not move a disconnected source record onto a new element', () => {
+    document.body.innerHTML = '<ul><li id="source">List item</li></ul>';
+    const source = document.querySelector('#source');
+    const renderer = new TranslationRenderer({document, sessionId: 'disconnected-session'});
+    renderer.insert({
+      element: source,
+      sourceId: 'disconnected-source',
+      sourceHash: hashSourceText('List item'),
+      translatedText: '목록 항목'
+    });
+
+    const replacement = document.createElement('li');
+    replacement.id = 'source';
     replacement.textContent = 'List item';
     source.replaceWith(replacement);
+    renderer.pruneDisconnected();
 
-    expect(renderer.restoreMissingTranslations()).toEqual([replacement]);
-    expect(replacement.querySelector('translight-translation')).toBe(translation);
+    expect(renderer.hasRecord(replacement)).toBe(false);
+    expect(replacement.querySelector('translight-translation')).toBeNull();
+    expect(document.querySelectorAll('translight-translation')).toHaveLength(0);
 
     renderer.removeAll();
     expect(document.body.innerHTML).toBe('<ul><li id="source">List item</li></ul>');

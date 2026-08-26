@@ -43,6 +43,24 @@ describe('collectTranslationBlocks', () => {
     expect(collectTranslationBlocks(document.body).map((block) => block.text)).toEqual(['Fresh paragraph']);
   });
 
+  it('treats a marked node as fresh when its renderer record is gone', () => {
+    document.body.innerHTML = `
+      <p
+        data-translight-source-id="stale-source"
+        data-translight-source-hash="stale-hash"
+        data-translight-session-id="old-session"
+      >Freshly rendered content.</p>
+    `;
+
+    const blocks = collectTranslationBlocks(document.body, {
+      isActiveSource: () => false
+    });
+
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].text).toBe('Freshly rendered content.');
+    expect(blocks[0].sourceId).not.toBe('stale-source');
+  });
+
   it('ignores visually hidden accessibility text in page layout blocks', () => {
     document.head.innerHTML = `
       <style>
