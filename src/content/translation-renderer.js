@@ -539,6 +539,43 @@ export class TranslationRenderer {
     return true;
   }
 
+  clearFallbackPresentation(record) {
+    if (!record.fallbackMode) return;
+    if (record.fallbackMode === TRANSLATION_MODES.TRANSLATION_ORIGINAL) {
+      restorePlacement(record);
+    }
+    record.fallbackMode = null;
+    this.clearReplacementAttributes(record);
+  }
+
+  placeTranslationBeforeSource(record) {
+    const {element, translation} = record;
+    if (!element?.parentNode || !translation) return;
+    if (record.placement === 'sibling') {
+      element.parentNode.insertBefore(translation, element);
+      return;
+    }
+    element.insertBefore(translation, element.firstChild);
+  }
+
+  applyFallbackPresentation(record, mode) {
+    const {element} = record;
+    this.clearReplacementAttributes(record);
+    if (mode === TRANSLATION_MODES.TRANSLATION_ONLY) {
+      restorePlacement(record);
+      element.setAttribute(HIDDEN_ATTRIBUTE, GENERATED_VALUE);
+      if (record.placement !== 'sibling') {
+        element.setAttribute(
+          HIDDEN_PLACEMENT_ATTRIBUTE,
+          record.mixedContent ? 'mixed' : 'inside'
+        );
+      }
+    } else {
+      this.placeTranslationBeforeSource(record);
+    }
+    record.fallbackMode = mode;
+  }
+
   restoreChangedSources() {
     for (const record of this.records.values()) {
       if (!record.replaced || !this.restoreSourceText(record, {onlyIfChanged: true})) continue;
@@ -597,6 +634,7 @@ export class TranslationRenderer {
     const {element, translation} = record;
     if (!element || !translation) return;
     const mode = this.presentation.translationMode;
+    this.clearFallbackPresentation(record);
     translation.setAttribute(MODE_ATTRIBUTE, mode);
     if (mode === TRANSLATION_MODES.ORIGINAL_TRANSLATION) {
       this.restoreSourceText(record);
@@ -615,8 +653,7 @@ export class TranslationRenderer {
       if (mode === TRANSLATION_MODES.TRANSLATION_ONLY) translation.removeAttribute(STYLE_ATTRIBUTE);
       else translation.setAttribute(STYLE_ATTRIBUTE, this.presentation.displayStyle);
       setTranslationText(translation, record.translatedText);
-      restorePlacement(record);
-      this.clearReplacementAttributes(record);
+      this.applyFallbackPresentation(record, mode);
       return;
     }
     if (mode === TRANSLATION_MODES.TRANSLATION_ORIGINAL) {
@@ -703,6 +740,7 @@ export class TranslationRenderer {
       presentedTextNodeValues: null,
       replacementNodeIndex: null,
       replacementNodeIndices: [],
+      fallbackMode: null,
       replacementWrappers: []
     };
     record.placement = insertAtSafeLocation(element, translation, mixedContent);

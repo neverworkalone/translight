@@ -3,6 +3,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   GENERATED_ATTRIBUTE,
+  HIDDEN_ATTRIBUTE,
+  HIDDEN_PLACEMENT_ATTRIBUTE,
   PRESENTATION_HASH_ATTRIBUTE,
   REPLACED_ATTRIBUTE,
   REPLACEMENT_TEXT_ATTRIBUTE,
@@ -259,7 +261,41 @@ describe('TranslationRenderer', () => {
     expect(source.querySelector('a')?.textContent).toBe('Open');
     expect(source.querySelector('em')?.textContent).toBe('close');
     expect(source.hasAttribute(REPLACED_ATTRIBUTE)).toBe(false);
+    expect(source.getAttribute(HIDDEN_ATTRIBUTE)).toBe('true');
+    expect(source.hasAttribute(HIDDEN_PLACEMENT_ATTRIBUTE)).toBe(false);
     expect(document.querySelector('translight-translation')?.textContent).toBe('번역');
+
+    renderer.removeAll();
+    expect(document.body.innerHTML).toBe(
+      '<p id="source"><a href="https://example.com">Open</a> or <em>close</em></p>'
+    );
+  });
+
+  it('keeps translation-original order when a short translation cannot be distributed', () => {
+    document.body.innerHTML = '<p id="source"><a href="https://example.com">Open</a> or <em>close</em></p>';
+    const source = document.querySelector('#source');
+    const renderer = new TranslationRenderer({
+      document,
+      sessionId: 'short-inline-original-session',
+      settings: {translationMode: TRANSLATION_MODES.TRANSLATION_ORIGINAL}
+    });
+
+    renderer.insert({
+      element: source,
+      sourceId: 'short-inline-original-source',
+      sourceHash: hashSourceText('Open or close'),
+      translatedText: '번역'
+    });
+
+    const translation = document.querySelector('translight-translation');
+    expect(document.body.firstElementChild).toBe(translation);
+    expect(document.body.lastElementChild).toBe(source);
+    expect(translation?.textContent).toBe('번역');
+    expect(source.textContent).toBe('Open or close');
+    expect(source.querySelector('a')?.textContent).toBe('Open');
+    expect(source.querySelector('em')?.textContent).toBe('close');
+    expect(source.hasAttribute(REPLACED_ATTRIBUTE)).toBe(false);
+    expect(source.hasAttribute(HIDDEN_ATTRIBUTE)).toBe(false);
 
     renderer.removeAll();
     expect(document.body.innerHTML).toBe(
