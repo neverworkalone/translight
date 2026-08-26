@@ -73,18 +73,4 @@ npm run package
 npm run dev
 ```
 
-### Reproduce the IMDb scroll-jitter regression
-
-With the development server running, open this real-browser fixture in Chrome:
-
-```text
-http://127.0.0.1:5173/tests/fixtures/imdb-jitter-repro.html?scenario=recovery&top=3100
-```
-
-It simulates the observed delayed host reconciliation, samples `scrollY`, and
-reports `testPassed: true` when the active session keeps the page from oscillating.
-Use `scenario=legacy` to disable the scroll-anchor guard and confirm the
-regression signal (`jitterDetected: true`).
-
-
 The Translator API and its language model run in Chrome's supported desktop environments. The first translation may require downloading the on-device model. Translight does not send page content to an external translation server.
