@@ -50,6 +50,13 @@ describe('content language detection', () => {
     expect(isTranslatableBlock(block, block.textContent, 'ko')).toBe(false);
   });
 
+  it('does not apply the English heuristic to an explicit non-English local language', () => {
+    document.body.innerHTML = '<section lang="fr"><p>This content is explicitly French.</p></section>';
+    const block = document.querySelector('p');
+    expect(nearestContentLanguage(block)).toBe('fr');
+    expect(isTranslatableBlock(block, block.textContent, 'ko')).toBe(false);
+  });
+
   it('ignores html and body language declarations for blocks', () => {
     document.documentElement.lang = 'ko-KR';
     document.body.lang = 'ko-KR';

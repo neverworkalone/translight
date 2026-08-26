@@ -94,6 +94,7 @@ export function isTranslatableBlock(element, text, targetLanguage = 'ko') {
   const declared = nearestContentLanguage(element);
   if (declared === target) return false;
   if (declared === 'en') return true;
+  if (declared) return false;
 
   return target === 'ko' &&
     stats.latinCount >= LANGUAGE_MIN_LATIN_LETTERS &&
