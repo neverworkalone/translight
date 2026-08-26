@@ -12,6 +12,7 @@ const MUTATION_DEBOUNCE_MS = 100;
 const MAX_MUTATION_ROOTS = 64;
 const BLOCK_SELECTOR = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,figcaption,div,td,th';
 const CANDIDATE_SELECTOR = `${BLOCK_SELECTOR},${SEGMENT_SELECTOR}`;
+const GENERATED_NODE_SELECTOR = '[data-translight-generated="true"]';
 const ROUTE_SETTLE_DELAYS = Object.freeze([100, 500]);
 let sessionSequence = 0;
 
@@ -447,6 +448,17 @@ export class PageSession {
       addMutationRoot(element);
     }
     for (const record of records) {
+      const mutationTarget = record.target?.nodeType === 1
+        ? record.target
+        : record.target?.parentElement;
+      if (mutationTarget?.closest?.('[data-translight-generated="true"]')) continue;
+      if (record.type === 'childList') {
+        const hasRelevantAddedNodes = Array.from(record.addedNodes ?? [])
+          .some((node) => !node.matches?.(GENERATED_NODE_SELECTOR));
+        const hasRelevantRemovedNodes = Array.from(record.removedNodes ?? [])
+          .some((node) => !node.matches?.(GENERATED_NODE_SELECTOR));
+        if (!hasRelevantAddedNodes && !hasRelevantRemovedNodes) continue;
+      }
       if (record.type === 'characterData') {
         const block = getClosestBlock(record.target);
         addMutationRoot(block);

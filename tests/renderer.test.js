@@ -41,6 +41,7 @@ describe('TranslationRenderer', () => {
     expect(translation.getAttribute(SOURCE_ATTRIBUTE)).toBe('source-1');
     expect(source.getAttribute(TRANSLATED_ATTRIBUTE)).toBe('true');
     expect(source.getAttribute(SESSION_ATTRIBUTE)).toBe('session-1');
+    expect(renderer.style.textContent).toContain('overflow-anchor: none !important');
   });
 
   it('prevents duplicate insertion and completely restores the DOM on cleanup', () => {
@@ -94,6 +95,28 @@ describe('TranslationRenderer', () => {
 
     expect(list.children).toHaveLength(1);
     expect(source.querySelector('translight-translation').textContent).toBe('List item translation');
+    renderer.removeAll();
+    expect(document.body.innerHTML).toBe('<ul><li id="source">List item</li></ul>');
+  });
+
+  it('reattaches a translation when a host replaces a source with its marked clone', () => {
+    document.body.innerHTML = '<ul><li id="source">List item</li></ul>';
+    const source = document.querySelector('#source');
+    const renderer = new TranslationRenderer({document, sessionId: 'rebind-session'});
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'rebind-source',
+      sourceHash: hashSourceText('List item'),
+      translatedText: '목록 항목'
+    });
+
+    const replacement = source.cloneNode(false);
+    replacement.textContent = 'List item';
+    source.replaceWith(replacement);
+
+    expect(renderer.restoreMissingTranslations()).toEqual([replacement]);
+    expect(replacement.querySelector('translight-translation')).toBe(translation);
+
     renderer.removeAll();
     expect(document.body.innerHTML).toBe('<ul><li id="source">List item</li></ul>');
   });

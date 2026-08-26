@@ -305,6 +305,7 @@ function styleText(sessionId, presentation) {
       --translight-text-color: ${presentation.textColor};
       --translight-font-weight: ${weight};
       --translight-font-style: ${fontStyle};
+      overflow-anchor: none !important;
       box-sizing: border-box !important;
       display: block !important;
       position: static !important;
@@ -383,6 +384,7 @@ function styleText(sessionId, presentation) {
       --translight-text-color: ${presentation.textColor};
       --translight-font-weight: ${weight};
       --translight-font-style: ${fontStyle};
+      overflow-anchor: none !important;
       box-sizing: border-box !important;
       border: 0 !important;
       outline: 0 !important;
@@ -776,7 +778,35 @@ export class TranslationRenderer {
       // updates the source element. Keep the existing record and put the
       // translation back when the source itself is still alive. This avoids a
       // visible blank interval and preserves the cached queue entry.
-      if (record.replaced || record.element?.isConnected === false || record.translation?.isConnected) continue;
+      if (record.replaced || record.translation?.isConnected) continue;
+      if (record.element?.isConnected === false) {
+        const replacement = this.document.querySelectorAll(`[${SOURCE_ATTRIBUTE}]`);
+        const nextElement = Array.from(replacement).find((candidate) => {
+          if (candidate === record.element || candidate.matches?.(GENERATED_SELECTOR)) return false;
+          if (!candidate.isConnected || candidate.getAttribute(SESSION_ATTRIBUTE) !== this.sessionId) return false;
+          if (candidate.getAttribute(SOURCE_ATTRIBUTE) !== record.sourceId) return false;
+          return !record.sourceHash || this.isSourceHashCurrent({
+            element: candidate,
+            sourceHash: record.sourceHash,
+            mixedContent: record.mixedContent
+          });
+        });
+        if (!nextElement) continue;
+        this.recordsByElement.delete(record.element);
+        record.element = nextElement;
+        this.recordsByElement.set(nextElement, record);
+        const clonedTranslation = Array.from(nextElement.querySelectorAll?.(TRANSLATION_TAG) ?? [])
+          .find((candidate) => candidate.getAttribute(SOURCE_ATTRIBUTE) === record.sourceId &&
+            candidate.getAttribute(SESSION_ATTRIBUTE) === this.sessionId);
+        if (clonedTranslation) record.translation = clonedTranslation;
+        record.sourceTextNodes = collectSourceTextNodes(nextElement, record.mixedContent);
+        nextElement.setAttribute(SOURCE_ATTRIBUTE, record.sourceId);
+        nextElement.setAttribute(TRANSLATED_ATTRIBUTE, GENERATED_VALUE);
+        nextElement.setAttribute(SESSION_ATTRIBUTE, this.sessionId);
+        if (record.sourceHash) nextElement.setAttribute(SOURCE_HASH_ATTRIBUTE, record.sourceHash);
+        nextElement.removeAttribute(PENDING_SOURCE_HASH_ATTRIBUTE);
+      }
+      if (record.element?.isConnected === false) continue;
       restorePlacement(record);
       if (record.translation?.isConnected) restored.push(record.element);
     }
@@ -791,12 +821,19 @@ export class TranslationRenderer {
     const currentHash = element.getAttribute(SOURCE_HASH_ATTRIBUTE);
     if (existing && currentHash && sourceHash && currentHash !== sourceHash && !pendingHash) return null;
     if (existing) {
+      if (existing.element !== element) {
+        this.recordsByElement.delete(existing.element);
+        existing.element = element;
+        this.recordsByElement.set(element, existing);
+      }
       if (existing.sourceId !== sourceId) {
         this.records.delete(existing.sourceId);
         existing.sourceId = sourceId;
         this.records.set(sourceId, existing);
       }
       element.setAttribute(SOURCE_ATTRIBUTE, sourceId);
+      element.setAttribute(TRANSLATED_ATTRIBUTE, GENERATED_VALUE);
+      element.setAttribute(SESSION_ATTRIBUTE, this.sessionId);
       existing.translation.setAttribute(SOURCE_ATTRIBUTE, sourceId);
       const nextMixedContent = Boolean(mixedContent);
       const sourceChanged = Boolean(sourceHash && sourceHash !== existing.sourceHash) || Boolean(pendingHash);
