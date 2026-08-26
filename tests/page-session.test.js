@@ -80,6 +80,32 @@ describe('PageSession', () => {
     session.stop({notify: false});
   });
 
+  it('translates table cells and rechecks cells whose text changes', async () => {
+    document.body.innerHTML = `
+      <article>
+        <p>Article introduction.</p>
+        <table><tbody><tr><td id="cell">Original cell.</td></tr></tbody></table>
+        <pre>const keepThisCode = true;</pre>
+      </article>
+    `;
+    const session = new PageSession({
+      generation: 13,
+      document,
+      provider: makeProvider()
+    });
+
+    await session.start();
+
+    expect(document.querySelector('#cell translight-translation')?.textContent).toBe('ko:Original cell.');
+    expect(document.querySelector('pre').textContent).toBe('const keepThisCode = true;');
+
+    document.querySelector('#cell').firstChild.data = 'Changed cell.';
+    await wait();
+    expect(document.querySelector('#cell translight-translation')?.textContent).toBe('ko:Changed cell.');
+
+    session.stop();
+  });
+
   it('does not insert late results after cancellation', async () => {
     document.body.innerHTML = '<p>Pending paragraph.</p>';
     const resolvers = [];
@@ -99,6 +125,29 @@ describe('PageSession', () => {
 
     expect(document.querySelector('translight-translation')).toBeNull();
     expect(document.querySelector('p').textContent).toBe('Pending paragraph.');
+  });
+
+  it('removes generated nodes and styles when translation fails', async () => {
+    document.body.innerHTML = '<p>Safe failure paragraph.</p>';
+    const statuses = [];
+    const session = new PageSession({
+      generation: 14,
+      document,
+      provider: makeProvider({
+        translate: async () => {
+          throw new Error('translator failed');
+        }
+      }),
+      sendStatus: (status) => statuses.push(status)
+    });
+
+    await session.start();
+
+    expect(statuses.at(-1).status).toBe('ERROR');
+    expect(document.querySelector('p').textContent).toBe('Safe failure paragraph.');
+    expect(document.querySelector('translight-translation')).toBeNull();
+    expect(document.querySelector('style[data-translight-generated="true"]')).toBeNull();
+    session.stop({notify: false});
   });
 
   it('can be started and stopped repeatedly without accumulating nodes', async () => {
@@ -181,6 +230,38 @@ describe('PageSession', () => {
     session.stop();
   });
 
+  it('restores inline source text before retranslation after a replacement update', async () => {
+    document.body.innerHTML = '<p id="source">Visit <a href="https://openai.com">OpenAI</a> docs</p>';
+    const inputs = [];
+    const session = new PageSession({
+      generation: 42,
+      document,
+      settings: {
+        translationMode: TRANSLATION_MODES.TRANSLATION_ORIGINAL,
+        translatePageTitle: false
+      },
+      provider: makeProvider({
+        translate: async (text) => {
+          inputs.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    await session.start();
+    document.querySelector('a').firstChild.data = 'OpenAI team';
+    await wait();
+
+    expect(inputs).toContain('Visit OpenAI docs');
+    expect(inputs).toContain('Visit OpenAI team docs');
+    expect(inputs).not.toContain(expect.stringContaining('ko:Visit OpenAI team docs'));
+
+    session.stop();
+    expect(document.body.innerHTML).toBe(
+      '<p id="source">Visit <a href="https://openai.com">OpenAI team</a> docs</p>'
+    );
+  });
+
   it('applies mode changes without calling the provider again', async () => {
     document.body.innerHTML = '<p>Mode paragraph.</p>';
     let calls = 0;
@@ -202,7 +283,9 @@ describe('PageSession', () => {
     session.applySettings({translationMode: 'translation-original'});
     expect(document.querySelector('p').textContent).toBe('ko:Mode paragraph.');
     expect(document.querySelector('p').nextElementSibling?.textContent).toBe('Mode paragraph.');
-    expect(document.querySelector('p').getAttribute('data-translight-style')).toBe('solid-border');
+    expect(document.querySelector('p').hasAttribute('data-translight-style')).toBe(false);
+    expect(document.querySelector('p [data-translight-replacement-text="true"]')
+      ?.getAttribute('data-translight-style')).toBe('solid-border');
     await wait();
     expect(calls).toBe(before);
     session.stop();

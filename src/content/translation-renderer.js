@@ -27,10 +27,11 @@ const ROLE_ATTRIBUTE = 'data-translight-role';
 const ROLE_TRANSLATION = 'translation';
 const ROLE_ORIGINAL = 'original';
 const TRANSLATION_TEXT_ATTRIBUTE = 'data-translight-text';
-const BLOCK_SELECTOR = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,figcaption,div';
+const BLOCK_SELECTOR = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,figcaption,div,td,th';
 const EXCLUDED_CONTENT_SELECTOR = 'script,style,noscript,code,pre,input,textarea,select,button';
 const GENERATED_SELECTOR = 'translight-translation,[data-translight-generated="true"]';
 const LAYOUT_DISPLAYS = new Set(['flex', 'inline-flex', 'grid', 'inline-grid']);
+const TABLE_CELL_TAGS = new Set(['td', 'th']);
 const ATTRIBUTE_NAMES = [
   SOURCE_ATTRIBUTE,
   SOURCE_HASH_ATTRIBUTE,
@@ -62,7 +63,8 @@ function getDirectNestedList(element) {
 }
 
 function shouldInsertInside(element) {
-  if (element.tagName?.toLowerCase() === 'li') return true;
+  const tagName = element.tagName?.toLowerCase();
+  if (tagName === 'li' || TABLE_CELL_TAGS.has(tagName)) return true;
   return LAYOUT_DISPLAYS.has(getDisplay(element.parentElement));
 }
 
@@ -175,10 +177,70 @@ function sourceTextFromNodes(nodes) {
   return Array.from(nodes ?? [], (node) => node.nodeValue ?? '').join('');
 }
 
-function setSourceTextNodes(nodes, value) {
+function setSourceTextNodes(nodes, values) {
   if (!nodes.length) return;
-  nodes[0].nodeValue = String(value ?? '');
-  for (const node of nodes.slice(1)) node.nodeValue = '';
+  const nextValues = Array.isArray(values) ? values : [values];
+  nodes.forEach((node, index) => {
+    node.nodeValue = String(nextValues[index] ?? '');
+  });
+}
+
+function textNodeShape(value) {
+  const text = String(value ?? '');
+  const leading = text.match(/^\s*/u)?.[0] ?? '';
+  const trailing = text.match(/\s*$/u)?.[0] ?? '';
+  const coreEnd = Math.max(leading.length, text.length - trailing.length);
+  return {
+    leading,
+    trailing,
+    core: text.slice(leading.length, coreEnd),
+    raw: text
+  };
+}
+
+function distributeReplacementText(text, weights) {
+  const characters = Array.from(String(text ?? ''));
+  if (!weights.length) return [];
+  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+  const parts = [];
+  let offset = 0;
+  let accumulatedWeight = 0;
+  for (let index = 0; index < weights.length; index += 1) {
+    accumulatedWeight += weights[index];
+    const isLast = index === weights.length - 1;
+    const idealEnd = Math.round(characters.length * accumulatedWeight / totalWeight);
+    const minimumEnd = characters.length >= weights.length ? offset + 1 : offset;
+    const remainingSlots = weights.length - index - 1;
+    const maximumEnd = characters.length - remainingSlots;
+    const end = isLast
+      ? characters.length
+      : Math.min(maximumEnd, Math.max(minimumEnd, idealEnd));
+    parts.push(characters.slice(offset, end).join(''));
+    offset = end;
+  }
+  return parts;
+}
+
+function replacementValuesForNodes(nodes, translatedText) {
+  const shapes = nodes.map((node) => textNodeShape(node.nodeValue));
+  const replacementNodeIndices = [];
+  const weights = [];
+  shapes.forEach((shape, index) => {
+    if (!shape.core) return;
+    replacementNodeIndices.push(index);
+    weights.push(Math.max(1, Array.from(shape.core).length));
+  });
+  const characters = Array.from(String(translatedText ?? ''));
+  if (!replacementNodeIndices.length || characters.length < replacementNodeIndices.length) {
+    return {fallback: true, values: [], replacementNodeIndices: []};
+  }
+  const parts = distributeReplacementText(characters.join(''), weights);
+  const partByNode = new Map(replacementNodeIndices.map((index, partIndex) => [index, parts[partIndex] ?? '']));
+  const values = shapes.map((shape, index) => {
+    if (!partByNode.has(index)) return '';
+    return partByNode.get(index);
+  });
+  return {fallback: false, values, replacementNodeIndices};
 }
 
 function snapshotTextNodes(nodes) {
@@ -204,11 +266,11 @@ function normalizePresentation(settings = {}) {
 
 function styleText(sessionId, presentation) {
   const selector = `${TRANSLATION_TAG}[${SESSION_ATTRIBUTE}="${escapeAttribute(sessionId)}"]`;
-  const replacementSelector = `[${REPLACED_ATTRIBUTE}="${GENERATED_VALUE}"][${STYLED_REPLACEMENT_ATTRIBUTE}="${GENERATED_VALUE}"][${SESSION_ATTRIBUTE}="${escapeAttribute(sessionId)}"]`;
+  const replacementTextSelector = `[${REPLACEMENT_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"][${SESSION_ATTRIBUTE}="${escapeAttribute(sessionId)}"]`;
   const styledSelector = `${selector}:not([${ROLE_ATTRIBUTE}="${ROLE_ORIGINAL}"])`;
   const styleSelector = (style) =>
-    `${styledSelector}[${STYLE_ATTRIBUTE}="${style}"], ${replacementSelector}[${STYLE_ATTRIBUTE}="${style}"]`;
-  const replacementTextSelector = `[${REPLACEMENT_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"][${SESSION_ATTRIBUTE}="${escapeAttribute(sessionId)}"]`;
+    `${styledSelector}[${STYLE_ATTRIBUTE}="${style}"], ${replacementTextSelector}[${STYLE_ATTRIBUTE}="${style}"]`;
+  const tableCellSelector = `td > ${selector}, th > ${selector}`;
   const translationTextSelector = `${styledSelector} > [${TRANSLATION_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"]`;
   const textStyleSelector = (style) =>
     `${styledSelector}[${STYLE_ATTRIBUTE}="${style}"], ${replacementTextSelector}[${STYLE_ATTRIBUTE}="${style}"]`;
@@ -252,7 +314,7 @@ function styleText(sessionId, presentation) {
       visibility: visible !important;
     }
 
-    ${replacementSelector} {
+    ${replacementTextSelector} {
       --translight-style-color: ${presentation.styleColor};
       --translight-text-color: ${presentation.textColor};
       --translight-font-weight: ${weight};
@@ -262,9 +324,12 @@ function styleText(sessionId, presentation) {
       outline: 0 !important;
       background: transparent !important;
       color: var(--translight-text-color) !important;
+      font-family: inherit !important;
+      font-size: inherit !important;
       font-weight: var(--translight-font-weight) !important;
       font-style: var(--translight-font-style) !important;
       font-synthesis: style !important;
+      line-height: inherit !important;
     }
     ${translationTextSelector},
     ${replacementTextSelector} {
@@ -282,6 +347,12 @@ function styleText(sessionId, presentation) {
       font-synthesis: inherit !important;
       line-height: inherit !important;
       margin: 0.45em 0 1em !important;
+    }
+
+    ${tableCellSelector} {
+      width: 100% !important;
+      max-width: 100% !important;
+      margin: 0.25em 0 0 !important;
     }
 
     ${styleSelector(TRANSLATION_STYLES.LEFT_BORDER)} {
@@ -384,98 +455,166 @@ export class TranslationRenderer {
   }
 
   unwrapReplacementText(record) {
-    const wrapper = record.replacementWrapper;
-    if (!wrapper) return;
-    if (wrapper.parentNode) {
+    const wrappers = record.replacementWrappers?.length
+      ? record.replacementWrappers
+      : record.replacementWrapper
+        ? [record.replacementWrapper]
+        : [];
+    for (const wrapper of wrappers) {
+      if (!wrapper?.parentNode) continue;
       const parent = wrapper.parentNode;
       while (wrapper.firstChild) parent.insertBefore(wrapper.firstChild, wrapper);
       wrapper.remove();
     }
+    record.replacementWrappers = [];
     record.replacementWrapper = null;
   }
 
   wrapReplacementText(record, node) {
-    if (record.replacementWrapper?.parentNode || !node?.parentNode) return record.replacementWrapper;
+    if (!node?.parentNode) return null;
     const wrapper = this.document.createElement('span');
     wrapper.setAttribute('translate', 'no');
     wrapper.setAttribute(REPLACEMENT_TEXT_ATTRIBUTE, GENERATED_VALUE);
     wrapper.setAttribute(SESSION_ATTRIBUTE, this.sessionId);
     node.parentNode.insertBefore(wrapper, node);
     wrapper.appendChild(node);
-    record.replacementWrapper = wrapper;
+    record.replacementWrappers ??= [];
+    record.replacementWrappers.push(wrapper);
+    record.replacementWrapper ??= wrapper;
     return wrapper;
   }
 
-  restoreSourceText(record) {
-    if (!record.replaced) return;
+  restoreSourceText(record, {onlyIfChanged = false} = {}) {
+    if (!record.replaced) return false;
+    const currentNodes = collectSourceTextNodes(record.element, record.mixedContent);
+    const presentedValues = record.presentedTextNodeValues ?? [record.presentedText ?? record.translatedText];
+    const originalValues = record.originalTextNodeValues ?? [];
+    const siteChanged = currentNodes.length !== presentedValues.length ||
+      currentNodes.some((node, index) => (node.nodeValue ?? '') !== (presentedValues[index] ?? ''));
+    if (onlyIfChanged && !siteChanged) return false;
     this.unwrapReplacementText(record);
     const nodes = collectSourceTextNodes(record.element, record.mixedContent);
-    const expectedText = normalizeSourceText(record.presentedText ?? record.translatedText);
-    if (normalizeSourceText(sourceTextFromNodes(nodes)) !== expectedText) {
-      record.sourceTextNodes = nodes;
-      record.originalTextNodeValues = snapshotTextNodes(nodes);
-      record.originalText = normalizeSourceText(sourceTextFromNodes(nodes));
-      record.replaced = false;
-      record.presentedText = null;
-      return;
-    }
-
-    const originalNodes = record.sourceTextNodes ?? [];
-    const canRestoreExact = nodes.length === originalNodes.length &&
-      nodes.every((node, index) => node === originalNodes[index]);
-    if (canRestoreExact) {
-      nodes.forEach((node, index) => {
-        node.nodeValue = record.originalTextNodeValues?.[index] ?? '';
-      });
-    } else {
-      setSourceTextNodes(nodes, record.originalText);
-    }
+    const restoredValues = nodes.map((node, index) => {
+      if (!siteChanged || (node.nodeValue ?? '') === (presentedValues[index] ?? '')) {
+        return originalValues[index] ?? '';
+      }
+      return node.nodeValue ?? '';
+    });
+    setSourceTextNodes(nodes, restoredValues);
     record.sourceTextNodes = nodes;
+    record.originalTextNodeValues = snapshotTextNodes(nodes);
+    record.originalText = normalizeSourceText(sourceTextFromNodes(nodes));
     record.replaced = false;
     record.presentedText = null;
+    record.presentedTextNodeValues = null;
+    return true;
   }
 
   replaceSourceText(record, {styled = false} = {}) {
-    if (!styled) this.unwrapReplacementText(record);
+    if (record.replaced) this.restoreSourceText(record);
+    this.unwrapReplacementText(record);
     const nodes = this.currentSourceTextNodes(record);
-    setSourceTextNodes(nodes, record.translatedText);
-    if (styled) this.wrapReplacementText(record, nodes[0]);
+    const {fallback, values: presentedValues, replacementNodeIndices} = replacementValuesForNodes(
+      nodes,
+      record.translatedText
+    );
+    if (fallback) {
+      record.replaced = false;
+      record.presentedText = null;
+      record.presentedTextNodeValues = null;
+      record.replacementNodeIndices = [];
+      record.replacementNodeIndex = null;
+      return false;
+    }
+    setSourceTextNodes(nodes, presentedValues);
+    const shouldWrap = styled && this.presentation.displayStyle !== TRANSLATION_STYLES.NONE;
+    if (shouldWrap) {
+      for (const index of replacementNodeIndices) this.wrapReplacementText(record, nodes[index]);
+    }
     record.replaced = true;
-    record.presentedText = String(record.translatedText ?? '');
+    record.replacementNodeIndices = replacementNodeIndices;
+    record.replacementNodeIndex = replacementNodeIndices[0] ?? null;
+    record.presentedTextNodeValues = snapshotTextNodes(nodes);
+    record.presentedText = record.presentedTextNodeValues.join('');
+    return true;
+  }
+
+  clearFallbackPresentation(record) {
+    if (!record.fallbackMode) return;
+    if (record.fallbackMode === TRANSLATION_MODES.TRANSLATION_ORIGINAL) {
+      restorePlacement(record);
+    }
+    record.fallbackMode = null;
+    this.clearReplacementAttributes(record);
+  }
+
+  placeTranslationBeforeSource(record) {
+    const {element, translation} = record;
+    if (!element?.parentNode || !translation) return;
+    if (record.placement === 'sibling') {
+      element.parentNode.insertBefore(translation, element);
+      return;
+    }
+    element.insertBefore(translation, element.firstChild);
+  }
+
+  applyFallbackPresentation(record, mode) {
+    const {element} = record;
+    this.clearReplacementAttributes(record);
+    if (mode === TRANSLATION_MODES.TRANSLATION_ONLY) {
+      restorePlacement(record);
+      element.setAttribute(HIDDEN_ATTRIBUTE, GENERATED_VALUE);
+      if (record.placement !== 'sibling') {
+        element.setAttribute(
+          HIDDEN_PLACEMENT_ATTRIBUTE,
+          record.mixedContent ? 'mixed' : 'inside'
+        );
+      }
+    } else {
+      this.placeTranslationBeforeSource(record);
+    }
+    record.fallbackMode = mode;
+  }
+
+  restoreChangedSources() {
+    for (const record of this.records.values()) {
+      if (!record.replaced || !this.restoreSourceText(record, {onlyIfChanged: true})) continue;
+      record.translation.parentNode?.removeChild(record.translation);
+      this.clearReplacementAttributes(record);
+    }
   }
 
   refreshOriginalSnapshot(record, sourceText) {
-    if (record.replaced) {
-      this.unwrapReplacementText(record);
-      const nodes = this.currentSourceTextNodes(record);
-      if (sourceText == null) this.restoreSourceText(record);
-      else {
-        setSourceTextNodes(nodes, sourceText);
-        record.sourceTextNodes = nodes;
-        record.replaced = false;
-        record.presentedText = null;
-      }
-    }
+    const wasReplaced = record.replaced;
+    if (wasReplaced) this.restoreSourceText(record);
 
     const nodes = this.currentSourceTextNodes(record);
     const currentText = sourceTextFromNodes(nodes);
     record.sourceTextNodes = nodes;
     record.originalTextNodeValues = snapshotTextNodes(nodes);
-    record.originalText = normalizeSourceText(sourceText ?? currentText);
+    record.originalText = normalizeSourceText(wasReplaced ? currentText : (sourceText ?? currentText));
   }
 
   applyReplacementAttributes(record, {styled = false} = {}) {
     const {element} = record;
     element.setAttribute(REPLACED_ATTRIBUTE, GENERATED_VALUE);
-    element.setAttribute(PRESENTATION_HASH_ATTRIBUTE, hashSourceText(normalizeSourceText(record.translatedText)));
-    const replacementWrapper = record.replacementWrapper;
+    element.setAttribute(
+      PRESENTATION_HASH_ATTRIBUTE,
+      hashSourceText(normalizeSourceText(record.presentedText ?? record.translatedText))
+    );
+    const replacementWrappers = record.replacementWrappers?.length
+      ? record.replacementWrappers
+      : record.replacementWrapper
+        ? [record.replacementWrapper]
+        : [];
     if (styled) {
       element.setAttribute(STYLED_REPLACEMENT_ATTRIBUTE, GENERATED_VALUE);
-      element.setAttribute(STYLE_ATTRIBUTE, this.presentation.displayStyle);
-      replacementWrapper?.setAttribute(STYLE_ATTRIBUTE, this.presentation.displayStyle);
+      restoreAttribute(element, STYLE_ATTRIBUTE, record.originalAttributes?.[STYLE_ATTRIBUTE]);
+      replacementWrappers.forEach((wrapper) => wrapper.setAttribute(STYLE_ATTRIBUTE, this.presentation.displayStyle));
     } else {
       restoreAttribute(element, STYLED_REPLACEMENT_ATTRIBUTE, record.originalAttributes?.[STYLED_REPLACEMENT_ATTRIBUTE]);
       restoreAttribute(element, STYLE_ATTRIBUTE, record.originalAttributes?.[STYLE_ATTRIBUTE]);
+      replacementWrappers.forEach((wrapper) => wrapper.removeAttribute(STYLE_ATTRIBUTE));
     }
     element.removeAttribute(HIDDEN_ATTRIBUTE);
     element.removeAttribute(HIDDEN_PLACEMENT_ATTRIBUTE);
@@ -495,6 +634,7 @@ export class TranslationRenderer {
     const {element, translation} = record;
     if (!element || !translation) return;
     const mode = this.presentation.translationMode;
+    this.clearFallbackPresentation(record);
     translation.setAttribute(MODE_ATTRIBUTE, mode);
     if (mode === TRANSLATION_MODES.ORIGINAL_TRANSLATION) {
       this.restoreSourceText(record);
@@ -507,7 +647,15 @@ export class TranslationRenderer {
     }
 
     const styledReplacement = mode === TRANSLATION_MODES.TRANSLATION_ORIGINAL;
-    this.replaceSourceText(record, {styled: styledReplacement});
+    const replacementApplied = this.replaceSourceText(record, {styled: styledReplacement});
+    if (!replacementApplied) {
+      translation.setAttribute(ROLE_ATTRIBUTE, ROLE_TRANSLATION);
+      if (mode === TRANSLATION_MODES.TRANSLATION_ONLY) translation.removeAttribute(STYLE_ATTRIBUTE);
+      else translation.setAttribute(STYLE_ATTRIBUTE, this.presentation.displayStyle);
+      setTranslationText(translation, record.translatedText);
+      this.applyFallbackPresentation(record, mode);
+      return;
+    }
     if (mode === TRANSLATION_MODES.TRANSLATION_ORIGINAL) {
       translation.setAttribute(ROLE_ATTRIBUTE, ROLE_ORIGINAL);
       translation.removeAttribute(STYLE_ATTRIBUTE);
@@ -550,8 +698,12 @@ export class TranslationRenderer {
       }
       existing.translatedText = String(translatedText ?? '');
       setTranslationText(existing.translation, translatedText);
-      existing.sourceHash = sourceHash ?? existing.sourceHash;
-      if (sourceHash) element.setAttribute(SOURCE_HASH_ATTRIBUTE, sourceHash);
+      if (sourceChanged || structureChanged) {
+        existing.sourceHash = hashSourceText(existing.originalText);
+      } else {
+        existing.sourceHash = sourceHash ?? existing.sourceHash;
+      }
+      if (existing.sourceHash) element.setAttribute(SOURCE_HASH_ATTRIBUTE, existing.sourceHash);
       element.removeAttribute(PENDING_SOURCE_HASH_ATTRIBUTE);
       this.applyRecordPresentation(existing);
       return existing.translation;
@@ -584,7 +736,12 @@ export class TranslationRenderer {
       originalText: normalizeSourceText(sourceText),
       translatedText: String(translatedText ?? ''),
       replaced: false,
-      presentedText: null
+      presentedText: null,
+      presentedTextNodeValues: null,
+      replacementNodeIndex: null,
+      replacementNodeIndices: [],
+      fallbackMode: null,
+      replacementWrappers: []
     };
     record.placement = insertAtSafeLocation(element, translation, mixedContent);
 

@@ -1,10 +1,11 @@
 import {describe, expect, it} from 'vitest';
 import {
   classifyNavigation,
+  createLoadingStatePatch,
   isNavigationStateCurrent,
   shouldContinueManualTranslation
 } from '../src/background/navigation.js';
-import {TAB_ACTIVATION} from '../src/background/tab-state.js';
+import {TAB_ACTIVATION, TAB_STATUS} from '../src/background/tab-state.js';
 
 describe('navigation activation rules', () => {
   it('continues manual translation on the same origin only', () => {
@@ -48,6 +49,24 @@ describe('navigation activation rules', () => {
       autoTranslateSameSite: false,
       autoTranslateSites: ['example.com']
     })).toMatchObject({translate: true, activation: TAB_ACTIVATION.AUTO});
+  });
+
+  it('preserves the manual activation context while a full navigation is loading', () => {
+    expect(createLoadingStatePatch({
+      status: TAB_STATUS.ACTIVE,
+      activation: TAB_ACTIVATION.MANUAL,
+      origin: 'https://example.com',
+      hostname: 'example.com'
+    }, 11)).toMatchObject({
+      status: TAB_STATUS.OFF,
+      generation: 11,
+      documentToken: null,
+      activation: TAB_ACTIVATION.MANUAL,
+      origin: 'https://example.com',
+      hostname: 'example.com',
+      modelState: null,
+      progress: null
+    });
   });
 
   it('rejects a loading update that was made stale while awaiting settings', () => {

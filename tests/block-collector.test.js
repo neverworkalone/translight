@@ -64,4 +64,19 @@ describe('collectTranslationBlocks', () => {
       'Nested block text.'
     ]);
   });
+
+  it('collects plain table cells without collecting the table row', () => {
+    document.body.innerHTML = `
+      <table>
+        <thead><tr><th>Column heading</th></tr></thead>
+        <tbody><tr><td>First cell</td><td>Second cell</td></tr></tbody>
+      </table>
+    `;
+
+    expect(collectTranslationBlocks(document.body).map((block) => block.text)).toEqual([
+      'Column heading',
+      'First cell',
+      'Second cell'
+    ]);
+  });
 });

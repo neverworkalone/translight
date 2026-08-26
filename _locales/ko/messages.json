@@ -340,19 +340,19 @@
     "message": "설정 데이터"
   },
   "dataPageDescription": {
-    "message": "Translight 설정을 백업하거나 복원합니다."
+    "message": "설정 데이터를 백업하거나 다른 환경으로 옮길 수 있습니다."
   },
   "dataBackupTitle": {
-    "message": "백업 및 복원"
+    "message": "설정 데이터"
   },
   "dataBackupDescription": {
-    "message": "JSON 백업 파일을 내보내거나 이전 백업에서 설정을 가져옵니다."
+    "message": "다른 환경으로 옮길 때 설정을 파일로 저장할 수 있습니다."
   },
   "dataExportTitle": {
     "message": "설정 내보내기"
   },
   "dataExportDescription": {
-    "message": "현재 모든 설정을 JSON 파일로 저장합니다."
+    "message": "현재 설정을 JSON 파일로 저장합니다."
   },
   "dataExportButton": {
     "message": "내보내기"
@@ -361,16 +361,16 @@
     "message": "설정 가져오기"
   },
   "dataImportDescription": {
-    "message": "Translight JSON 파일에서 설정을 복원합니다."
+    "message": "백업한 JSON 파일을 불러옵니다."
   },
   "dataImportButton": {
     "message": "가져오기"
   },
   "dataResetTitle": {
-    "message": "초기화"
+    "message": "설정 초기화"
   },
   "dataDangerBadge": {
-    "message": "주의 필요"
+    "message": "위험 작업"
   },
   "dataResetHeading": {
     "message": "모든 설정 초기화"

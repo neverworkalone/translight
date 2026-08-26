@@ -11,6 +11,7 @@ import { t } from '../i18n/index.js';
 import { loadSettings, hostnameForUrl, matchesAutoTranslateSite, originForUrl } from '../settings.js';
 import {
   classifyNavigation,
+  createLoadingStatePatch,
   isNavigationStateCurrent
 } from './navigation.js';
 
@@ -312,6 +313,40 @@ async function handleContentReady(message, sender) {
   );
 }
 
+async function handleContentRulesChanged(message, sender) {
+  await ready;
+  const tabId = sender?.tab?.id;
+  const url = typeof message.url === 'string' ? message.url : '';
+  if (typeof tabId !== 'number' || !url) return;
+
+  const settings = await loadSettings();
+  const state = getState(tabId);
+  const navigation = classifyNavigation({
+    state,
+    url,
+    autoTranslateSites: settings.autoTranslateSites,
+    autoTranslateSameSite: settings.autoTranslateSameSite
+  });
+
+  if (navigation.translate) {
+    if (isBusyOrActive(state)) return;
+    if (state.activation === TAB_ACTIVATION.MANUAL && state.status !== TAB_STATUS.ERROR) return;
+    await startTranslation(
+      {id: tabId, url},
+      {
+        activation: navigation.activation,
+        url,
+        documentToken: message.documentToken
+      }
+    );
+    return;
+  }
+
+  if (state.activation === TAB_ACTIVATION.AUTO && state.status !== TAB_STATUS.OFF) {
+    await stopTranslation(tabId, state);
+  }
+}
+
 async function handleContentNavigation(message, sender) {
   await ready;
   const tabId = sender?.tab?.id;
@@ -370,34 +405,24 @@ async function handleTabUpdated(tabId, changeInfo) {
     autoTranslateSites: settings.autoTranslateSites,
     autoTranslateSameSite: settings.autoTranslateSameSite
   });
+  const loadingState = createLoadingStatePatch(state, nextGeneration());
   if (!navigation.translate) {
     if (state.activation == null && state.status === TAB_STATUS.OFF && state.documentToken == null) return;
     await setState(tabId, {
-      status: TAB_STATUS.OFF,
-      generation: nextGeneration(),
+      ...loadingState,
       activation: null,
-      documentToken: null,
       origin: null,
-      hostname: hostnameForUrl(url) || null,
-      modelState: null,
-      progress: null,
-      errorCode: null,
-      errorMessage: null
+      hostname: hostnameForUrl(url) || null
     });
     await sendStopMessage(tabId, state.generation);
     return;
   }
   await setState(tabId, {
-    status: TAB_STATUS.OFF,
-    generation: nextGeneration(),
+    ...loadingState,
     documentToken: null,
     activation: navigation.activation,
     origin: state.origin || originForUrl(url),
-    hostname: navigation.hostname || state.hostname,
-    modelState: null,
-    progress: null,
-    errorCode: null,
-    errorMessage: null
+    hostname: navigation.hostname || state.hostname
   });
   await sendStopMessage(tabId, state.generation);
 }
@@ -456,6 +481,9 @@ chrome.runtime.onMessage.addListener((message, sender) => {
   }
   if (message?.type === 'CONTENT_READY' && typeof tabId === 'number') {
     void enqueueTabOperation(tabId, () => handleContentReady(message, sender));
+  }
+  if (message?.type === 'CONTENT_RULES_CHANGED' && typeof tabId === 'number') {
+    void enqueueTabOperation(tabId, () => handleContentRulesChanged(message, sender));
   }
   if (message?.type === 'CONTENT_NAVIGATION' && typeof tabId === 'number') {
     void enqueueTabOperation(tabId, () => handleContentNavigation(message, sender));

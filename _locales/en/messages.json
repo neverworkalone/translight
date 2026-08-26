@@ -340,19 +340,19 @@
     "message": "Settings data"
   },
   "dataPageDescription": {
-    "message": "Back up or restore your Translight settings."
+    "message": "Back up your settings or move them to another environment."
   },
   "dataBackupTitle": {
-    "message": "Backup and restore"
+    "message": "Settings data"
   },
   "dataBackupDescription": {
-    "message": "Export a JSON backup or import settings from a previous backup."
+    "message": "Save your settings to a file when moving them to another environment."
   },
   "dataExportTitle": {
     "message": "Export settings"
   },
   "dataExportDescription": {
-    "message": "Save all current settings as a JSON file."
+    "message": "Save current settings as a JSON file."
   },
   "dataExportButton": {
     "message": "Export"
@@ -361,16 +361,16 @@
     "message": "Import settings"
   },
   "dataImportDescription": {
-    "message": "Restore settings from a Translight JSON file."
+    "message": "Load a backed-up JSON file."
   },
   "dataImportButton": {
     "message": "Import"
   },
   "dataResetTitle": {
-    "message": "Reset"
+    "message": "Reset settings"
   },
   "dataDangerBadge": {
-    "message": "Danger zone"
+    "message": "Dangerous action"
   },
   "dataResetHeading": {
     "message": "Reset all settings"

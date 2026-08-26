@@ -10,7 +10,7 @@ import { isDocumentInLanguage } from './language.js';
 const DEFAULT_CONCURRENCY = 3;
 const MUTATION_DEBOUNCE_MS = 100;
 const MAX_MUTATION_ROOTS = 64;
-const BLOCK_SELECTOR = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,figcaption,div';
+const BLOCK_SELECTOR = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,figcaption,div,td,th';
 const NAVIGATION_EVENT = 'translight:navigation';
 const HISTORY_PATCH_KEY = '__translight_history_patch__';
 let sessionSequence = 0;
@@ -347,6 +347,10 @@ export class PageSession {
       this.mutationTimer = null;
       const roots = [...this.pendingMutationRoots];
       this.pendingMutationRoots.clear();
+      // Replacement modes can leave translated segments in unchanged inline
+      // nodes while a site updates one sibling. Restore changed records before
+      // collecting text so the provider receives the real source text.
+      this.renderer?.restoreChangedSources?.();
       const blocks = [];
       const seen = new Set();
       for (const root of roots) {

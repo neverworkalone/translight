@@ -36,10 +36,27 @@ const statusClass = computed(() => {
   switch (modelState.value) {
     case MODEL_STATE.AVAILABLE: return 'status-success';
     case MODEL_STATE.DOWNLOADING: return 'status-info';
-    case MODEL_STATE.DOWNLOADABLE: return 'status-warning';
+    case MODEL_STATE.DOWNLOADABLE: return 'status-info';
     case MODEL_STATE.DOWNLOAD_FAILED:
     case MODEL_STATE.UNAVAILABLE: return 'status-danger';
     default: return 'status-neutral';
+  }
+});
+
+const providerStatusVariant = computed(() => {
+  if (modelState.value === MODEL_STATE.DOWNLOAD_FAILED) return 'provider-status-failed';
+  if (modelState.value === MODEL_STATE.UNAVAILABLE) return 'provider-status-unavailable';
+  return 'provider-status-active';
+});
+
+const modelStatusVariant = computed(() => {
+  switch (modelState.value) {
+    case MODEL_STATE.DOWNLOADABLE: return 'model-status-downloadable';
+    case MODEL_STATE.DOWNLOADING: return 'model-status-downloading';
+    case MODEL_STATE.AVAILABLE: return 'model-status-available';
+    case MODEL_STATE.DOWNLOAD_FAILED: return 'model-status-download-failed';
+    case MODEL_STATE.UNAVAILABLE: return 'model-status-unavailable';
+    default: return 'model-status-checking';
   }
 });
 
@@ -180,7 +197,7 @@ onUnmounted(() => {
               <strong>{{ t('serviceProviderChrome') }}</strong>
               <small>{{ t('serviceProviderChromeDescription') }}</small>
             </div>
-            <span class="status-badge" :class="statusClass">{{ providerStatusLabel }}</span>
+            <span class="status-badge" :class="[statusClass, providerStatusVariant]">{{ providerStatusLabel }}</span>
           </div>
         </section>
       </div>
@@ -197,7 +214,7 @@ onUnmounted(() => {
 
           <div class="model-heading">
             <h4>{{ t('serviceModelTitle') }}</h4>
-            <span class="status-badge" :class="statusClass">{{ statusLabel }}</span>
+            <span class="status-badge" :class="[statusClass, modelStatusVariant]">{{ statusLabel }}</span>
           </div>
           <div class="model-row">
             <span>{{ t('serviceModelPair') }}</span>

@@ -4,7 +4,25 @@ import {
   matchesAutoTranslateSite,
   normalizeHostnameList
 } from '../settings.js';
-import {TAB_ACTIVATION} from './tab-state.js';
+import {TAB_ACTIVATION, TAB_STATUS} from './tab-state.js';
+
+export function createLoadingStatePatch(state = {}, generation) {
+  return {
+    status: TAB_STATUS.OFF,
+    generation,
+    documentToken: null,
+    // Keep the activation context until CONTENT_READY can classify the new
+    // document. This is what lets a manual same-site translation continue
+    // across a full-page navigation.
+    activation: state.activation ?? null,
+    origin: state.origin ?? null,
+    hostname: state.hostname ?? null,
+    modelState: null,
+    progress: null,
+    errorCode: null,
+    errorMessage: null
+  };
+}
 
 export function isNavigationStateCurrent(before, after) {
   return before?.generation === after?.generation &&
