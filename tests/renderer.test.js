@@ -98,6 +98,34 @@ describe('TranslationRenderer', () => {
     expect(document.body.innerHTML).toBe('<ul><li id="source">List item</li></ul>');
   });
 
+  it('protects generated text from host list-item span styles', () => {
+    document.head.innerHTML = `
+      <style>
+        .tableofcontents li span {
+          position: absolute;
+          height: 12px;
+          width: 14px;
+          margin: 8px;
+          overflow: hidden;
+          white-space: nowrap;
+        }
+      </style>
+    `;
+    document.body.innerHTML = '<ul class="tableofcontents"><li id="source">Roadmap</li></ul>';
+    const source = document.querySelector('#source');
+    const renderer = new TranslationRenderer({ document, sessionId: 'host-style-session' });
+
+    renderer.insert({ element: source, sourceId: 'host-style-source', translatedText: '로드맵' });
+
+    const generatedText = source.querySelector('[data-translight-text="true"]');
+    const computedStyle = window.getComputedStyle(generatedText);
+    expect(computedStyle.position).toBe('static');
+    expect(computedStyle.width).toBe('auto');
+    expect(computedStyle.height).toBe('auto');
+    expect(computedStyle.margin).toBe('0px');
+    expect(computedStyle.display).toBe('inline');
+  });
+
   it.each(['flex', 'grid'])('does not create a second %s item for a layout child', (display) => {
     document.body.innerHTML = `<div id="layout" style="display:${display}"><div id="source">Layout child</div></div>`;
     const source = document.querySelector('#source');
