@@ -249,7 +249,11 @@ describe('PageSession', () => {
     });
 
     await session.start();
-    document.querySelector('a').firstChild.data = 'OpenAI team';
+    const anchor = document.querySelector('a');
+    const anchorText = anchor.querySelector(
+      '[data-translight-replacement-text="true"]'
+    )?.firstChild ?? anchor.firstChild;
+    anchorText.data = 'OpenAI team';
     await wait();
 
     expect(inputs).toContain('Visit OpenAI docs');

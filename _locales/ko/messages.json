@@ -194,7 +194,7 @@
     "message": "미리보기"
   },
   "settingsColorInvalid": {
-    "message": "#F0F6FF와 같은 6자리 16진수 색상값을 입력하세요."
+    "message": "#FFF4BF와 같은 6자리 16진수 색상값을 입력하세요."
   },
   "servicePageTitle": {
     "message": "번역 서비스"

@@ -155,7 +155,7 @@ function normalizeSourceText(value) {
     .trim();
 }
 
-function collectSourceTextNodes(element, mixedContent = false) {
+function collectSourceTextNodes(element, mixedContent = false, {includeReplacementText = false} = {}) {
   const nodes = [];
   const visit = (parent) => {
     for (const child of parent.childNodes ?? []) {
@@ -164,7 +164,13 @@ function collectSourceTextNodes(element, mixedContent = false) {
         continue;
       }
       if (child.nodeType !== 1) continue;
-      if (child.matches(EXCLUDED_CONTENT_SELECTOR) || child.matches(GENERATED_SELECTOR)) continue;
+      if (child.matches(EXCLUDED_CONTENT_SELECTOR)) continue;
+      if (child.matches(GENERATED_SELECTOR)) {
+        if (includeReplacementText && child.matches(`[${REPLACEMENT_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"]`)) {
+          visit(child);
+        }
+        continue;
+      }
       if (mixedContent && child.matches(BLOCK_SELECTOR)) continue;
       visit(child);
     }
@@ -534,7 +540,9 @@ export class TranslationRenderer {
 
   restoreSourceText(record, {onlyIfChanged = false} = {}) {
     if (!record.replaced) return false;
-    const currentNodes = collectSourceTextNodes(record.element, record.mixedContent);
+    const currentNodes = collectSourceTextNodes(record.element, record.mixedContent, {
+      includeReplacementText: record.replaced
+    });
     const presentedValues = record.presentedTextNodeValues ?? [record.presentedText ?? record.translatedText];
     const originalValues = record.originalTextNodeValues ?? [];
     const siteChanged = currentNodes.length !== presentedValues.length ||

@@ -1,4 +1,5 @@
 import {
+  DEFAULT_SETTINGS,
   hostnameForUrl,
   isSameOrigin,
   matchesAutoTranslateSite,
@@ -53,7 +54,12 @@ export function shouldAutoTranslate(url, sites) {
   return Boolean(hostname && matchesAutoTranslateSite(hostname, normalizeHostnameList(sites)));
 }
 
-export function classifyNavigation({state, url, autoTranslateSites = [], autoTranslateSameSite = true} = {}) {
+export function classifyNavigation({
+  state,
+  url,
+  autoTranslateSites = [],
+  autoTranslateSameSite = DEFAULT_SETTINGS.autoTranslateSameSite
+} = {}) {
   const hostname = hostnameForUrl(url);
   if (!hostname) return {translate: false, activation: null, hostname: ''};
   if (shouldContinueManualTranslation(state, url, autoTranslateSameSite)) {
