@@ -726,6 +726,9 @@ describe('PageSession', () => {
       .toBe('ko:A reusable list item.');
     expect(calls).toEqual(['A reusable list item.']);
     expect(document.querySelectorAll('translight-translation')).toHaveLength(1);
+    expect(session.renderer.records.size).toBe(1);
+    expect(session.renderer.hasRecord(source)).toBe(false);
+    expect(session.renderer.hasRecord(replacement)).toBe(true);
     session.stop();
   });
 
@@ -744,29 +747,45 @@ describe('PageSession', () => {
       })
     });
 
-    await session.start();
     const source = document.querySelector('#source');
-    source.nextElementSibling.remove();
-    await wait(500);
-    expect(source.nextElementSibling?.tagName.toLowerCase()).toBe('translight-translation');
+    let hostRemovals = 0;
+    const hostObserver = new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.addedNodes ?? []) {
+          if (node.nodeType !== 1 || !node.matches('translight-translation') ||
+              node.previousElementSibling !== source) continue;
+          hostRemovals += 1;
+          node.remove();
+        }
+      }
+    });
+    hostObserver.observe(document.body, {childList: true, subtree: true});
 
-    source.nextElementSibling.remove();
-    await wait(500);
-    expect(source.nextElementSibling).toBeNull();
+    try {
+      await session.start();
+      await wait(900);
 
-    const added = document.createElement('p');
-    added.textContent = 'A later post body.';
-    document.body.appendChild(added);
-    await wait(220);
+      expect(hostRemovals).toBe(2);
+      expect(session.recoveryTimer).toBeNull();
+      expect(session.pendingRecoveryElements.size).toBe(0);
+      expect(source.nextElementSibling).toBeNull();
 
-    expect(added.nextElementSibling?.textContent).toBe('ko:A later post body.');
-    expect(calls).toEqual(['A stable post body.', 'A later post body.']);
-    expect(session.running).toBe(true);
-    session.stop();
+      const added = document.createElement('p');
+      added.textContent = 'A later post body.';
+      document.body.appendChild(added);
+      await wait(220);
+
+      expect(added.nextElementSibling?.textContent).toBe('ko:A later post body.');
+      expect(calls).toEqual(['A stable post body.', 'A later post body.']);
+      expect(session.running).toBe(true);
+    } finally {
+      hostObserver.disconnect();
+      session.stop();
+    }
   });
 
   it('waits for the final DOM in a burst of SPA renders', async () => {
-    document.body.innerHTML = '<p id="source">Initial post body.</p>';
+    document.body.innerHTML = '<div id="root"><p id="source">Initial post body.</p></div>';
     const calls = [];
     const session = new PageSession({
       generation: 415,
@@ -781,16 +800,22 @@ describe('PageSession', () => {
     });
 
     await session.start();
-    const source = document.querySelector('#source');
-    for (const text of ['First interim body.', 'Second interim body.', 'Final post body.']) {
-      source.textContent = text;
-      await wait(20);
-    }
-    await wait(220);
+    try {
+      let source = document.querySelector('#source');
+      for (const text of ['First interim body.', 'Second interim body.', 'Final post body.']) {
+        const root = document.querySelector('#root');
+        root.innerHTML = `<p id="source">${text}</p>`;
+        source = root.querySelector('#source');
+        await wait(20);
+      }
+      expect(calls).toEqual(['Initial post body.']);
+      await wait(220);
 
-    expect(source.nextElementSibling?.textContent).toBe('ko:Final post body.');
-    expect(calls).toEqual(['Initial post body.', 'Final post body.']);
-    session.stop();
+      expect(source.nextElementSibling?.textContent).toBe('ko:Final post body.');
+      expect(calls).toEqual(['Initial post body.', 'Final post body.']);
+    } finally {
+      session.stop();
+    }
   });
 
   it('clears pending translation recovery when a session stops', async () => {

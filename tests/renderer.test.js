@@ -157,6 +157,42 @@ describe('TranslationRenderer', () => {
     expect(document.body.innerHTML).toBe('<ul><li id="source">List item</li></ul>');
   });
 
+  it('does not reattach a translation when the live source changed or became hidden', () => {
+    const source = document.querySelector('#source');
+    const renderer = new TranslationRenderer({document, sessionId: 'validation-session'});
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'validation-source',
+      sourceHash: hashSourceText('Original text'),
+      translatedText: '원문 번역'
+    });
+
+    translation.remove();
+    source.textContent = 'Changed source text';
+    expect(renderer.restoreMissingTranslations({elements: [source]})).toEqual({
+      restored: [],
+      invalid: [source]
+    });
+    expect(source.querySelector('translight-translation')).toBeNull();
+
+    renderer.remove(source);
+    document.body.innerHTML = '<p id="source" hidden>Hidden source text</p>';
+    const hiddenSource = document.querySelector('#source');
+    renderer.insert({
+      element: hiddenSource,
+      sourceId: 'hidden-source',
+      sourceHash: hashSourceText('Hidden source text'),
+      translatedText: '숨겨진 원문 번역'
+    });
+    hiddenSource.nextElementSibling?.remove();
+
+    expect(renderer.restoreMissingTranslations({elements: [hiddenSource]})).toEqual({
+      restored: [],
+      invalid: [hiddenSource]
+    });
+    renderer.removeAll();
+  });
+
   it('protects generated text from host list-item span styles', () => {
     document.head.innerHTML = `
       <style>

@@ -547,10 +547,12 @@ export class PageSession {
       const blocks = [];
       const seen = new Set();
       for (const root of roots) {
+        if (!root?.isConnected) continue;
         for (const block of this.collectBlocks(root, {
           targetLanguage: this.settings.targetLanguage,
           onExcluded: (element) => this.renderer?.remove(element)
         })) {
+          if (!block.element?.isConnected) continue;
           if (seen.has(block.element)) continue;
           seen.add(block.element);
           blocks.push(block);
