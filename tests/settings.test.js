@@ -24,7 +24,7 @@ describe('settings normalization', () => {
       textColor: '#111827',
       bold: false,
       italic: false,
-      autoTranslateSameSite: false,
+      autoTranslateSameSite: true,
       translatePageTitle: false
     });
     expect(createDefaultSettings()).toEqual(DEFAULT_SETTINGS);
