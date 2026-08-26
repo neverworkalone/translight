@@ -12,6 +12,7 @@ import { loadSettings, hostnameForUrl, matchesAutoTranslateSite, originForUrl } 
 import {
   classifyNavigation,
   createLoadingStatePatch,
+  documentUrlForUrl,
   isNavigationStateCurrent
 } from './navigation.js';
 
@@ -50,6 +51,10 @@ const ERROR_MESSAGE_KEYS = Object.freeze({
 let tabStates = {};
 let generationSequence = Date.now();
 const tabOperationChains = new Map();
+// Full document URLs are only needed to identify a late loading event. Keep
+// them out of persisted tab state because URLs may contain private paths or
+// query parameters.
+const documentUrls = new Map();
 
 function getSessionStorage() {
   return globalThis.chrome?.storage?.session ?? null;
@@ -80,6 +85,12 @@ function nextGeneration() {
 
 function getState(tabId) {
   return tabStates[String(tabId)] ?? createTabState();
+}
+
+function rememberDocumentUrl(tabId, url) {
+  const documentUrl = documentUrlForUrl(url);
+  if (documentUrl) documentUrls.set(String(tabId), documentUrl);
+  return documentUrl;
 }
 
 function enqueueTabOperation(tabId, operation) {
@@ -176,6 +187,7 @@ async function startTranslation(tab, {
   if (typeof tabId !== 'number') return;
 
   const generation = nextGeneration();
+  rememberDocumentUrl(tabId, url);
   const current = getState(tabId);
   await setState(tabId, {
     status: TAB_STATUS.CHECKING,
@@ -265,7 +277,10 @@ async function handleContentReady(message, sender) {
 
   const url = message.url || sender?.tab?.url || '';
   const initialState = getState(tabId);
-  if (initialState.documentToken === message.documentToken) return;
+  if (initialState.documentToken === message.documentToken) {
+    rememberDocumentUrl(tabId, url);
+    return;
+  }
   const settings = await loadSettings();
   const state = getState(tabId);
   const currentHost = hostnameForUrl(url);
@@ -276,8 +291,12 @@ async function handleContentReady(message, sender) {
     autoTranslateSameSite: settings.autoTranslateSameSite
   });
 
-  if (state.documentToken === message.documentToken) return;
+  if (state.documentToken === message.documentToken) {
+    rememberDocumentUrl(tabId, url);
+    return;
+  }
   if (state.documentToken == null && BUSY_STATUSES.has(state.status)) {
+    rememberDocumentUrl(tabId, url);
     await setState(tabId, {
       documentToken: message.documentToken,
       origin: state.origin || originForUrl(url),
@@ -287,6 +306,7 @@ async function handleContentReady(message, sender) {
   }
 
   if (!navigation.translate) {
+    rememberDocumentUrl(tabId, url);
     const next = await setState(tabId, {
       status: TAB_STATUS.OFF,
       generation: nextGeneration(),
@@ -356,7 +376,13 @@ async function handleContentNavigation(message, sender) {
   if (state.documentToken && state.documentToken !== message.documentToken) return;
   // SKIPPED only describes the last route. A SPA can replace a target-language
   // view with a foreign-language view without creating a new document.
-  if (isBusyOrActive(state)) return;
+  if (isBusyOrActive(state)) {
+    const documentUrl = documentUrlForUrl(message.url);
+    if (documentUrl && documentUrl !== documentUrls.get(String(tabId))) {
+      rememberDocumentUrl(tabId, message.url);
+    }
+    return;
+  }
 
   const settings = await loadSettings();
   const navigation = classifyNavigation({
@@ -405,25 +431,37 @@ async function handleTabUpdated(tabId, changeInfo) {
     autoTranslateSites: settings.autoTranslateSites,
     autoTranslateSameSite: settings.autoTranslateSameSite
   });
-  const loadingState = createLoadingStatePatch(state, nextGeneration());
-  if (!navigation.translate) {
+  if (navigation.translate) {
+    const documentUrl = documentUrlForUrl(url);
+    if (state.documentToken && documentUrls.get(String(tabId)) === documentUrl) {
+      // Let CONTENT_READY own the hand-off when it already reached this
+      // document. A loading event can be delivered after the new content
+      // script has reported ready; resetting the state here would invalidate
+      // the new session and leave the action icon in its default state.
+      return;
+    }
     if (state.activation == null && state.status === TAB_STATUS.OFF && state.documentToken == null) return;
+
+    const loadingState = createLoadingStatePatch(state, nextGeneration());
     await setState(tabId, {
       ...loadingState,
-      activation: null,
-      origin: null,
-      hostname: hostnameForUrl(url) || null
+      activation: navigation.activation,
+      origin: state.origin || originForUrl(url),
+      hostname: navigation.hostname || state.hostname
     });
+    documentUrls.delete(String(tabId));
     await sendStopMessage(tabId, state.generation);
     return;
   }
+  const loadingState = createLoadingStatePatch(state, nextGeneration());
+  if (state.activation == null && state.status === TAB_STATUS.OFF && state.documentToken == null) return;
   await setState(tabId, {
     ...loadingState,
-    documentToken: null,
-    activation: navigation.activation,
-    origin: state.origin || originForUrl(url),
-    hostname: navigation.hostname || state.hostname
+    activation: null,
+    origin: null,
+    hostname: hostnameForUrl(url) || null
   });
+  documentUrls.delete(String(tabId));
   await sendStopMessage(tabId, state.generation);
 }
 
@@ -499,5 +537,6 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 chrome.tabs.onRemoved.addListener((tabId) => {
   tabStates = removeTabState(tabStates, tabId);
   tabOperationChains.delete(String(tabId));
+  documentUrls.delete(String(tabId));
   void persist();
 });

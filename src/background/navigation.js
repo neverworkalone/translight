@@ -24,6 +24,17 @@ export function createLoadingStatePatch(state = {}, generation) {
   };
 }
 
+export function documentUrlForUrl(value) {
+  if (typeof value !== 'string' || !value.trim()) return '';
+  try {
+    const parsed = new URL(value);
+    parsed.hash = '';
+    return parsed.href;
+  } catch {
+    return value.split('#', 1)[0];
+  }
+}
+
 export function isNavigationStateCurrent(before, after) {
   return before?.generation === after?.generation &&
     before?.documentToken === after?.documentToken;

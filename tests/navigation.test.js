@@ -2,6 +2,7 @@ import {describe, expect, it} from 'vitest';
 import {
   classifyNavigation,
   createLoadingStatePatch,
+  documentUrlForUrl,
   isNavigationStateCurrent,
   shouldContinueManualTranslation
 } from '../src/background/navigation.js';
@@ -67,6 +68,11 @@ describe('navigation activation rules', () => {
       modelState: null,
       progress: null
     });
+  });
+
+  it('normalizes document URLs without changing route identity for hashes', () => {
+    expect(documentUrlForUrl('https://example.com/article#details'))
+      .toBe('https://example.com/article');
   });
 
   it('rejects a loading update that was made stale while awaiting settings', () => {
