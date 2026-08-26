@@ -60,7 +60,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   italic: false,
   targetLanguage: TARGET_LANGUAGES.KOREAN,
   translationProvider: TRANSLATION_PROVIDERS.CHROME,
-  autoTranslateSameSite: true,
+  autoTranslateSameSite: false,
   translatePageTitle: false,
   autoTranslateSites: []
 });

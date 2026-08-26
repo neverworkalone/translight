@@ -52,11 +52,11 @@ describe('navigation activation rules', () => {
     })).toMatchObject({translate: true, activation: TAB_ACTIVATION.AUTO});
   });
 
-  it('defaults same-site continuation to enabled', () => {
+  it('defaults same-site continuation to disabled', () => {
     expect(classifyNavigation({
       state: {activation: TAB_ACTIVATION.MANUAL, origin: 'https://example.com'},
       url: 'https://example.com/next'
-    })).toMatchObject({translate: true, activation: TAB_ACTIVATION.MANUAL});
+    })).toMatchObject({translate: false});
   });
 
   it('preserves the manual activation context while a full navigation is loading', () => {

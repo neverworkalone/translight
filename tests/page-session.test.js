@@ -110,6 +110,80 @@ describe('PageSession', () => {
     document.documentElement.removeAttribute('lang');
   });
 
+  it('does not restart model preparation for consecutive watch-only renders', async () => {
+    document.documentElement.lang = 'ko-KR';
+    document.body.innerHTML = '<p>처음에는 한국어 콘텐츠만 있습니다.</p>';
+    let releaseModel;
+    const modelReady = new Promise((resolve) => { releaseModel = resolve; });
+    let modelChecks = 0;
+    const calls = [];
+    const session = new PageSession({
+      generation: 114,
+      document,
+      settings: {translatePageTitle: false},
+      provider: {
+        getModelState: async () => {
+          modelChecks += 1;
+          return modelReady;
+        },
+        prepare: async () => {},
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        },
+        cancel: () => {},
+        close: () => {}
+      }
+    });
+
+    await session.start();
+    const first = document.createElement('p');
+    first.textContent = 'The first post arrived.';
+    document.body.appendChild(first);
+    await wait(130);
+    const second = document.createElement('p');
+    second.textContent = 'The second post arrived right after it.';
+    document.body.appendChild(second);
+    await wait(130);
+
+    expect(modelChecks).toBe(1);
+    releaseModel('Available');
+    await wait(180);
+    expect(calls).toEqual(expect.arrayContaining([
+      'The first post arrived.',
+      'The second post arrived right after it.'
+    ]));
+    session.stop({notify: false});
+    document.documentElement.removeAttribute('lang');
+  });
+
+  it('translates an English block when a SPA reveals it by changing attributes', async () => {
+    document.documentElement.lang = 'ko-KR';
+    document.body.innerHTML = '<p id="revealed" hidden>English content revealed later.</p>';
+    const calls = [];
+    const session = new PageSession({
+      generation: 115,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    await session.start();
+    document.querySelector('#revealed').hidden = false;
+    await wait(220);
+
+    expect(calls).toEqual(['English content revealed later.']);
+    expect(document.querySelector('#revealed + translight-translation')?.textContent)
+      .toBe('ko:English content revealed later.');
+    session.stop({notify: false});
+    document.documentElement.removeAttribute('lang');
+  });
+
   it('translates English content on a page whose UI declares Korean', async () => {
     document.documentElement.lang = 'ko-KR';
     document.body.innerHTML = `

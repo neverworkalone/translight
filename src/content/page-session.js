@@ -85,6 +85,7 @@ export class PageSession {
     this.titleObserver = null;
     this.mutationTimer = null;
     this.pendingMutationRoots = new Set();
+    this.mutationOverflow = false;
     this.navigationHandler = null;
     this.scrollHandler = null;
     this.priorityTimer = null;
@@ -262,12 +263,15 @@ export class PageSession {
     if (!this.observe) return;
     const view = getView(this.document);
     const MutationObserverClass = view?.MutationObserver ?? globalThis.MutationObserver;
-    if (typeof MutationObserverClass === 'function' && this.document.body) {
+    const observationRoot = this.document.documentElement ?? this.document.body;
+    if (typeof MutationObserverClass === 'function' && observationRoot) {
       this.observer = new MutationObserverClass((records) => this.handleMutations(records));
-      this.observer.observe(this.document.body, {
+      this.observer.observe(observationRoot, {
         childList: true,
         characterData: true,
-        subtree: true
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['class', 'style', 'hidden', 'aria-hidden', 'lang']
       });
     }
 
@@ -319,6 +323,7 @@ export class PageSession {
     if (this.priorityTimer != null) clearTimeout(this.priorityTimer);
     this.priorityTimer = null;
     this.pendingMutationRoots.clear();
+    this.mutationOverflow = false;
     const view = getView(this.document);
     if (this.navigationHandler) {
       view?.removeEventListener?.(NAVIGATION_EVENT, this.navigationHandler);
@@ -335,35 +340,43 @@ export class PageSession {
 
   handleMutations(records) {
     if (!this.isCurrent()) return;
+    const addMutationRoot = (root) => {
+      if (!root || this.pendingMutationRoots.has(root)) return;
+      if (this.pendingMutationRoots.size >= MAX_MUTATION_ROOTS) {
+        this.mutationOverflow = true;
+        return;
+      }
+      this.pendingMutationRoots.add(root);
+    };
     for (const element of this.renderer?.pruneMissingTranslations?.() ?? []) {
-      if (this.pendingMutationRoots.size >= MAX_MUTATION_ROOTS) break;
-      this.pendingMutationRoots.add(element);
+      addMutationRoot(element);
     }
     for (const record of records) {
       if (record.type === 'characterData') {
         const block = getClosestBlock(record.target);
-        if (block && this.pendingMutationRoots.size < MAX_MUTATION_ROOTS) this.pendingMutationRoots.add(block);
+        addMutationRoot(block);
         continue;
       }
       const changedBlock = getClosestBlock(record.target);
-      if (changedBlock && this.pendingMutationRoots.size < MAX_MUTATION_ROOTS) {
-        this.pendingMutationRoots.add(changedBlock);
-      }
+      addMutationRoot(changedBlock);
       for (const node of record.addedNodes ?? []) {
         if (node.nodeType !== 1) continue;
         if (node.matches?.('[data-translight-generated="true"],style')) continue;
-        if (this.pendingMutationRoots.size < MAX_MUTATION_ROOTS) this.pendingMutationRoots.add(node);
+        addMutationRoot(node);
       }
     }
-    if (!this.pendingMutationRoots.size) {
+    if (!this.pendingMutationRoots.size && !this.mutationOverflow) {
       this.renderer?.pruneDisconnected?.();
       return;
     }
     if (this.mutationTimer != null) return;
     this.mutationTimer = setTimeout(() => {
       this.mutationTimer = null;
-      const roots = [...this.pendingMutationRoots];
+      const roots = this.mutationOverflow
+        ? [this.document.body]
+        : [...this.pendingMutationRoots];
       this.pendingMutationRoots.clear();
+      this.mutationOverflow = false;
       // Replacement modes can leave translated segments in unchanged inline
       // nodes while a site updates one sibling. Restore changed records before
       // collecting text so the provider receives the real source text.
@@ -381,7 +394,13 @@ export class PageSession {
         }
       }
       if (blocks.length) {
-        if (this.watchOnly) void this.start();
+        if (this.watchOnly) {
+          // Move out of watch-only before starting. Reddit can deliver many
+          // mutation batches while the model is preparing; without this
+          // transition every batch would cancel and restart the same session.
+          this.watchOnly = false;
+          void this.start();
+        }
         else void this.enqueueBlocks(blocks);
       }
       this.renderer?.pruneDisconnected?.();
@@ -404,7 +423,10 @@ export class PageSession {
       onExcluded: (element) => this.renderer?.remove(element)
     });
     if (this.watchOnly) {
-      if (blocks.length || hasTranslatableTitle) void this.start();
+      if (blocks.length || hasTranslatableTitle) {
+        this.watchOnly = false;
+        void this.start();
+      }
       return;
     }
     if (shouldTranslateTitle) {
