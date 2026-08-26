@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Translight에서 Chrome 내장 번역 모델을 준비하고 문제를 해결하는 방법입니다.">
+  <title>Chrome 번역 모델 준비 | Translight · 빛번역</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="document">
+    <nav class="document-nav" aria-label="문서 이동">
+      <a href="index.html">← 도움말</a>
+      <a href="appearance.html">03 표시 설정 →</a>
+    </nav>
+    <article>
+      <header class="document-header">
+        <p class="eyebrow">Translight · 빛번역</p>
+        <h1>Chrome 번역 모델<br>준비하기</h1>
+        <img class="product-image product-image--promotion" src="assets/small-promotion-tile.png" width="440" height="280"
+             alt="어두운 배경 위에 Translight 빛번역 로고가 있는 홍보 이미지">
+      </header>
+
+      <div class="content">
+        <blockquote>
+          <p>Translight는 Chrome에 내장된 Translator API를 사용합니다. 번역 모델은 기기에서 실행되며, 페이지 내용을 외부 번역 서버로 보내지 않습니다.</p>
+        </blockquote>
+
+        <p>영어 → 한국어 모델이 기기에 없으면 첫 번역을 시작할 때 자동 다운로드가 시작됩니다. 페이지가 길거나 처음 설치한 직후에는 다운로드와 번역에 수십 초가 걸릴 수 있습니다.</p>
+
+        <h2>모델을 미리 다운로드하는 방법</h2>
+        <ol class="steps">
+          <li>Translight의 <strong>설정</strong> 페이지를 엽니다.</li>
+          <li><strong>번역 서비스</strong>에서 Chrome 내장 번역과 영어 → 한국어 모델의 상태를 확인합니다.</li>
+          <li>상태가 <span class="status-pill status-pill--info">다운로드 필요</span>라면 <strong>다운로드</strong>를 누르고 완료될 때까지 기다립니다.</li>
+          <li>상태가 <span class="status-pill status-pill--success">사용 가능</span>으로 바뀌면 설정을 저장하고 웹페이지에서 번역을 시작합니다.</li>
+        </ol>
+
+        <div class="model-card">
+          <div class="model-card-heading"><span class="model-dot" aria-hidden="true"></span><strong>영어 → 한국어</strong><span class="status-pill status-pill--success">사용 가능</span></div>
+          <div class="model-track" aria-hidden="true"><span></span></div>
+          <p>모델이 준비되면 다음 번역부터 다운로드를 기다리지 않고 바로 시작합니다.</p>
+        </div>
+
+        <h2>다운로드 중에는 어떻게 하나요?</h2>
+        <p>툴바 아이콘의 안내와 설정 페이지의 진행 상태를 확인하면서 기다려 주세요. 다운로드가 끝나기 전에 아이콘을 여러 번 누르면 같은 작업을 다시 시작하거나 오류 상태가 보일 수 있습니다.</p>
+        <p>다운로드가 실패했다면 설정 페이지의 <strong>다시 시도</strong>를 누르세요. 계속 문제가 생기면 Chrome의 온디바이스 번역 관리 화면에서 <code>en-ko</code> 모델을 삭제한 뒤 다시 설치할 수 있습니다.</p>
+        <p class="inline-code"><code>chrome://on-device-translation-internals</code></p>
+
+        <h2>사용할 수 없는 경우</h2>
+        <p>Chrome Translator가 지원되지 않는 환경에서는 모델 상태가 <span class="status-pill status-pill--danger">사용 불가</span>로 표시됩니다. 이 경우 Chrome을 최신 버전으로 업데이트하고 데스크톱 환경에서 다시 확인해 주세요.</p>
+
+        <p class="store-link"><a href="appearance.html">다음: 번역 표시 설정 <span aria-hidden="true">→</span></a></p>
+      </div>
+    </article>
+  </main>
+</body>
+</html>
