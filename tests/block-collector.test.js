@@ -65,6 +65,35 @@ describe('collectTranslationBlocks', () => {
     ]);
   });
 
+  it('anchors mixed direct-text segments around nested blocks in document order', () => {
+    document.body.innerHTML = `
+      <div id="mixed">
+        <h2>Section heading</h2>
+        First paragraph.<div><br></div>
+        Second paragraph.<p>Nested block.</p>Third paragraph.
+      </div>
+    `;
+
+    const mixed = document.querySelector('#mixed');
+    const blocks = collectTranslationBlocks(document.body);
+
+    expect(blocks.map((block) => block.text)).toEqual([
+      'Section heading',
+      'First paragraph.',
+      'Second paragraph.',
+      'Nested block.',
+      'Third paragraph.'
+    ]);
+    expect(blocks.filter(({element}) => element.matches('[data-translight-segment="true"]')))
+      .toHaveLength(3);
+    expect(mixed.innerHTML).toContain(
+      '<h2>Section heading</h2><span data-translight-segment="true"'
+    );
+    expect(mixed.querySelector('p')?.previousElementSibling?.matches('[data-translight-segment="true"]'))
+      .toBe(true);
+    expect(mixed.lastElementChild?.matches('[data-translight-segment="true"]')).toBe(true);
+  });
+
   it('splits direct text paragraphs separated by double line breaks', () => {
     document.body.innerHTML = `
       <div id="guide">

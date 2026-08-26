@@ -126,8 +126,13 @@ function textFromNodes(nodes, root) {
   return Array.from(nodes ?? [], (node) => textFromNode(node, root)).join('');
 }
 
-function directSegmentRanges(element) {
-  const nodes = Array.from(element.childNodes ?? []);
+function isNestedBlockNode(node) {
+  if (!isElement(node)) return false;
+  return node.matches?.(`${BLOCK_SELECTOR},${SEGMENT_SELECTOR}`) ||
+    Boolean(node.querySelector?.(`${BLOCK_SELECTOR},${SEGMENT_SELECTOR}`));
+}
+
+function splitNodesAtDoubleBreaks(nodes) {
   const ranges = [];
   let segmentStart = 0;
 
@@ -166,11 +171,30 @@ function directSegmentRanges(element) {
   return ranges.filter(({nodes}) => nodes.length && isPhrasingContent(nodes));
 }
 
-function splitDirectTextIntoSegments(element, targetLanguage) {
+function directContentRanges(element) {
+  const ranges = [];
+  let current = [];
+  const flush = () => {
+    ranges.push(...splitNodesAtDoubleBreaks(current));
+    current = [];
+  };
+
+  for (const node of Array.from(element.childNodes ?? [])) {
+    if (isNestedBlockNode(node)) {
+      flush();
+      continue;
+    }
+    current.push(node);
+  }
+  flush();
+  return ranges;
+}
+
+function splitDirectTextIntoSegments(element, targetLanguage, {hasNestedBlocks = false} = {}) {
   if (!isElement(element) || element.matches(SEGMENT_SELECTOR)) return [];
 
-  const ranges = directSegmentRanges(element);
-  if (ranges.length < 2) return [];
+  const ranges = directContentRanges(element);
+  if (ranges.length < 2 && !hasNestedBlocks) return [];
 
   const translatableRanges = ranges.filter(({nodes}) => {
     const text = normalizeSourceText(textFromNodes(nodes, element));
@@ -206,7 +230,7 @@ function hasBlockDescendant(element, candidateSet) {
 
 export function collectTranslationBlocks(
   root = globalThis.document?.body,
-  {targetLanguage = 'ko', onExcluded} = {}
+  {targetLanguage = 'ko', onExcluded, splitSegments = true} = {}
 ) {
   if (!root || typeof root.querySelectorAll !== 'function') return [];
 
@@ -214,7 +238,7 @@ export function collectTranslationBlocks(
   const candidateSet = new Set(candidates);
   const blocks = [];
 
-  const processCandidate = (element, {allowSegmentation = true} = {}) => {
+  const processCandidate = (element, {allowSegmentation = splitSegments} = {}) => {
     if (!isElement(element)) return;
     if (isGenerated(element) || isExcluded(element)) return;
     const existingSourceId = element.getAttribute(SOURCE_ID_ATTRIBUTE);
@@ -228,8 +252,9 @@ export function collectTranslationBlocks(
     if (hasNestedBlocks && !directText) return;
 
     const text = hasNestedBlocks ? directText : normalizeSourceText(textFromNode(element, element));
-    if (allowSegmentation && !hasNestedBlocks && !isNavigationLike(element, text)) {
-      const segments = splitDirectTextIntoSegments(element, targetLanguage);
+    const segmentationText = hasNestedBlocks ? directText : text;
+    if (allowSegmentation && segmentationText && !isNavigationLike(element, segmentationText)) {
+      const segments = splitDirectTextIntoSegments(element, targetLanguage, {hasNestedBlocks});
       if (segments.length) {
         for (const segment of segments) processCandidate(segment, {allowSegmentation: false});
         return;
@@ -260,7 +285,12 @@ export function collectTranslationBlocks(
 
   for (const element of candidates) processCandidate(element);
 
-  return blocks;
+  return blocks.sort((left, right) => {
+    const position = left.element.compareDocumentPosition?.(right.element) ?? 0;
+    if (position & 4) return -1;
+    if (position & 2) return 1;
+    return 0;
+  });
 }
 
 export function resetSourceSequence() {

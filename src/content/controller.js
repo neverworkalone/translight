@@ -87,7 +87,10 @@ export function installContentController({
       url: globalThis.location?.href ?? '',
       origin: globalThis.location?.origin ?? '',
       resume: true,
-      contentSessionActive: Boolean(session?.isNavigationWatching?.() ?? session?.running === true)
+      contentSessionActive: Boolean(session?.isNavigationWatching?.() ?? session?.running === true),
+      contentSessionGeneration: Number.isInteger(session?.generation) ? session.generation : null,
+      contentSessionStatus: session?.status ?? null,
+      contentSessionActivation: session?.activation ?? null
     });
   };
   globalThis.addEventListener?.('pagehide', controller.pageLifecycleHandler);
@@ -166,6 +169,7 @@ export function installContentController({
     controller.lastNavigationUrl = globalThis.location?.href ?? controller.lastNavigationUrl;
     controller.currentSession = createSession({
       generation: message.generation,
+      activation: message.activation ?? null,
       sendStatus,
       settings: controller.settings,
       translationCache: controller.translationCache,

@@ -250,6 +250,82 @@ describe('background automatic translation status', () => {
     expect(contentMessages.filter(({message}) => message.type === 'TRANSLATION_START')).toHaveLength(2);
   });
 
+  it('adopts a live BFCache session without restarting it when continuation is enabled', async () => {
+    installChrome({autoTranslateSites: [], autoTranslateSameSite: true});
+    await import('../src/background/index.js?background-bfcache-adopt-on');
+    await runtimeMessage({
+      type: 'CONTENT_READY',
+      documentToken: 'document-a',
+      url: 'https://example.com/questions'
+    }, {tab: {id: 1, url: 'https://example.com/questions'}});
+    await settle();
+
+    await clickedListeners[0]({id: 1, url: 'https://example.com/questions'});
+    await settle();
+    const startMessage = contentMessages.find(({message}) => message.type === 'TRANSLATION_START')?.message;
+    expect(startMessage.activation).toBe('manual');
+
+    await updatedListeners[0](1, {status: 'loading', url: 'https://example.com/other'});
+    await settle();
+    await runtimeMessage({
+      type: 'CONTENT_READY',
+      documentToken: 'document-a',
+      url: 'https://example.com/questions',
+      resume: true,
+      contentSessionActive: true,
+      contentSessionGeneration: startMessage.generation,
+      contentSessionStatus: 'ACTIVE',
+      contentSessionActivation: 'manual'
+    }, {tab: {id: 1, url: 'https://example.com/questions'}});
+    await settle();
+
+    expect(contentMessages.filter(({message}) => message.type === 'TRANSLATION_START')).toHaveLength(1);
+    expect(iconCalls.at(-1)?.path?.[16]).toBe('icon-active16.png');
+
+    await clickedListeners[0]({id: 1, url: 'https://example.com/questions'});
+    await settle();
+    expect(contentMessages.at(-1)?.message).toMatchObject({
+      type: 'TRANSLATION_STOP',
+      generation: startMessage.generation
+    });
+  });
+
+  it('stops a restored content session when same-site continuation is disabled', async () => {
+    installChrome({autoTranslateSites: [], autoTranslateSameSite: false});
+    await import('../src/background/index.js?background-bfcache-adopt-off');
+    await runtimeMessage({
+      type: 'CONTENT_READY',
+      documentToken: 'document-a',
+      url: 'https://example.com/questions'
+    }, {tab: {id: 1, url: 'https://example.com/questions'}});
+    await settle();
+
+    await clickedListeners[0]({id: 1, url: 'https://example.com/questions'});
+    await settle();
+    const startMessage = contentMessages.find(({message}) => message.type === 'TRANSLATION_START')?.message;
+
+    await updatedListeners[0](1, {status: 'loading', url: 'https://example.com/other'});
+    await settle();
+    await runtimeMessage({
+      type: 'CONTENT_READY',
+      documentToken: 'document-a',
+      url: 'https://example.com/questions',
+      resume: true,
+      contentSessionActive: true,
+      contentSessionGeneration: startMessage.generation,
+      contentSessionStatus: 'ACTIVE',
+      contentSessionActivation: 'manual'
+    }, {tab: {id: 1, url: 'https://example.com/questions'}});
+    await settle();
+
+    expect(contentMessages.filter(({message}) => message.type === 'TRANSLATION_START')).toHaveLength(1);
+    expect(contentMessages.at(-1)?.message).toMatchObject({
+      type: 'TRANSLATION_STOP',
+      generation: startMessage.generation
+    });
+    expect(iconCalls.at(-1)?.path?.[16]).toBe('icon16.png');
+  });
+
   it('starts a registered-site translation when loading is handled before content is ready', async () => {
     installChrome();
     await import('../src/background/index.js?background-loading-first');

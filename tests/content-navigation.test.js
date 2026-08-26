@@ -28,7 +28,10 @@ describe('content navigation notifications', () => {
     const controller = installContentController({runtime});
     controller.currentSession = {
       isNavigationWatching: () => true,
-      beginRouteChange: vi.fn()
+      beginRouteChange: vi.fn(),
+      generation: 42,
+      status: 'ACTIVE',
+      activation: 'manual'
     };
     history.pushState({}, '', '#Types');
     controller.navigationHandler();
@@ -121,7 +124,10 @@ describe('content navigation notifications', () => {
     const controller = installContentController({runtime});
     const session = {
       isNavigationWatching: () => true,
-      stop: vi.fn()
+      stop: vi.fn(),
+      generation: 42,
+      status: 'ACTIVE',
+      activation: 'manual'
     };
     controller.currentSession = session;
 
@@ -134,7 +140,10 @@ describe('content navigation notifications', () => {
       documentToken: expect.any(String),
       url: `${location.origin}/questions`,
       resume: true,
-      contentSessionActive: true
+      contentSessionActive: true,
+      contentSessionGeneration: 42,
+      contentSessionStatus: 'ACTIVE',
+      contentSessionActivation: 'manual'
     });
     controller.stopNavigationWatcher();
   });
