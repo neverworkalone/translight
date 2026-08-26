@@ -8,6 +8,7 @@ const clickedListeners = [];
 const iconCalls = [];
 const badgeCalls = [];
 const titleCalls = [];
+const contentMessages = [];
 let settings;
 let runtimeMessage;
 
@@ -25,10 +26,11 @@ function makeArea(value) {
 function installChrome({
   autoTranslateSites = ['example.com'],
   statuses = ['ACTIVE'],
+  autoTranslateSameSite = true,
   tabs = []
 } = {}) {
   settings = {
-    autoTranslateSameSite: true,
+    autoTranslateSameSite,
     autoTranslateSites
   };
   globalThis.chrome = {
@@ -52,6 +54,7 @@ function installChrome({
       onRemoved: {addListener(listener) { removedListeners.push(listener); }},
       query: async () => tabs,
       sendMessage: async (tabId, message) => {
+        contentMessages.push({tabId, message});
         if (message.type === 'TRANSLATION_START') {
           statuses.forEach((status) => queueMicrotask(() => runtimeMessage?.({
             type: 'TRANSLATION_STATUS',
@@ -80,6 +83,7 @@ afterEach(() => {
   iconCalls.length = 0;
   badgeCalls.length = 0;
   titleCalls.length = 0;
+  contentMessages.length = 0;
   runtimeMessage = null;
 });
 
@@ -255,5 +259,96 @@ describe('background automatic translation status', () => {
     await settle();
 
     expect(iconCalls.at(-1)?.path?.[16]).toBe('icon-active16.png');
+  });
+
+  it('approves a same-origin SPA route without restarting an active manual session', async () => {
+    installChrome({autoTranslateSites: [], autoTranslateSameSite: true});
+    await import('../src/background/index.js?background-spa-manual-allowed');
+    await runtimeMessage({
+      type: 'CONTENT_READY',
+      documentToken: 'document-1',
+      url: 'https://example.com/first'
+    }, {tab: {id: 1, url: 'https://example.com/first'}});
+    await settle();
+    await clickedListeners[0]({id: 1, url: 'https://example.com/first'});
+    await settle();
+
+    await runtimeMessage({
+      type: 'CONTENT_NAVIGATION',
+      previousUrl: 'https://example.com/first',
+      currentUrl: 'https://example.com/second',
+      url: 'https://example.com/second',
+      documentToken: 'document-1',
+      routeGeneration: 1
+    }, {tab: {id: 1, url: 'https://example.com/second'}});
+    await settle();
+
+    expect(contentMessages.filter(({message}) => message.type === 'TRANSLATION_START')).toHaveLength(1);
+    expect(contentMessages.at(-1)?.message).toMatchObject({
+      type: 'TRANSLATION_ROUTE',
+      routeGeneration: 1,
+      continueTranslation: true
+    });
+    expect(iconCalls.at(-1)?.path?.[16]).toBe('icon-active16.png');
+  });
+
+  it('stops a manual SPA session when same-origin continuation is disabled', async () => {
+    installChrome({autoTranslateSites: [], autoTranslateSameSite: false});
+    await import('../src/background/index.js?background-spa-manual-disabled');
+    await runtimeMessage({
+      type: 'CONTENT_READY',
+      documentToken: 'document-1',
+      url: 'https://example.com/first'
+    }, {tab: {id: 1, url: 'https://example.com/first'}});
+    await settle();
+    await clickedListeners[0]({id: 1, url: 'https://example.com/first'});
+    await settle();
+
+    await runtimeMessage({
+      type: 'CONTENT_NAVIGATION',
+      previousUrl: 'https://example.com/first',
+      currentUrl: 'https://example.com/second',
+      url: 'https://example.com/second',
+      documentToken: 'document-1',
+      routeGeneration: 1
+    }, {tab: {id: 1, url: 'https://example.com/second'}});
+    await settle();
+
+    expect(contentMessages.at(-2)?.message).toMatchObject({
+      type: 'TRANSLATION_ROUTE',
+      routeGeneration: 1,
+      continueTranslation: false
+    });
+    expect(contentMessages.at(-1)?.message.type).toBe('TRANSLATION_STOP');
+    expect(iconCalls.at(-1)?.path?.[16]).toBe('icon16.png');
+  });
+
+  it('stops automatic translation when an SPA route leaves the registered hostname', async () => {
+    installChrome({autoTranslateSites: ['example.com']});
+    await import('../src/background/index.js?background-spa-auto-escape');
+    await runtimeMessage({
+      type: 'CONTENT_READY',
+      documentToken: 'document-1',
+      url: 'https://example.com/first'
+    }, {tab: {id: 1, url: 'https://example.com/first'}});
+    await settle();
+
+    await runtimeMessage({
+      type: 'CONTENT_NAVIGATION',
+      previousUrl: 'https://example.com/first',
+      currentUrl: 'https://other.example/second',
+      url: 'https://other.example/second',
+      documentToken: 'document-1',
+      routeGeneration: 1
+    }, {tab: {id: 1, url: 'https://other.example/second'}});
+    await settle();
+
+    expect(contentMessages.at(-2)?.message).toMatchObject({
+      type: 'TRANSLATION_ROUTE',
+      routeGeneration: 1,
+      continueTranslation: false
+    });
+    expect(contentMessages.at(-1)?.message.type).toBe('TRANSLATION_STOP');
+    expect(iconCalls.at(-1)?.path?.[16]).toBe('icon16.png');
   });
 });

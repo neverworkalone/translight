@@ -67,7 +67,7 @@ export function prioritizeBlocks(blocks, options = {}) {
 }
 
 function blockKey(block) {
-  return `${block?.sourceId ?? ''}\u0000${block?.text ?? ''}`;
+  return `${block?.routeGeneration ?? 0}\u0000${block?.sourceId ?? ''}\u0000${block?.text ?? ''}`;
 }
 
 function trimCache(cache, limit) {

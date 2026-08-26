@@ -11,8 +11,7 @@ const DEFAULT_CONCURRENCY = 3;
 const MUTATION_DEBOUNCE_MS = 100;
 const MAX_MUTATION_ROOTS = 64;
 const BLOCK_SELECTOR = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,figcaption,div,td,th';
-const NAVIGATION_EVENT = 'translight:navigation';
-const HISTORY_PATCH_KEY = '__translight_history_patch__';
+const ROUTE_SETTLE_DELAYS = Object.freeze([100, 500]);
 let sessionSequence = 0;
 
 function errorPayload(error) {
@@ -32,24 +31,6 @@ function getClosestBlock(node) {
   return node.parentElement?.closest?.(BLOCK_SELECTOR) ?? null;
 }
 
-function installHistoryPatch(view) {
-  if (!view?.history || view[HISTORY_PATCH_KEY]) return;
-  const notify = () => view.dispatchEvent(new view.Event(NAVIGATION_EVENT));
-  const originalPushState = view.history.pushState;
-  const originalReplaceState = view.history.replaceState;
-  view.history.pushState = function patchedPushState(...args) {
-    const result = originalPushState.apply(this, args);
-    notify();
-    return result;
-  };
-  view.history.replaceState = function patchedReplaceState(...args) {
-    const result = originalReplaceState.apply(this, args);
-    notify();
-    return result;
-  };
-  view[HISTORY_PATCH_KEY] = {originalPushState, originalReplaceState};
-}
-
 export class PageSession {
   constructor({
     generation,
@@ -60,7 +41,9 @@ export class PageSession {
     settings,
     translationCache = new Map(),
     isGenerationCurrent = () => true,
-    observe = true
+    observe = true,
+    onDomMutation = () => false,
+    initialRouteGeneration = 0
   }) {
     this.generation = generation;
     this.document = document;
@@ -78,6 +61,7 @@ export class PageSession {
     this.translationCache = translationCache;
     this.isGenerationCurrent = isGenerationCurrent;
     this.observe = observe;
+    this.onDomMutation = onDomMutation;
     this.sessionId = `session-${generation}-${Date.now()}-${++sessionSequence}`;
     this.renderer = null;
     this.queue = null;
@@ -86,14 +70,18 @@ export class PageSession {
     this.mutationTimer = null;
     this.pendingMutationRoots = new Set();
     this.mutationOverflow = false;
-    this.navigationHandler = null;
     this.scrollHandler = null;
     this.priorityTimer = null;
-    this.lastUrl = this.document?.location?.href ?? '';
+    this.routeGeneration = Number.isInteger(initialRouteGeneration) ? initialRouteGeneration : 0;
+    this.routeDecisionPending = false;
+    this.routeMutationSeen = false;
+    this.routeSettleTimers = new Set();
+    this.routeDecisionWaiters = [];
     this.originalTitle = null;
     this.translatedTitle = null;
     this.titleRequest = 0;
     this.updatingTitle = false;
+    this.providerReady = false;
     this.running = false;
     this.watchOnly = false;
     this.runPromise = null;
@@ -104,6 +92,10 @@ export class PageSession {
 
   isCurrent() {
     return this.running && !this.controller?.signal.aborted && this.isGenerationCurrent(this.generation);
+  }
+
+  isNavigationWatching() {
+    return this.running;
   }
 
   notify(status, payload = {}) {
@@ -127,11 +119,16 @@ export class PageSession {
     const wasRunning = this.running;
     this.running = false;
     this.watchOnly = false;
+    this.routeDecisionPending = false;
+    this.routeMutationSeen = false;
+    this.clearRouteSettleTimers();
+    this.resolveRouteDecisionWaiters();
     this.controller?.abort();
     this.queue?.cancel();
     this.queue = null;
     this.disconnectObservers();
     this.provider.cancel?.();
+    this.providerReady = false;
     this.renderer?.removeAll();
     this.renderer = null;
     this.provider.close?.();
@@ -142,6 +139,7 @@ export class PageSession {
   async run() {
     const signal = this.controller.signal;
     try {
+      const startupRouteGeneration = this.routeGeneration;
       const initialBlocks = collectTranslationBlocks(this.document.body, {
         targetLanguage: this.settings.targetLanguage
       });
@@ -182,22 +180,73 @@ export class PageSession {
         }
       });
       if (!this.isCurrent()) throw new TranslationCancelledError();
+      this.providerReady = true;
 
       const blocks = collectTranslationBlocks(this.document.body, {
         targetLanguage: this.settings.targetLanguage,
         onExcluded: (element) => this.renderer?.remove(element)
       });
-      this.createQueue(signal);
-      this.notify('TRANSLATING', {count: blocks.length});
       this.installObservers();
+      // A route may have been discovered while the model was preparing. Do
+      // not collect or enqueue the old route until the background policy has
+      // approved continuation.
+      await this.waitForRouteDecision(signal);
+      if (!this.isCurrent()) throw new TranslationCancelledError();
+      await this.translateCurrentRoute(
+        signal,
+        shouldTranslateTitle,
+        startupRouteGeneration === this.routeGeneration && !this.routeDecisionPending ? blocks : null
+      );
+    } catch (error) {
+      if (!this.isCurrent() || isTranslationCancelled(error)) return;
+      this.renderer?.removeAll();
+      this.renderer = null;
+      this.disconnectObservers();
+      this.running = false;
+      this.providerReady = false;
+      this.routeDecisionPending = false;
+      this.clearRouteSettleTimers();
+      this.resolveRouteDecisionWaiters();
+      this.provider.close?.();
+      this.restoreTitle();
+      this.notify('ERROR', {...errorPayload(error), openOptions: Boolean(error?.openOptions)});
+    }
+  }
+
+  async translateCurrentRoute(signal, shouldTranslateTitle, initialBlocks = null) {
+    let blocks = initialBlocks;
+    while (this.isCurrent()) {
+      await this.waitForRouteDecision(signal);
+      if (!this.isCurrent()) throw new TranslationCancelledError();
+      const routeGeneration = this.routeGeneration;
+      if (!blocks || routeGeneration !== this.routeGeneration) {
+        this.renderer?.pruneMissingTranslations?.();
+        this.renderer?.pruneDisconnected?.();
+        this.renderer?.restoreChangedSources?.();
+        blocks = collectTranslationBlocks(this.document.body, {
+          targetLanguage: this.settings.targetLanguage,
+          onExcluded: (element) => this.renderer?.remove(element)
+        });
+      }
+      if (!this.queue) this.createQueue(signal);
+      this.notify('TRANSLATING', {count: blocks.length});
       // Translate the title before the document queue so a long page cannot
       // leave the browser tab showing the original title for a long time.
       if (shouldTranslateTitle) {
-        await this.translateTitle(signal);
+        await this.translateTitle(signal, routeGeneration);
       }
       if (!this.isCurrent()) throw new TranslationCancelledError();
-      await this.queue.enqueueAll(blocks);
+      if (this.routeDecisionPending || routeGeneration !== this.routeGeneration) {
+        blocks = null;
+        continue;
+      }
+      const queue = this.queue;
+      await queue.enqueueAll(this.tagBlocks(blocks, routeGeneration));
       if (!this.isCurrent()) throw new TranslationCancelledError();
+      if (this.routeDecisionPending || routeGeneration !== this.routeGeneration) {
+        blocks = null;
+        continue;
+      }
       if (this.translatedCount === 0 && this.firstError) throw this.firstError;
 
       this.notify('ACTIVE', {
@@ -205,16 +254,9 @@ export class PageSession {
         translatedCount: this.translatedCount,
         failedCount: this.failedCount
       });
-    } catch (error) {
-      if (!this.isCurrent() || isTranslationCancelled(error)) return;
-      this.renderer?.removeAll();
-      this.renderer = null;
-      this.disconnectObservers();
-      this.running = false;
-      this.provider.close?.();
-      this.restoreTitle();
-      this.notify('ERROR', {...errorPayload(error), openOptions: Boolean(error?.openOptions)});
+      return;
     }
+    throw new TranslationCancelledError();
   }
 
   createQueue(signal) {
@@ -231,12 +273,16 @@ export class PageSession {
       signal,
       isCurrent: () => this.isCurrent(),
       onResult: (block, translatedText) => {
-        if (!this.isCurrent()) return;
+        if (!this.isCurrent() || this.routeDecisionPending ||
+            block?.routeGeneration !== this.routeGeneration ||
+            !block?.element?.isConnected ||
+            !this.renderer?.isSourceHashCurrent?.(block)) return;
         const translation = this.renderer?.insert({...block, translatedText});
         if (translation) this.translatedCount += 1;
       },
-      onError: (error) => {
-        if (!this.isCurrent()) return;
+      onError: (error, block) => {
+        if (!this.isCurrent() || this.routeDecisionPending ||
+            block?.routeGeneration !== this.routeGeneration) return;
         this.firstError ??= error;
         this.failedCount += 1;
       }
@@ -245,7 +291,8 @@ export class PageSession {
 
   async translateBlocks(blocks, signal) {
     if (!this.queue) this.createQueue(signal ?? this.controller?.signal);
-    await this.queue.enqueueAll(blocks);
+    const routeGeneration = this.routeGeneration;
+    await this.queue.enqueueAll(this.tagBlocks(blocks, routeGeneration));
     if (this.translatedCount === 0 && this.firstError) throw this.firstError;
     return {
       translatedCount: this.translatedCount,
@@ -253,17 +300,29 @@ export class PageSession {
     };
   }
 
-  async enqueueBlocks(blocks) {
-    if (!this.isCurrent() || !this.queue || !blocks.length) return;
+  tagBlocks(blocks, routeGeneration = this.routeGeneration) {
+    return Array.from(blocks ?? [], (block) => ({...block, routeGeneration}));
+  }
+
+  async enqueueBlocks(blocks, routeGeneration = this.routeGeneration) {
+    if (!this.isCurrent() || this.routeDecisionPending ||
+        routeGeneration !== this.routeGeneration || !blocks.length) return;
+    if (!this.queue) this.createQueue(this.controller?.signal);
     this.notify('TRANSLATING', {count: blocks.length});
-    await this.queue.enqueueAll(blocks);
+    await this.queue.enqueueAll(this.tagBlocks(blocks, routeGeneration));
+    if (!this.isCurrent() || this.routeDecisionPending || routeGeneration !== this.routeGeneration) return;
+    this.notify('ACTIVE', {
+      count: this.translatedCount + this.failedCount,
+      translatedCount: this.translatedCount,
+      failedCount: this.failedCount
+    });
   }
 
   installObservers() {
     if (!this.observe) return;
     const view = getView(this.document);
     const MutationObserverClass = view?.MutationObserver ?? globalThis.MutationObserver;
-    const observationRoot = this.document.documentElement ?? this.document.body;
+    const observationRoot = this.document.documentElement ?? this.document;
     if (typeof MutationObserverClass === 'function' && observationRoot) {
       this.observer = new MutationObserverClass((records) => this.handleMutations(records));
       this.observer.observe(observationRoot, {
@@ -271,15 +330,10 @@ export class PageSession {
         characterData: true,
         subtree: true,
         attributes: true,
-        attributeFilter: ['class', 'style', 'hidden', 'aria-hidden', 'lang']
+        attributeFilter: ['hidden', 'aria-hidden', 'lang']
       });
     }
 
-    installHistoryPatch(view);
-    this.navigationHandler = () => this.handleNavigation();
-    view?.addEventListener?.(NAVIGATION_EVENT, this.navigationHandler);
-    view?.addEventListener?.('popstate', this.navigationHandler);
-    view?.addEventListener?.('hashchange', this.navigationHandler);
     this.scrollHandler = () => {
       if (this.priorityTimer != null) return;
       this.priorityTimer = setTimeout(() => {
@@ -302,11 +356,16 @@ export class PageSession {
     if (!titleRoot || typeof MutationObserverClass !== 'function') return;
     this.titleObserver = new MutationObserverClass(() => {
       if (this.updatingTitle) return;
+      const routeChanged = this.onDomMutation?.();
+      if (routeChanged || this.routeDecisionPending) {
+        if (this.routeDecisionPending) this.routeMutationSeen = true;
+        return;
+      }
       if (this.watchOnly) {
         if (isTranslatableTitle(this.document, this.settings.targetLanguage)) void this.start();
         return;
       }
-      void this.translateTitle(this.controller.signal);
+      void this.translateTitle(this.controller.signal, this.routeGeneration);
     });
     // Observe the head rather than only the initial <title> node. SPA sites
     // commonly replace the node itself when updating their document title.
@@ -325,12 +384,6 @@ export class PageSession {
     this.pendingMutationRoots.clear();
     this.mutationOverflow = false;
     const view = getView(this.document);
-    if (this.navigationHandler) {
-      view?.removeEventListener?.(NAVIGATION_EVENT, this.navigationHandler);
-      view?.removeEventListener?.('popstate', this.navigationHandler);
-      view?.removeEventListener?.('hashchange', this.navigationHandler);
-    }
-    this.navigationHandler = null;
     if (this.scrollHandler) {
       view?.removeEventListener?.('scroll', this.scrollHandler);
       view?.removeEventListener?.('resize', this.scrollHandler);
@@ -340,6 +393,15 @@ export class PageSession {
 
   handleMutations(records) {
     if (!this.isCurrent()) return;
+    const routeChanged = this.onDomMutation?.();
+    if (routeChanged || this.routeDecisionPending) {
+      if (this.routeDecisionPending) this.routeMutationSeen = true;
+      this.pendingMutationRoots.clear();
+      this.mutationOverflow = false;
+      if (this.mutationTimer != null) clearTimeout(this.mutationTimer);
+      this.mutationTimer = null;
+      return;
+    }
     const addMutationRoot = (root) => {
       if (!root || this.pendingMutationRoots.has(root)) return;
       if (this.pendingMutationRoots.size >= MAX_MUTATION_ROOTS) {
@@ -373,7 +435,7 @@ export class PageSession {
     this.mutationTimer = setTimeout(() => {
       this.mutationTimer = null;
       const roots = this.mutationOverflow
-        ? [this.document.body]
+        ? [this.document.body ?? this.document.documentElement]
         : [...this.pendingMutationRoots];
       this.pendingMutationRoots.clear();
       this.mutationOverflow = false;
@@ -407,36 +469,108 @@ export class PageSession {
     }, MUTATION_DEBOUNCE_MS);
   }
 
-  async handleNavigation() {
-    if (!this.isCurrent()) return;
-    const currentUrl = this.document.location?.href ?? '';
-    if (!currentUrl || currentUrl === this.lastUrl) return;
-    this.lastUrl = currentUrl;
+  clearRouteSettleTimers() {
+    for (const timer of this.routeSettleTimers) clearTimeout(timer);
+    this.routeSettleTimers.clear();
+  }
+
+  resolveRouteDecisionWaiters() {
+    for (const resolve of this.routeDecisionWaiters.splice(0)) resolve();
+  }
+
+  waitForRouteDecision(signal) {
+    if (!this.routeDecisionPending || signal?.aborted) return Promise.resolve();
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        signal?.removeEventListener?.('abort', finish);
+        resolve();
+      };
+      this.routeDecisionWaiters.push(finish);
+      signal?.addEventListener?.('abort', finish, {once: true});
+    });
+  }
+
+  beginRouteChange({routeGeneration} = {}) {
+    if (!this.isCurrent() || !Number.isInteger(routeGeneration) ||
+        routeGeneration <= this.routeGeneration) return false;
+    this.routeGeneration = routeGeneration;
+    this.routeDecisionPending = true;
+    this.routeMutationSeen = false;
+    this.clearRouteSettleTimers();
+    if (this.mutationTimer != null) clearTimeout(this.mutationTimer);
+    this.mutationTimer = null;
+    this.pendingMutationRoots.clear();
+    this.mutationOverflow = false;
+    this.queue?.cancel();
+    this.queue = null;
+    if (this.queue || this.providerReady) this.provider.cancel?.();
+    this.restoreTitle();
+    this.renderer?.pruneMissingTranslations?.();
+    this.renderer?.pruneDisconnected?.();
+    return true;
+  }
+
+  applyRouteDecision({routeGeneration, continueTranslation} = {}) {
+    if (!this.routeDecisionPending || routeGeneration !== this.routeGeneration) return false;
+    this.routeDecisionPending = false;
+    const hadMutation = this.routeMutationSeen;
+    this.routeMutationSeen = false;
+    this.resolveRouteDecisionWaiters();
+    if (!continueTranslation) {
+      this.stop({notify: false});
+      return true;
+    }
+    this.scheduleRouteRescans(routeGeneration, hadMutation);
+    return true;
+  }
+
+  scheduleRouteRescans(routeGeneration, includeImmediate = false) {
+    this.clearRouteSettleTimers();
+    const delays = includeImmediate ? [0, ...ROUTE_SETTLE_DELAYS] : ROUTE_SETTLE_DELAYS;
+    for (const delay of delays) {
+      const timer = setTimeout(() => {
+        this.routeSettleTimers.delete(timer);
+        this.rescanRoute(routeGeneration);
+      }, delay);
+      this.routeSettleTimers.add(timer);
+    }
+  }
+
+  rescanRoute(routeGeneration) {
+    if (!this.isCurrent() || this.routeDecisionPending || routeGeneration !== this.routeGeneration) return;
     this.renderer?.pruneMissingTranslations?.();
     this.renderer?.pruneDisconnected?.();
     this.renderer?.restoreChangedSources?.();
     const shouldTranslateTitle = this.settings.translatePageTitle || this.legacyTranslatePageTitle;
-    const hasTranslatableTitle = shouldTranslateTitle &&
-      isTranslatableTitle(this.document, this.settings.targetLanguage);
     const blocks = collectTranslationBlocks(this.document.body, {
       targetLanguage: this.settings.targetLanguage,
       onExcluded: (element) => this.renderer?.remove(element)
     });
+    const hasTranslatableTitle = shouldTranslateTitle &&
+      isTranslatableTitle(this.document, this.settings.targetLanguage);
+    if (!blocks.length && !hasTranslatableTitle) return;
     if (this.watchOnly) {
-      if (blocks.length || hasTranslatableTitle) {
-        this.watchOnly = false;
-        void this.start();
-      }
+      // The provider has not been prepared in watch-only mode. Starting here
+      // promotes the session exactly once; subsequent route rescans reuse the
+      // prepared provider and queue instead.
+      this.watchOnly = false;
+      void this.start();
       return;
     }
+    if (!this.renderer || !this.providerReady) return;
     if (shouldTranslateTitle) {
-      await this.translateTitle(this.controller.signal);
+      void this.translateTitle(this.controller.signal, routeGeneration);
     }
-    await this.enqueueBlocks(blocks);
+    if (blocks.length) void this.enqueueBlocks(blocks, routeGeneration);
   }
 
-  async translateTitle(signal) {
+  async translateTitle(signal, expectedRouteGeneration = this.routeGeneration) {
     if (!this.isCurrent() ||
+        this.routeDecisionPending ||
+        expectedRouteGeneration !== this.routeGeneration ||
         (!(this.settings.translatePageTitle || this.legacyTranslatePageTitle)) ||
         !this.document.title?.trim()) return;
     const currentTitle = this.document.title;
@@ -449,12 +583,16 @@ export class PageSession {
     const request = ++this.titleRequest;
     try {
       const translated = String(await this.provider.translate(this.originalTitle, {signal}) ?? '').trim();
-      if (!translated || !this.isCurrent() || request !== this.titleRequest) return;
+      if (!translated || !this.isCurrent() || this.routeDecisionPending ||
+          expectedRouteGeneration !== this.routeGeneration || request !== this.titleRequest) return;
       this.updatingTitle = true;
       this.document.title = translated;
       this.translatedTitle = translated;
     } catch (error) {
-      if (!isTranslationCancelled(error)) this.firstError ??= error;
+      if (!isTranslationCancelled(error) && this.isCurrent() && !this.routeDecisionPending &&
+          expectedRouteGeneration === this.routeGeneration && request === this.titleRequest) {
+        this.firstError ??= error;
+      }
     } finally {
       if (request === this.titleRequest) this.updatingTitle = false;
     }

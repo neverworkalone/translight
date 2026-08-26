@@ -508,6 +508,14 @@ export class TranslationRenderer {
     return nodes;
   }
 
+  isSourceHashCurrent({element, sourceHash, mixedContent = false} = {}) {
+    if (!element?.isConnected) return false;
+    if (!sourceHash) return true;
+    const nodes = collectSourceTextNodes(element, Boolean(mixedContent));
+    const sourceText = normalizeSourceText(sourceTextFromNodes(nodes));
+    return hashSourceText(sourceText) === sourceHash;
+  }
+
   unwrapReplacementText(record) {
     const wrappers = record.replacementWrappers?.length
       ? record.replacementWrappers

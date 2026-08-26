@@ -8,7 +8,7 @@ import {
 
 export const CONTENT_CONTROLLER_KEY = '__translight_content_controller__';
 export const DOCUMENT_TOKEN_KEY = '__translight_document_token__';
-const NAVIGATION_PATCH_KEY = '__translight_content_navigation_patch__';
+const NAVIGATION_POLL_MS = 500;
 
 function getDocumentToken() {
   if (globalThis[DOCUMENT_TOKEN_KEY]) return globalThis[DOCUMENT_TOKEN_KEY];
@@ -29,23 +29,6 @@ function sendRuntimeMessage(runtime, message) {
   }
 }
 
-function installNavigationPatch(view, notify) {
-  if (!view?.history || view[NAVIGATION_PATCH_KEY]) return;
-  const originalPushState = view.history.pushState;
-  const originalReplaceState = view.history.replaceState;
-  view.history.pushState = function patchedPushState(...args) {
-    const result = originalPushState.apply(this, args);
-    notify();
-    return result;
-  };
-  view.history.replaceState = function patchedReplaceState(...args) {
-    const result = originalReplaceState.apply(this, args);
-    notify();
-    return result;
-  };
-  view[NAVIGATION_PATCH_KEY] = true;
-}
-
 export function installContentController({
   runtime = globalThis.chrome?.runtime,
   createSession = (options) => new PageSession(options)
@@ -63,7 +46,10 @@ export function installContentController({
     unsubscribeSettings: null,
     pageLifecycleHandler: null,
     navigationHandler: null,
-    lastNavigationUrl: globalThis.location?.href ?? ''
+    lastNavigationUrl: globalThis.location?.href ?? '',
+    routeGeneration: 0,
+    navigationTimer: null,
+    navigationView: null
   };
   globalThis[CONTENT_CONTROLLER_KEY] = controller;
 
@@ -79,25 +65,68 @@ export function installContentController({
     controller.currentSession?.applySettings(controller.settings);
   });
   controller.pageLifecycleHandler = () => {
+    if (controller.navigationTimer != null) {
+      const clearInterval = controller.navigationView?.clearInterval ?? globalThis.clearInterval;
+      clearInterval?.(controller.navigationTimer);
+      controller.navigationTimer = null;
+    }
     controller.currentSession?.stop({notify: false});
     controller.currentSession = null;
   };
   globalThis.addEventListener?.('pagehide', controller.pageLifecycleHandler);
   controller.navigationHandler = () => {
+    const session = controller.currentSession;
+    const isWatching = session?.isNavigationWatching?.() ?? session?.running === true;
+    if (!isWatching) return false;
     const url = globalThis.location?.href ?? '';
-    if (!url || url === controller.lastNavigationUrl) return;
+    if (!url || url === controller.lastNavigationUrl) return false;
+    const previousUrl = controller.lastNavigationUrl;
     controller.lastNavigationUrl = url;
+    const routeGeneration = ++controller.routeGeneration;
+    const route = {
+      previousUrl,
+      currentUrl: url,
+      url,
+      documentToken: controller.documentToken,
+      origin: globalThis.location?.origin ?? '',
+      routeGeneration
+    };
+    if (session.beginRouteChange?.(route) === false) return false;
     sendRuntimeMessage(runtime, {
       type: 'CONTENT_NAVIGATION',
-      documentToken: controller.documentToken,
-      url,
-      origin: globalThis.location?.origin ?? ''
+      ...route
     });
+    return true;
   };
   const view = globalThis.window ?? globalThis;
-  installNavigationPatch(view, controller.navigationHandler);
+  controller.navigationView = view;
   view?.addEventListener?.('popstate', controller.navigationHandler);
   view?.addEventListener?.('hashchange', controller.navigationHandler);
+
+  controller.startNavigationWatcher = (session) => {
+    const isWatching = session?.isNavigationWatching?.() ?? session?.running === true;
+    if (!isWatching || controller.navigationTimer != null) return;
+    const setInterval = view?.setInterval ?? globalThis.setInterval;
+    if (typeof setInterval !== 'function') return;
+    controller.navigationTimer = setInterval(() => {
+      const currentSession = controller.currentSession;
+      const currentIsWatching = currentSession?.isNavigationWatching?.() ?? currentSession?.running === true;
+      if (!currentIsWatching) {
+        const clearInterval = view?.clearInterval ?? globalThis.clearInterval;
+        clearInterval?.(controller.navigationTimer);
+        controller.navigationTimer = null;
+        return;
+      }
+      controller.navigationHandler();
+    }, NAVIGATION_POLL_MS);
+  };
+
+  controller.stopNavigationWatcher = () => {
+    if (controller.navigationTimer == null) return;
+    const clearInterval = view?.clearInterval ?? globalThis.clearInterval;
+    clearInterval?.(controller.navigationTimer);
+    controller.navigationTimer = null;
+  };
 
   const sendStatus = (payload) => sendRuntimeMessage(runtime, {
     type: 'TRANSLATION_STATUS',
@@ -112,15 +141,24 @@ export function installContentController({
   });
 
   const startSession = (message) => {
+    controller.stopNavigationWatcher();
     controller.currentSession?.stop({ notify: false });
+    // Navigation that happened while translation was OFF is the baseline for
+    // this new session, not an SPA route inside it.
+    controller.lastNavigationUrl = globalThis.location?.href ?? controller.lastNavigationUrl;
     controller.currentSession = createSession({
       generation: message.generation,
       sendStatus,
       settings: controller.settings,
       translationCache: controller.translationCache,
-      isGenerationCurrent: (generation) => controller.currentSession?.generation === generation
+      isGenerationCurrent: (generation) => controller.currentSession?.generation === generation,
+      initialRouteGeneration: Number.isInteger(message.routeGeneration)
+        ? message.routeGeneration
+        : controller.routeGeneration,
+      onDomMutation: () => controller.navigationHandler()
     });
     void controller.currentSession.start();
+    controller.startNavigationWatcher(controller.currentSession);
   };
 
   const stopSession = (message) => {
@@ -128,6 +166,7 @@ export function installContentController({
     if (!session) return;
     if (message.generation != null && session.generation !== message.generation) return;
     session.stop();
+    controller.stopNavigationWatcher();
     controller.currentSession = null;
   };
 
@@ -141,6 +180,12 @@ export function installContentController({
     if (message?.type === 'TRANSLATION_STOP') {
       stopSession(message);
       sendResponse?.({ ok: true });
+      return false;
+    }
+
+    if (message?.type === 'TRANSLATION_ROUTE') {
+      controller.currentSession?.applyRouteDecision?.(message);
+      sendResponse?.({ok: true});
       return false;
     }
 

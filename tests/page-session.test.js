@@ -4,10 +4,13 @@ import { describe, expect, it } from 'vitest';
 import { PageSession } from '../src/content/page-session.js';
 import { TRANSLATION_MODES } from '../src/settings.js';
 
-function makeProvider({ translate = async (text) => `ko:${text}` } = {}) {
+function makeProvider({
+  translate = async (text) => `ko:${text}`,
+  prepare = async () => {}
+} = {}) {
   return {
     getModelState: async () => 'Available',
-    prepare: async () => {},
+    prepare,
     translate,
     cancel: () => {},
     close: () => {}
@@ -182,6 +185,154 @@ describe('PageSession', () => {
       .toBe('ko:English content revealed later.');
     session.stop({notify: false});
     document.documentElement.removeAttribute('lang');
+  });
+
+  it('drops late results from the previous route and reuses the prepared provider', async () => {
+    document.body.innerHTML = '<p id="old">Old route content.</p>';
+    const resolvers = new Map();
+    let prepareCalls = 0;
+    const calls = [];
+    const session = new PageSession({
+      generation: 116,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider({
+        prepare: async () => { prepareCalls += 1; },
+        translate: (text) => {
+          calls.push(text);
+          if (text === 'Old route content.') {
+            return new Promise((resolve) => resolvers.set(text, resolve));
+          }
+          return Promise.resolve(`ko:${text}`);
+        }
+      })
+    });
+
+    const run = session.start();
+    await wait(20);
+    expect(calls).toEqual(['Old route content.']);
+
+    expect(session.beginRouteChange({routeGeneration: 1})).toBe(true);
+    expect(session.applyRouteDecision({
+      routeGeneration: 1,
+      continueTranslation: true
+    })).toBe(true);
+    resolvers.get('Old route content.')('ko:Old route content.');
+    document.querySelector('#old').remove();
+    const next = document.createElement('p');
+    next.id = 'next';
+    next.textContent = 'New route content.';
+    document.body.appendChild(next);
+
+    await wait(260);
+    expect(prepareCalls).toBe(1);
+    expect(calls).toEqual(['Old route content.', 'New route content.']);
+    expect(document.querySelector('#old + translight-translation')).toBeNull();
+    expect(document.querySelector('#next + translight-translation')?.textContent)
+      .toBe('ko:New route content.');
+    session.stop({notify: false});
+    await run;
+  });
+
+  it('finds translated blocks after a route replaces the body', async () => {
+    document.body.innerHTML = '<p>Initial route content.</p>';
+    const session = new PageSession({
+      generation: 117,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider()
+    });
+
+    await session.start();
+    expect(session.beginRouteChange({routeGeneration: 1})).toBe(true);
+    expect(session.applyRouteDecision({routeGeneration: 1, continueTranslation: true})).toBe(true);
+
+    const replacement = document.createElement('body');
+    replacement.innerHTML = '<main><p>Content rendered by the next route.</p></main>';
+    document.documentElement.replaceChild(replacement, document.body);
+    await wait(260);
+
+    expect(document.querySelector('main p + translight-translation')?.textContent)
+      .toBe('ko:Content rendered by the next route.');
+    session.stop({notify: false});
+  });
+
+  it('does not let a previous route title result overwrite the next title', async () => {
+    document.title = 'Old route title';
+    document.body.innerHTML = '<p>Old route body.</p>';
+    const resolvers = [];
+    const calls = [];
+    const session = new PageSession({
+      generation: 118,
+      document,
+      settings: {translatePageTitle: true},
+      provider: makeProvider({
+        translate: (text) => {
+          calls.push(text);
+          if (text === 'Old route title') {
+            return new Promise((resolve) => resolvers.push(resolve));
+          }
+          return Promise.resolve(`ko:${text}`);
+        }
+      })
+    });
+
+    const run = session.start();
+    await wait(20);
+    expect(calls).toEqual(['Old route title']);
+    expect(session.beginRouteChange({routeGeneration: 1})).toBe(true);
+    expect(session.applyRouteDecision({routeGeneration: 1, continueTranslation: true})).toBe(true);
+    resolvers[0]('ko:Old route title');
+    document.title = 'New route title';
+    document.body.innerHTML = '<p>New route body.</p>';
+
+    await wait(260);
+    expect(document.title).toBe('ko:New route title');
+    expect(document.body.textContent).toContain('New route body.');
+    expect(document.body.textContent).not.toContain('ko:Old route title');
+    expect(calls).toEqual(expect.arrayContaining(['Old route title', 'New route title', 'New route body.']));
+    session.stop({notify: false});
+    await run;
+  });
+
+  it('applies the route guard to a cache hit as well as a provider response', async () => {
+    document.body.innerHTML = '<p id="old">Cached old route.</p>';
+    const cached = new Map([['default\u0000Cached old route.', 'ko:Cached old route.']]);
+    let session;
+    let triggered = false;
+    class RouteChangingCache extends Map {
+      has(key) {
+        if (!triggered && key === 'default\u0000Cached old route.') {
+          triggered = true;
+          session.beginRouteChange({routeGeneration: 1});
+          document.body.innerHTML = '<p id="new">Cached new route.</p>';
+          session.applyRouteDecision({routeGeneration: 1, continueTranslation: true});
+        }
+        return super.has(key);
+      }
+    }
+    const translationCache = new RouteChangingCache(cached);
+    const calls = [];
+    session = new PageSession({
+      generation: 119,
+      document,
+      settings: {translatePageTitle: false},
+      translationCache,
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    await session.start();
+    await wait(220);
+    expect(calls).toEqual(['Cached new route.']);
+    expect(document.querySelector('#old + translight-translation')).toBeNull();
+    expect(document.querySelector('#new + translight-translation')?.textContent)
+      .toBe('ko:Cached new route.');
+    session.stop({notify: false});
   });
 
   it('translates English content on a page whose UI declares Korean', async () => {
