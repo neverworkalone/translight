@@ -230,17 +230,17 @@ function replacementValuesForNodes(nodes, translatedText) {
     replacementNodeIndices.push(index);
     weights.push(Math.max(1, Array.from(shape.core).length));
   });
-  if (!replacementNodeIndices.length && nodes.length) {
-    replacementNodeIndices.push(0);
-    weights.push(1);
+  const characters = Array.from(String(translatedText ?? ''));
+  if (!replacementNodeIndices.length || characters.length < replacementNodeIndices.length) {
+    return {fallback: true, values: [], replacementNodeIndices: []};
   }
-  const parts = distributeReplacementText(translatedText, weights);
+  const parts = distributeReplacementText(characters.join(''), weights);
   const partByNode = new Map(replacementNodeIndices.map((index, partIndex) => [index, parts[partIndex] ?? '']));
   const values = shapes.map((shape, index) => {
     if (!partByNode.has(index)) return '';
     return partByNode.get(index);
   });
-  return {values, replacementNodeIndices};
+  return {fallback: false, values, replacementNodeIndices};
 }
 
 function snapshotTextNodes(nodes) {
@@ -514,10 +514,18 @@ export class TranslationRenderer {
     if (record.replaced) this.restoreSourceText(record);
     this.unwrapReplacementText(record);
     const nodes = this.currentSourceTextNodes(record);
-    const {values: presentedValues, replacementNodeIndices} = replacementValuesForNodes(
+    const {fallback, values: presentedValues, replacementNodeIndices} = replacementValuesForNodes(
       nodes,
       record.translatedText
     );
+    if (fallback) {
+      record.replaced = false;
+      record.presentedText = null;
+      record.presentedTextNodeValues = null;
+      record.replacementNodeIndices = [];
+      record.replacementNodeIndex = null;
+      return false;
+    }
     setSourceTextNodes(nodes, presentedValues);
     const shouldWrap = styled && this.presentation.displayStyle !== TRANSLATION_STYLES.NONE;
     if (shouldWrap) {
@@ -528,6 +536,7 @@ export class TranslationRenderer {
     record.replacementNodeIndex = replacementNodeIndices[0] ?? null;
     record.presentedTextNodeValues = snapshotTextNodes(nodes);
     record.presentedText = record.presentedTextNodeValues.join('');
+    return true;
   }
 
   restoreChangedSources() {
@@ -600,7 +609,16 @@ export class TranslationRenderer {
     }
 
     const styledReplacement = mode === TRANSLATION_MODES.TRANSLATION_ORIGINAL;
-    this.replaceSourceText(record, {styled: styledReplacement});
+    const replacementApplied = this.replaceSourceText(record, {styled: styledReplacement});
+    if (!replacementApplied) {
+      translation.setAttribute(ROLE_ATTRIBUTE, ROLE_TRANSLATION);
+      if (mode === TRANSLATION_MODES.TRANSLATION_ONLY) translation.removeAttribute(STYLE_ATTRIBUTE);
+      else translation.setAttribute(STYLE_ATTRIBUTE, this.presentation.displayStyle);
+      setTranslationText(translation, record.translatedText);
+      restorePlacement(record);
+      this.clearReplacementAttributes(record);
+      return;
+    }
     if (mode === TRANSLATION_MODES.TRANSLATION_ORIGINAL) {
       translation.setAttribute(ROLE_ATTRIBUTE, ROLE_ORIGINAL);
       translation.removeAttribute(STYLE_ATTRIBUTE);

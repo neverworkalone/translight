@@ -239,6 +239,34 @@ describe('TranslationRenderer', () => {
     );
   });
 
+  it('falls back without emptying inline nodes when translation is too short to distribute', () => {
+    document.body.innerHTML = '<p id="source"><a href="https://example.com">Open</a> or <em>close</em></p>';
+    const source = document.querySelector('#source');
+    const renderer = new TranslationRenderer({
+      document,
+      sessionId: 'short-inline-session',
+      settings: {translationMode: TRANSLATION_MODES.TRANSLATION_ONLY}
+    });
+
+    renderer.insert({
+      element: source,
+      sourceId: 'short-inline-source',
+      sourceHash: hashSourceText('Open or close'),
+      translatedText: '번역'
+    });
+
+    expect(source.textContent).toBe('Open or close');
+    expect(source.querySelector('a')?.textContent).toBe('Open');
+    expect(source.querySelector('em')?.textContent).toBe('close');
+    expect(source.hasAttribute(REPLACED_ATTRIBUTE)).toBe(false);
+    expect(document.querySelector('translight-translation')?.textContent).toBe('번역');
+
+    renderer.removeAll();
+    expect(document.body.innerHTML).toBe(
+      '<p id="source"><a href="https://example.com">Open</a> or <em>close</em></p>'
+    );
+  });
+
   it('keeps mixed parent and nested block translations visible in translation-only mode', () => {
     document.body.innerHTML = '<div id="mixed">Direct text.<p id="nested">Nested text.</p></div>';
     const mixed = document.querySelector('#mixed');
