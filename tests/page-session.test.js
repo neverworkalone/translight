@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { PageSession } from '../src/content/page-session.js';
+import { MODEL_STATE } from '../src/translation/model-state.js';
 import { TRANSLATION_MODES } from '../src/settings.js';
 
 function makeProvider({
@@ -457,6 +458,81 @@ describe('PageSession', () => {
 
     expect(document.querySelector('translight-translation')).toBeNull();
     expect(document.querySelector('p').textContent).toBe('Pending paragraph.');
+  });
+
+  it('does not mutate mixed content before model availability is confirmed', async () => {
+    document.body.innerHTML = '<div id="guide">First paragraph.<div><br></div>Second paragraph.</div>';
+    const original = document.body.innerHTML;
+    const statuses = [];
+    const session = new PageSession({
+      generation: 15,
+      document,
+      provider: {
+        getModelState: async () => MODEL_STATE.UNAVAILABLE,
+        prepare: async () => {},
+        translate: async () => '번역',
+        cancel: () => {},
+        close: () => {}
+      },
+      sendStatus: (status) => statuses.push(status)
+    });
+
+    await session.start();
+
+    expect(document.body.innerHTML).toBe(original);
+    expect(document.querySelector('[data-translight-segment="true"]')).toBeNull();
+    expect(statuses.at(-1)?.status).toBe('ERROR');
+  });
+
+  it('restores uncommitted mixed-content segments after cancellation', async () => {
+    document.body.innerHTML = '<div id="guide">First paragraph.<div><br></div>Second paragraph.</div>';
+    const original = document.body.innerHTML;
+    const resolvers = [];
+    let resolveStarted;
+    const started = new Promise((resolve) => { resolveStarted = resolve; });
+    const session = new PageSession({
+      generation: 16,
+      document,
+      provider: makeProvider({
+        translate: () => {
+          resolveStarted();
+          return new Promise((resolve) => resolvers.push(resolve));
+        }
+      })
+    });
+
+    const run = session.start();
+    await started;
+    expect(document.querySelectorAll('[data-translight-segment="true"]')).toHaveLength(2);
+
+    session.stop({notify: false});
+    resolvers.forEach((resolve) => resolve('Late translation'));
+    await run;
+
+    expect(document.body.innerHTML).toBe(original);
+    expect(document.querySelector('[data-translight-segment="true"]')).toBeNull();
+  });
+
+  it('restores a failed segment together with successful siblings', async () => {
+    document.body.innerHTML = '<div id="guide">First paragraph.<div><br></div>Second paragraph.</div>';
+    const original = document.body.innerHTML;
+    const session = new PageSession({
+      generation: 17,
+      document,
+      provider: makeProvider({
+        translate: async (text) => {
+          if (text.includes('First')) return '첫 번째 번역';
+          throw new Error('one segment failed');
+        }
+      })
+    });
+
+    await session.start();
+
+    expect(document.querySelectorAll('translight-translation')).toHaveLength(1);
+    expect(document.querySelectorAll('[data-translight-segment="true"]')).toHaveLength(2);
+    session.stop({notify: false});
+    expect(document.body.innerHTML).toBe(original);
   });
 
   it('removes generated nodes and styles when translation fails', async () => {

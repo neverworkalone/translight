@@ -11,6 +11,17 @@ const SOURCE_ID_ATTRIBUTE = 'data-translight-source-id';
 const SOURCE_HASH_ATTRIBUTE = 'data-translight-source-hash';
 const PENDING_SOURCE_HASH_ATTRIBUTE = 'data-translight-pending-source-hash';
 const PRESENTATION_HASH_ATTRIBUTE = 'data-translight-presentation-hash';
+export const SEGMENT_ATTRIBUTE = 'data-translight-segment';
+export const SEGMENT_ID_ATTRIBUTE = 'data-translight-segment-id';
+export const SEGMENT_SELECTOR = `[${SEGMENT_ATTRIBUTE}="true"]`;
+const CANDIDATE_SELECTOR = `${BLOCK_SELECTOR},${SEGMENT_SELECTOR}`;
+const PHRASING_TAGS = new Set([
+  'a', 'abbr', 'b', 'bdi', 'bdo', 'br', 'button', 'cite', 'code', 'data', 'del',
+  'dfn', 'em', 'i', 'img', 'input', 'ins', 'kbd', 'label', 'mark', 'meter',
+  'noscript', 'object', 'output', 'picture', 'progress', 'q', 'ruby', 's',
+  'samp', 'select', 'small', 'span', 'strong', 'sub', 'sup', 'svg', 'template',
+  'textarea', 'time', 'u', 'var', 'wbr'
+]);
 
 let sourceSequence = 0;
 
@@ -57,6 +68,7 @@ function textFromNode(node, root) {
   if (!isElement(node)) return '';
   if (node !== root && node.matches(EXCLUDED_CONTENT_SELECTOR)) return '';
   if (node !== root && node.matches(GENERATED_SELECTOR)) return '';
+  if (node !== root && node.matches(SEGMENT_SELECTOR)) return '';
   return Array.from(node.childNodes, (child) => textFromNode(child, root)).join('');
 }
 
@@ -65,6 +77,7 @@ function directTextFromNode(node, root) {
   if (!isElement(node)) return '';
   if (node !== root && node.matches(EXCLUDED_CONTENT_SELECTOR)) return '';
   if (node !== root && node.matches(GENERATED_SELECTOR)) return '';
+  if (node !== root && node.matches(SEGMENT_SELECTOR)) return '';
   if (node !== root && node.matches(BLOCK_SELECTOR)) return '';
   return Array.from(node.childNodes, (child) => directTextFromNode(child, root)).join('');
 }
@@ -94,20 +107,130 @@ function isNavigationLike(element, text) {
   return linkText.length / text.length >= LINK_RATIO_LIMIT;
 }
 
+function isBreak(node) {
+  return isElement(node) && node.tagName?.toLowerCase() === 'br';
+}
+
+function isWhitespaceText(node) {
+  return node?.nodeType === 3 && !(node.nodeValue ?? '').trim();
+}
+
+function isPhrasingContent(nodes) {
+  return nodes.every((node) => {
+    if (!isElement(node)) return true;
+    return PHRASING_TAGS.has(node.tagName?.toLowerCase());
+  });
+}
+
+function textFromNodes(nodes, root) {
+  return Array.from(nodes ?? [], (node) => textFromNode(node, root)).join('');
+}
+
+function isNestedBlockNode(node) {
+  if (!isElement(node)) return false;
+  return node.matches?.(`${BLOCK_SELECTOR},${SEGMENT_SELECTOR}`) ||
+    Boolean(node.querySelector?.(`${BLOCK_SELECTOR},${SEGMENT_SELECTOR}`));
+}
+
+function splitNodesAtDoubleBreaks(nodes) {
+  const ranges = [];
+  let segmentStart = 0;
+
+  for (let index = 0; index < nodes.length;) {
+    if (!isBreak(nodes[index])) {
+      index += 1;
+      continue;
+    }
+
+    let cursor = index;
+    let breakCount = 0;
+    while (cursor < nodes.length) {
+      if (isBreak(nodes[cursor])) {
+        breakCount += 1;
+        cursor += 1;
+        continue;
+      }
+      if (isWhitespaceText(nodes[cursor])) {
+        cursor += 1;
+        continue;
+      }
+      break;
+    }
+
+    if (breakCount < 2) {
+      index += 1;
+      continue;
+    }
+
+    ranges.push({nodes: nodes.slice(segmentStart, index)});
+    segmentStart = cursor;
+    index = cursor;
+  }
+
+  ranges.push({nodes: nodes.slice(segmentStart)});
+  return ranges.filter(({nodes}) => nodes.length && isPhrasingContent(nodes));
+}
+
+function directContentRanges(element) {
+  const ranges = [];
+  let current = [];
+  const flush = () => {
+    ranges.push(...splitNodesAtDoubleBreaks(current));
+    current = [];
+  };
+
+  for (const node of Array.from(element.childNodes ?? [])) {
+    if (isNestedBlockNode(node)) {
+      flush();
+      continue;
+    }
+    current.push(node);
+  }
+  flush();
+  return ranges;
+}
+
+function splitDirectTextIntoSegments(element, targetLanguage, {hasNestedBlocks = false} = {}) {
+  if (!isElement(element) || element.matches(SEGMENT_SELECTOR)) return [];
+
+  const ranges = directContentRanges(element);
+  if (ranges.length < 2 && !hasNestedBlocks) return [];
+
+  const translatableRanges = ranges.filter(({nodes}) => {
+    const text = normalizeSourceText(textFromNodes(nodes, element));
+    return text.length >= 2 && isTranslatableBlock(element, text, targetLanguage);
+  });
+  if (!translatableRanges.length) return [];
+
+  const wrappers = [];
+  for (const {nodes} of [...translatableRanges].reverse()) {
+    const firstNode = nodes[0];
+    if (!firstNode?.parentNode) continue;
+    const wrapper = element.ownerDocument.createElement('span');
+    wrapper.setAttribute(SEGMENT_ATTRIBUTE, 'true');
+    wrapper.setAttribute(SEGMENT_ID_ATTRIBUTE, `source-${++sourceSequence}`);
+    element.insertBefore(wrapper, firstNode);
+    for (const node of nodes) wrapper.appendChild(node);
+    wrappers.unshift(wrapper);
+  }
+  return wrappers;
+}
+
 function getCandidates(root) {
   const candidates = [];
-  if (isElement(root) && root.matches(BLOCK_SELECTOR)) candidates.push(root);
-  candidates.push(...root.querySelectorAll(BLOCK_SELECTOR));
+  if (isElement(root) && root.matches(CANDIDATE_SELECTOR)) candidates.push(root);
+  candidates.push(...root.querySelectorAll(CANDIDATE_SELECTOR));
   return candidates;
 }
 
 function hasBlockDescendant(element, candidateSet) {
-  return Array.from(element.querySelectorAll(BLOCK_SELECTOR)).some((descendant) => candidateSet.has(descendant));
+  return Array.from(element.querySelectorAll(CANDIDATE_SELECTOR))
+    .some((descendant) => candidateSet.has(descendant));
 }
 
 export function collectTranslationBlocks(
   root = globalThis.document?.body,
-  {targetLanguage = 'ko', onExcluded} = {}
+  {targetLanguage = 'ko', onExcluded, splitSegments = true} = {}
 ) {
   if (!root || typeof root.querySelectorAll !== 'function') return [];
 
@@ -115,44 +238,59 @@ export function collectTranslationBlocks(
   const candidateSet = new Set(candidates);
   const blocks = [];
 
-  for (const element of candidates) {
-    if (!isElement(element)) continue;
-    if (isGenerated(element) || isExcluded(element)) continue;
+  const processCandidate = (element, {allowSegmentation = splitSegments} = {}) => {
+    if (!isElement(element)) return;
+    if (isGenerated(element) || isExcluded(element)) return;
     const existingSourceId = element.getAttribute(SOURCE_ID_ATTRIBUTE);
     const isExistingSource = Boolean(existingSourceId);
     const excludeExisting = () => {
       if (isExistingSource) onExcluded?.(element);
     };
-    if (isHidden(element) && !isExistingSource) continue;
+    if (isHidden(element) && !isExistingSource) return;
     const hasNestedBlocks = hasBlockDescendant(element, candidateSet);
     const directText = hasNestedBlocks ? normalizeSourceText(directTextFromNode(element, element)) : '';
-    if (hasNestedBlocks && !directText) continue;
+    if (hasNestedBlocks && !directText) return;
 
     const text = hasNestedBlocks ? directText : normalizeSourceText(textFromNode(element, element));
+    const segmentationText = hasNestedBlocks ? directText : text;
+    if (allowSegmentation && segmentationText && !isNavigationLike(element, segmentationText)) {
+      const segments = splitDirectTextIntoSegments(element, targetLanguage, {hasNestedBlocks});
+      if (segments.length) {
+        for (const segment of segments) processCandidate(segment, {allowSegmentation: false});
+        return;
+      }
+    }
     if (text.length < 2 || !hasLettersOrNumbers(text) || isNavigationLike(element, text)) {
       excludeExisting();
-      continue;
+      return;
     }
     if (!isTranslatableBlock(element, text, targetLanguage)) {
       excludeExisting();
-      continue;
+      return;
     }
     const sourceHash = hashSourceText(text);
-    if (isExistingSource && !element.getAttribute(SOURCE_HASH_ATTRIBUTE)) continue;
-    if (isExistingSource && element.getAttribute(PRESENTATION_HASH_ATTRIBUTE) === sourceHash) continue;
-    if (isExistingSource && element.getAttribute(SOURCE_HASH_ATTRIBUTE) === sourceHash) continue;
+    if (isExistingSource && !element.getAttribute(SOURCE_HASH_ATTRIBUTE)) return;
+    if (isExistingSource && element.getAttribute(PRESENTATION_HASH_ATTRIBUTE) === sourceHash) return;
+    if (isExistingSource && element.getAttribute(SOURCE_HASH_ATTRIBUTE) === sourceHash) return;
     if (isExistingSource) element.setAttribute(PENDING_SOURCE_HASH_ATTRIBUTE, sourceHash);
 
     blocks.push({
       element,
       text,
-      sourceId: existingSourceId || `source-${++sourceSequence}`,
+      sourceId: existingSourceId || element.getAttribute(SEGMENT_ID_ATTRIBUTE) || `source-${++sourceSequence}`,
       sourceHash,
       mixedContent: hasNestedBlocks
     });
-  }
+  };
 
-  return blocks;
+  for (const element of candidates) processCandidate(element);
+
+  return blocks.sort((left, right) => {
+    const position = left.element.compareDocumentPosition?.(right.element) ?? 0;
+    if (position & 4) return -1;
+    if (position & 2) return 1;
+    return 0;
+  });
 }
 
 export function resetSourceSequence() {

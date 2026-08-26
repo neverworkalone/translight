@@ -28,7 +28,10 @@ describe('content navigation notifications', () => {
     const controller = installContentController({runtime});
     controller.currentSession = {
       isNavigationWatching: () => true,
-      beginRouteChange: vi.fn()
+      beginRouteChange: vi.fn(),
+      generation: 42,
+      status: 'ACTIVE',
+      activation: 'manual'
     };
     history.pushState({}, '', '#Types');
     controller.navigationHandler();
@@ -106,5 +109,42 @@ describe('content navigation notifications', () => {
     });
     controller.stopNavigationWatcher();
     vi.useRealTimers();
+  });
+
+  it('keeps a cached session and sends a resume handshake on pageshow', () => {
+    history.replaceState({}, '', '/questions');
+    const messages = [];
+    const runtime = {
+      onMessage: {addListener() {}},
+      sendMessage(message) {
+        messages.push(message);
+        return Promise.resolve();
+      }
+    };
+    const controller = installContentController({runtime});
+    const session = {
+      isNavigationWatching: () => true,
+      stop: vi.fn(),
+      generation: 42,
+      status: 'ACTIVE',
+      activation: 'manual'
+    };
+    controller.currentSession = session;
+
+    controller.pageLifecycleHandler({persisted: true});
+    expect(session.stop).not.toHaveBeenCalled();
+
+    controller.pageShowHandler({persisted: true});
+    expect(messages.at(-1)).toMatchObject({
+      type: 'CONTENT_READY',
+      documentToken: expect.any(String),
+      url: `${location.origin}/questions`,
+      resume: true,
+      contentSessionActive: true,
+      contentSessionGeneration: 42,
+      contentSessionStatus: 'ACTIVE',
+      contentSessionActivation: 'manual'
+    });
+    controller.stopNavigationWatcher();
   });
 });

@@ -1,4 +1,4 @@
-import { collectTranslationBlocks } from './block-collector.js';
+import { collectTranslationBlocks, SEGMENT_SELECTOR } from './block-collector.js';
 import { TranslationQueue } from './translation-queue.js';
 import { ChromeTranslateProvider } from '../translation/chrome-provider.js';
 import { MODEL_STATE } from '../translation/model-state.js';
@@ -11,6 +11,7 @@ const DEFAULT_CONCURRENCY = 3;
 const MUTATION_DEBOUNCE_MS = 100;
 const MAX_MUTATION_ROOTS = 64;
 const BLOCK_SELECTOR = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,figcaption,div,td,th';
+const CANDIDATE_SELECTOR = `${BLOCK_SELECTOR},${SEGMENT_SELECTOR}`;
 const ROUTE_SETTLE_DELAYS = Object.freeze([100, 500]);
 let sessionSequence = 0;
 
@@ -27,8 +28,8 @@ function getView(document) {
 
 function getClosestBlock(node) {
   if (!node) return null;
-  if (node.nodeType === 1 && node.matches?.(BLOCK_SELECTOR)) return node;
-  return node.parentElement?.closest?.(BLOCK_SELECTOR) ?? null;
+  if (node.nodeType === 1 && node.matches?.(CANDIDATE_SELECTOR)) return node;
+  return node.parentElement?.closest?.(CANDIDATE_SELECTOR) ?? null;
 }
 
 export class PageSession {
@@ -38,6 +39,7 @@ export class PageSession {
     sendStatus,
     provider,
     concurrency = DEFAULT_CONCURRENCY,
+    activation = null,
     settings,
     translationCache = new Map(),
     isGenerationCurrent = () => true,
@@ -49,6 +51,7 @@ export class PageSession {
     this.document = document;
     this.sendStatus = sendStatus ?? (() => {});
     this.concurrency = concurrency;
+    this.activation = activation;
     this.settings = normalizeSettings(settings ?? createDefaultSettings());
     this.usesDefaultProvider = provider == null;
     this.provider = provider ?? new ChromeTranslateProvider({
@@ -84,6 +87,8 @@ export class PageSession {
     this.providerReady = false;
     this.running = false;
     this.watchOnly = false;
+    this.status = null;
+    this.segmentWrappers = new Set();
     this.runPromise = null;
     this.translatedCount = 0;
     this.failedCount = 0;
@@ -99,12 +104,31 @@ export class PageSession {
   }
 
   notify(status, payload = {}) {
+    this.status = status;
     this.sendStatus({
       status,
       generation: this.generation,
       origin: this.document.location?.origin,
       ...payload
     });
+  }
+
+  collectBlocks(root = this.document.body, options = {}) {
+    const blocks = collectTranslationBlocks(root, options);
+    for (const block of blocks) {
+      if (block.element?.matches?.(SEGMENT_SELECTOR)) this.segmentWrappers.add(block.element);
+    }
+    return blocks;
+  }
+
+  cleanupSegmentWrappers() {
+    for (const segment of this.segmentWrappers) {
+      if (!segment?.matches?.(SEGMENT_SELECTOR) || !segment.parentNode) continue;
+      const parent = segment.parentNode;
+      while (segment.firstChild) parent.insertBefore(segment.firstChild, segment);
+      segment.remove();
+    }
+    this.segmentWrappers.clear();
   }
 
   start() {
@@ -130,6 +154,7 @@ export class PageSession {
     this.provider.cancel?.();
     this.providerReady = false;
     this.renderer?.removeAll();
+    this.cleanupSegmentWrappers();
     this.renderer = null;
     this.provider.close?.();
     this.restoreTitle();
@@ -140,8 +165,9 @@ export class PageSession {
     const signal = this.controller.signal;
     try {
       const startupRouteGeneration = this.routeGeneration;
-      const initialBlocks = collectTranslationBlocks(this.document.body, {
-        targetLanguage: this.settings.targetLanguage
+      const initialBlocks = this.collectBlocks(this.document.body, {
+        targetLanguage: this.settings.targetLanguage,
+        splitSegments: false
       });
       const shouldTranslateTitle = this.settings.translatePageTitle || this.legacyTranslatePageTitle;
       const hasTranslatableTitle = shouldTranslateTitle &&
@@ -182,7 +208,7 @@ export class PageSession {
       if (!this.isCurrent()) throw new TranslationCancelledError();
       this.providerReady = true;
 
-      const blocks = collectTranslationBlocks(this.document.body, {
+      const blocks = this.collectBlocks(this.document.body, {
         targetLanguage: this.settings.targetLanguage,
         onExcluded: (element) => this.renderer?.remove(element)
       });
@@ -198,8 +224,12 @@ export class PageSession {
         startupRouteGeneration === this.routeGeneration && !this.routeDecisionPending ? blocks : null
       );
     } catch (error) {
-      if (!this.isCurrent() || isTranslationCancelled(error)) return;
+      if (!this.isCurrent() || isTranslationCancelled(error)) {
+        this.cleanupSegmentWrappers();
+        return;
+      }
       this.renderer?.removeAll();
+      this.cleanupSegmentWrappers();
       this.renderer = null;
       this.disconnectObservers();
       this.running = false;
@@ -223,7 +253,7 @@ export class PageSession {
         this.renderer?.pruneMissingTranslations?.();
         this.renderer?.pruneDisconnected?.();
         this.renderer?.restoreChangedSources?.();
-        blocks = collectTranslationBlocks(this.document.body, {
+        blocks = this.collectBlocks(this.document.body, {
           targetLanguage: this.settings.targetLanguage,
           onExcluded: (element) => this.renderer?.remove(element)
         });
@@ -278,7 +308,10 @@ export class PageSession {
             !block?.element?.isConnected ||
             !this.renderer?.isSourceHashCurrent?.(block)) return;
         const translation = this.renderer?.insert({...block, translatedText});
-        if (translation) this.translatedCount += 1;
+        if (translation) {
+          this.segmentWrappers.delete(block.element);
+          this.translatedCount += 1;
+        }
       },
       onError: (error, block) => {
         if (!this.isCurrent() || this.routeDecisionPending ||
@@ -446,7 +479,7 @@ export class PageSession {
       const blocks = [];
       const seen = new Set();
       for (const root of roots) {
-        for (const block of collectTranslationBlocks(root, {
+        for (const block of this.collectBlocks(root, {
           targetLanguage: this.settings.targetLanguage,
           onExcluded: (element) => this.renderer?.remove(element)
         })) {
@@ -545,7 +578,7 @@ export class PageSession {
     this.renderer?.pruneDisconnected?.();
     this.renderer?.restoreChangedSources?.();
     const shouldTranslateTitle = this.settings.translatePageTitle || this.legacyTranslatePageTitle;
-    const blocks = collectTranslationBlocks(this.document.body, {
+    const blocks = this.collectBlocks(this.document.body, {
       targetLanguage: this.settings.targetLanguage,
       onExcluded: (element) => this.renderer?.remove(element)
     });

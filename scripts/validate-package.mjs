@@ -132,15 +132,7 @@ export function validatePackageDirectory({packageDir}) {
     errors.push(`Development or unnecessary files found in package: ${forbidden.join(', ')}`)
   }
 
-  const packageJsonPath = path.join(path.dirname(packageDir), 'package.json')
-  if (fs.existsSync(packageJsonPath)) {
-    const packageVersion = String(readJson(packageJsonPath).version || '')
-    const manifestVersion = String(manifest.version || '')
-    if (!manifestVersion || !packageVersion.startsWith(`${manifestVersion}.`)) {
-      errors.push(`Version mismatch: manifest ${manifestVersion || '(missing)'} vs package ${packageVersion || '(missing)'}.`)
-    }
-  }
-
+  // The extension manifest is the source of truth for the release version and ZIP name.
   return {
     errors,
     actualFiles,

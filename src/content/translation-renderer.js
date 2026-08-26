@@ -4,6 +4,11 @@ import {
   TRANSLATION_STYLES,
   normalizeColor
 } from '../settings.js';
+import {
+  SEGMENT_ATTRIBUTE,
+  SEGMENT_ID_ATTRIBUTE,
+  SEGMENT_SELECTOR
+} from './block-collector.js';
 import {hashSourceText} from './translation-queue.js';
 
 export const TRANSLATION_TAG = 'translight-translation';
@@ -43,7 +48,9 @@ const ATTRIBUTE_NAMES = [
   STYLED_REPLACEMENT_ATTRIBUTE,
   STYLE_ATTRIBUTE,
   HIDDEN_ATTRIBUTE,
-  HIDDEN_PLACEMENT_ATTRIBUTE
+  HIDDEN_PLACEMENT_ATTRIBUTE,
+  SEGMENT_ATTRIBUTE,
+  SEGMENT_ID_ATTRIBUTE
 ];
 
 function escapeAttribute(value) {
@@ -171,6 +178,7 @@ function collectSourceTextNodes(element, mixedContent = false, {includeReplaceme
         }
         continue;
       }
+      if (child.matches(SEGMENT_SELECTOR)) continue;
       if (mixedContent && child.matches(BLOCK_SELECTOR)) continue;
       visit(child);
     }
@@ -546,6 +554,14 @@ export class TranslationRenderer {
     return wrapper;
   }
 
+  unwrapSegment(record) {
+    const segment = record?.element;
+    if (!segment?.matches?.(SEGMENT_SELECTOR) || !segment.parentNode) return;
+    const parent = segment.parentNode;
+    while (segment.firstChild) parent.insertBefore(segment.firstChild, segment);
+    segment.remove();
+  }
+
   restoreSourceText(record, {onlyIfChanged = false} = {}) {
     if (!record.replaced) return false;
     const currentNodes = collectSourceTextNodes(record.element, record.mixedContent, {
@@ -846,6 +862,7 @@ export class TranslationRenderer {
       this.restoreSourceText(record);
       for (const name of ATTRIBUTE_NAMES) restoreAttribute(element, name, record.originalAttributes[name]);
     }
+    this.unwrapSegment(record);
     this.recordsByElement.delete(element);
     this.records.delete(record.sourceId);
     return true;
@@ -870,6 +887,7 @@ export class TranslationRenderer {
       if (element?.getAttribute(SESSION_ATTRIBUTE) !== this.sessionId) continue;
       this.restoreSourceText(record);
       for (const name of ATTRIBUTE_NAMES) restoreAttribute(element, name, originalAttributes[name]);
+      this.unwrapSegment(record);
       this.recordsByElement.delete(element);
     }
 

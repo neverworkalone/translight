@@ -15,7 +15,7 @@ import {
   TRANSLATED_ATTRIBUTE,
   TranslationRenderer
 } from '../src/content/translation-renderer.js';
-import {collectTranslationBlocks} from '../src/content/block-collector.js';
+import {collectTranslationBlocks, SEGMENT_ATTRIBUTE} from '../src/content/block-collector.js';
 import {TRANSLATION_MODES, TRANSLATION_STYLES} from '../src/settings.js';
 import {hashSourceText} from '../src/content/translation-queue.js';
 
@@ -388,6 +388,27 @@ describe('TranslationRenderer', () => {
 
     renderer.removeAll();
     expect(document.body.innerHTML).toBe('<table><tbody><tr><td id="cell">Original cell</td></tr></tbody></table>');
+  });
+
+  it('places direct-text paragraph translations at each paragraph boundary', () => {
+    document.body.innerHTML = '<div id="guide">First paragraph.<br><br>Second paragraph.</div>';
+    const guide = document.querySelector('#guide');
+    const blocks = collectTranslationBlocks(document.body);
+    const renderer = new TranslationRenderer({document, sessionId: 'segment-session'});
+
+    blocks.forEach((block, index) => renderer.insert({
+      ...block,
+      translatedText: `Translated paragraph ${index + 1}`
+    }));
+
+    const translations = [...guide.querySelectorAll('translight-translation')];
+    expect(translations).toHaveLength(2);
+    expect(translations[0].previousElementSibling).toBe(blocks[0].element);
+    expect(translations[1].previousElementSibling).toBe(blocks[1].element);
+    expect(guide.querySelectorAll(`[${SEGMENT_ATTRIBUTE}="true"]`)).toHaveLength(2);
+
+    renderer.removeAll();
+    expect(document.body.innerHTML).toBe('<div id="guide">First paragraph.<br><br>Second paragraph.</div>');
   });
 
   it.each(Object.values(TRANSLATION_STYLES))('styles only the replacement text in table cells for %s', (displayStyle) => {

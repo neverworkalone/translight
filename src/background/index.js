@@ -173,7 +173,9 @@ async function sendContentMessage(tabId, message, {allowInjection = false} = {})
 
 async function sendStopMessage(tabId, generation) {
   try {
-    await chrome.tabs.sendMessage(tabId, {type: 'TRANSLATION_STOP', generation});
+    const message = {type: 'TRANSLATION_STOP'};
+    if (Number.isInteger(generation)) message.generation = generation;
+    await chrome.tabs.sendMessage(tabId, message);
   } catch {
     // Navigation may have already destroyed the content page.
   }
@@ -194,6 +196,27 @@ async function sendRouteDecision(tabId, routeGeneration, continueTranslation) {
 
 function isBusyOrActive(state) {
   return state.status === TAB_STATUS.ACTIVE || BUSY_STATUSES.has(state.status);
+}
+
+const RESUMABLE_CONTENT_STATUSES = new Set([
+  TAB_STATUS.CHECKING,
+  TAB_STATUS.DOWNLOADING,
+  TAB_STATUS.TRANSLATING,
+  TAB_STATUS.ACTIVE,
+  TAB_STATUS.SKIPPED
+]);
+
+function resumedContentStatus(message) {
+  return RESUMABLE_CONTENT_STATUSES.has(message.contentSessionStatus)
+    ? message.contentSessionStatus
+    : TAB_STATUS.ACTIVE;
+}
+
+function resumedContentActivation(message, fallback) {
+  return message.contentSessionActivation === TAB_ACTIVATION.MANUAL ||
+    message.contentSessionActivation === TAB_ACTIVATION.AUTO
+    ? message.contentSessionActivation
+    : fallback;
 }
 
 async function startTranslation(tab, {
@@ -235,6 +258,7 @@ async function startTranslation(tab, {
       {
         type: 'TRANSLATION_START',
         generation,
+        activation,
         ...(Number.isInteger(routeGeneration) ? {routeGeneration} : {})
       },
       {allowInjection: activation === TAB_ACTIVATION.MANUAL}
@@ -313,7 +337,8 @@ async function handleContentReady(message, sender) {
 
   const url = message.url || sender?.tab?.url || '';
   const initialState = getState(tabId);
-  if (initialState.documentToken === message.documentToken) {
+  const isResume = message.resume === true;
+  if (initialState.documentToken === message.documentToken && !isResume) {
     rememberDocumentUrl(tabId, url);
     return;
   }
@@ -335,8 +360,52 @@ async function handleContentReady(message, sender) {
     autoTranslateSameSite: settings.autoTranslateSameSite
   });
 
-  if (state.documentToken === message.documentToken) {
+  if (state.documentToken === message.documentToken && !isResume) {
     rememberDocumentUrl(tabId, url);
+    return;
+  }
+  if (state.documentToken === message.documentToken && message.contentSessionActive === true &&
+      (isBusyOrActive(state) || state.status === TAB_STATUS.SKIPPED)) {
+    rememberDocumentUrl(tabId, url);
+    return;
+  }
+  const hasResumedContentSession = isResume && message.contentSessionActive === true;
+  const resumedGeneration = Number.isInteger(message.contentSessionGeneration)
+    ? message.contentSessionGeneration
+    : null;
+  if (hasResumedContentSession && !navigation.translate) {
+    rememberDocumentUrl(tabId, url);
+    await setState(tabId, {
+      status: TAB_STATUS.OFF,
+      generation: nextGeneration(),
+      activation: null,
+      documentToken: message.documentToken,
+      origin: null,
+      hostname: currentHost || null,
+      autoTranslateSuppressed: false,
+      modelState: null,
+      progress: null,
+      errorCode: null,
+      errorMessage: null
+    });
+    await sendStopMessage(tabId, resumedGeneration);
+    return;
+  }
+  if (hasResumedContentSession && navigation.translate && resumedGeneration != null) {
+    rememberDocumentUrl(tabId, url);
+    await setState(tabId, {
+      status: resumedContentStatus(message),
+      generation: resumedGeneration,
+      activation: resumedContentActivation(message, navigation.activation),
+      origin: originForUrl(url) || state.origin,
+      hostname: currentHost || state.hostname,
+      documentToken: message.documentToken,
+      autoTranslateSuppressed: false,
+      modelState: null,
+      progress: null,
+      errorCode: null,
+      errorMessage: null
+    });
     return;
   }
   if (state.autoTranslateSuppressed && navigation.translate) {

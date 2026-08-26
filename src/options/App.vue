@@ -33,7 +33,7 @@ const saving = ref(false);
 const savedPulse = ref(false);
 const error = ref('');
 
-const version = globalThis.chrome?.runtime?.getManifest?.()?.version ?? '1.0';
+const version = globalThis.chrome?.runtime?.getManifest?.()?.version ?? '1.x';
 const iconUrl = globalThis.chrome?.runtime?.getURL?.('icon.png') ?? '/icon.png';
 const pageComponent = computed(() => PAGE_COMPONENTS[currentPage.value]);
 const draftSettings = computed(() => normalizeSettings({

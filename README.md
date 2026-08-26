@@ -60,6 +60,12 @@ npm run check
 npm run package
 ```
 
+For a readable debug package without JavaScript or CSS minification:
+
+```bash
+npm run package -- --no-minify
+```
+
 
 ### Run the development server
 
