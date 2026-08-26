@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   CONTENT_CONTROLLER_KEY,
   DOCUMENT_TOKEN_KEY,
@@ -33,7 +33,8 @@ describe('content controller initialization', () => {
       const session = {
         generation: options.generation,
         start: () => Promise.resolve(),
-        stop: () => {}
+        stop: () => {},
+        applyRouteDecision: vi.fn()
       };
       sessions.push(session);
       return session;
@@ -46,5 +47,14 @@ describe('content controller initialization', () => {
     expect(runtime.listeners).toHaveLength(1);
     await runtime.listeners[0]({ type: 'TRANSLATION_START', generation: 1 }, {}, () => {});
     expect(sessions).toHaveLength(1);
+    runtime.listeners[0]({
+      type: 'TRANSLATION_ROUTE',
+      routeGeneration: 1,
+      continueTranslation: true
+    }, {}, () => {});
+    expect(sessions[0].applyRouteDecision).toHaveBeenCalledWith(expect.objectContaining({
+      routeGeneration: 1,
+      continueTranslation: true
+    }));
   });
 });

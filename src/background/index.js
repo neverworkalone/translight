@@ -179,6 +179,19 @@ async function sendStopMessage(tabId, generation) {
   }
 }
 
+async function sendRouteDecision(tabId, routeGeneration, continueTranslation) {
+  if (!Number.isInteger(routeGeneration)) return;
+  try {
+    await chrome.tabs.sendMessage(tabId, {
+      type: 'TRANSLATION_ROUTE',
+      routeGeneration,
+      continueTranslation: continueTranslation === true
+    });
+  } catch {
+    // The content page may disappear while the background is deciding policy.
+  }
+}
+
 function isBusyOrActive(state) {
   return state.status === TAB_STATUS.ACTIVE || BUSY_STATUSES.has(state.status);
 }
@@ -186,7 +199,8 @@ function isBusyOrActive(state) {
 async function startTranslation(tab, {
   activation = TAB_ACTIVATION.MANUAL,
   url = tab?.url,
-  documentToken
+  documentToken,
+  routeGeneration
 } = {}) {
   const tabId = tab?.id;
   if (typeof tabId !== 'number') return;
@@ -218,7 +232,11 @@ async function startTranslation(tab, {
   try {
     await sendContentMessage(
       tabId,
-      { type: 'TRANSLATION_START', generation },
+      {
+        type: 'TRANSLATION_START',
+        generation,
+        ...(Number.isInteger(routeGeneration) ? {routeGeneration} : {})
+      },
       {allowInjection: activation === TAB_ACTIVATION.MANUAL}
     );
   } catch (error) {
@@ -427,18 +445,13 @@ async function handleContentNavigation(message, sender) {
   if (state.autoTranslateSuppressed) {
     const currentUrl = documentUrlForUrl(message.url);
     const suppressedUrl = documentUrls.get(String(tabId));
-    if (!suppressedUrl || currentUrl === suppressedUrl) return;
+    if (!suppressedUrl || currentUrl === suppressedUrl) {
+      await sendRouteDecision(tabId, message.routeGeneration, false);
+      return;
+    }
     state = await setState(tabId, {autoTranslateSuppressed: false});
   }
-  // SKIPPED only describes the last route. A SPA can replace a target-language
-  // view with a foreign-language view without creating a new document.
-  if (isBusyOrActive(state)) {
-    const documentUrl = documentUrlForUrl(message.url);
-    if (documentUrl && documentUrl !== documentUrls.get(String(tabId))) {
-      rememberDocumentUrl(tabId, message.url);
-    }
-    return;
-  }
+  rememberDocumentUrl(tabId, message.url);
 
   const settings = await loadSettings();
   const navigation = classifyNavigation({
@@ -447,14 +460,29 @@ async function handleContentNavigation(message, sender) {
     autoTranslateSites: settings.autoTranslateSites,
     autoTranslateSameSite: settings.autoTranslateSameSite
   });
-  if (!navigation.translate) return;
+
+  if (!navigation.translate) {
+    await sendRouteDecision(tabId, message.routeGeneration, false);
+    if (state.status !== TAB_STATUS.OFF || state.activation != null || state.documentToken != null) {
+      await stopTranslation(tabId, state);
+    }
+    return;
+  }
+
+  // SKIPPED is a live watch-only PageSession. Keep it alive so the content
+  // layer can prepare the provider only when the new route yields English.
+  if (isBusyOrActive(state) || state.status === TAB_STATUS.SKIPPED) {
+    await sendRouteDecision(tabId, message.routeGeneration, true);
+    return;
+  }
 
   await startTranslation(
     {id: tabId, url: message.url},
     {
       activation: navigation.activation,
       url: message.url,
-      documentToken: message.documentToken
+      documentToken: message.documentToken,
+      routeGeneration: message.routeGeneration
     }
   );
 }

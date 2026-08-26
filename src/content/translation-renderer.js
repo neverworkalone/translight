@@ -508,6 +508,14 @@ export class TranslationRenderer {
     return nodes;
   }
 
+  isSourceHashCurrent({element, sourceHash, mixedContent = false} = {}) {
+    if (!element?.isConnected) return false;
+    if (!sourceHash) return true;
+    const nodes = collectSourceTextNodes(element, Boolean(mixedContent));
+    const sourceText = normalizeSourceText(sourceTextFromNodes(nodes));
+    return hashSourceText(sourceText) === sourceHash;
+  }
+
   unwrapReplacementText(record) {
     const wrappers = record.replacementWrappers?.length
       ? record.replacementWrappers
@@ -638,6 +646,23 @@ export class TranslationRenderer {
       record.translation.parentNode?.removeChild(record.translation);
       this.clearReplacementAttributes(record);
     }
+  }
+
+  pruneMissingTranslations() {
+    const missing = [];
+    for (const record of this.records.values()) {
+      // Translation-only replacement intentionally removes the generated
+      // translation node, so the replaced source text is the live result in
+      // that mode. Every other presentation needs its generated node to stay
+      // connected; hosts such as SPA renderers may remove it while reusing
+      // the source element for a new route.
+      const hasLivePresentation = record.replaced || record.translation?.isConnected;
+      if (record.element?.isConnected !== false && !hasLivePresentation) {
+        missing.push(record.element);
+      }
+    }
+    for (const element of missing) this.remove(element);
+    return missing;
   }
 
   refreshOriginalSnapshot(record, sourceText) {
@@ -810,6 +835,20 @@ export class TranslationRenderer {
     this.recordsByElement.set(element, record);
     this.applyRecordPresentation(record);
     return translation;
+  }
+
+  remove(element) {
+    const record = this.recordsByElement.get(element);
+    if (!record) return false;
+
+    record.translation?.parentNode?.removeChild(record.translation);
+    if (element?.getAttribute(SESSION_ATTRIBUTE) === this.sessionId) {
+      this.restoreSourceText(record);
+      for (const name of ATTRIBUTE_NAMES) restoreAttribute(element, name, record.originalAttributes[name]);
+    }
+    this.recordsByElement.delete(element);
+    this.records.delete(record.sourceId);
+    return true;
   }
 
   pruneDisconnected() {

@@ -4,10 +4,13 @@ import { describe, expect, it } from 'vitest';
 import { PageSession } from '../src/content/page-session.js';
 import { TRANSLATION_MODES } from '../src/settings.js';
 
-function makeProvider({ translate = async (text) => `ko:${text}` } = {}) {
+function makeProvider({
+  translate = async (text) => `ko:${text}`,
+  prepare = async () => {}
+} = {}) {
   return {
     getModelState: async () => 'Available',
-    prepare: async () => {},
+    prepare,
     translate,
     cancel: () => {},
     close: () => {}
@@ -41,31 +44,360 @@ describe('PageSession', () => {
     session.stop();
   });
 
-  it('skips a document whose declared language is the target language', async () => {
+  it('skips a document with no translatable blocks', async () => {
     document.documentElement.lang = 'ko-KR';
     document.body.innerHTML = '<p>한국어 문서는 이미 대상 언어로 작성되어 있습니다.</p>';
     let calls = 0;
+    let providerChecks = 0;
     const statuses = [];
     const session = new PageSession({
       generation: 11,
       document,
-      provider: makeProvider({
+      provider: {
+        getModelState: async () => {
+          providerChecks += 1;
+          return 'Available';
+        },
+        prepare: async () => {
+          providerChecks += 1;
+        },
         translate: async (text) => {
           calls += 1;
           return `ko:${text}`;
-        }
-      }),
+        },
+        cancel: () => {},
+        close: () => {}
+      },
       sendStatus: (status) => statuses.push(status)
     });
 
     await session.start();
 
     expect(calls).toBe(0);
+    expect(providerChecks).toBe(0);
     expect(document.querySelector('p').textContent).toBe('한국어 문서는 이미 대상 언어로 작성되어 있습니다.');
     expect(document.querySelector('translight-translation')).toBeNull();
     expect(statuses.at(-1)).toMatchObject({status: 'SKIPPED', reason: 'TARGET_LANGUAGE'});
     document.documentElement.removeAttribute('lang');
     session.stop({notify: false});
+  });
+
+  it('waits for English content after an initially Korean-only page', async () => {
+    document.documentElement.lang = 'ko-KR';
+    document.body.innerHTML = '<p>처음에는 한국어 콘텐츠만 있습니다.</p>';
+    const calls = [];
+    const session = new PageSession({
+      generation: 113,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    await session.start();
+    expect(calls).toEqual([]);
+
+    const added = document.createElement('p');
+    added.textContent = 'A new English post arrived after the first route.';
+    document.body.appendChild(added);
+    await wait(180);
+
+    expect(calls).toEqual(['A new English post arrived after the first route.']);
+    expect(added.nextElementSibling?.textContent)
+      .toBe('ko:A new English post arrived after the first route.');
+    session.stop({notify: false});
+    document.documentElement.removeAttribute('lang');
+  });
+
+  it('does not restart model preparation for consecutive watch-only renders', async () => {
+    document.documentElement.lang = 'ko-KR';
+    document.body.innerHTML = '<p>처음에는 한국어 콘텐츠만 있습니다.</p>';
+    let releaseModel;
+    const modelReady = new Promise((resolve) => { releaseModel = resolve; });
+    let modelChecks = 0;
+    const calls = [];
+    const session = new PageSession({
+      generation: 114,
+      document,
+      settings: {translatePageTitle: false},
+      provider: {
+        getModelState: async () => {
+          modelChecks += 1;
+          return modelReady;
+        },
+        prepare: async () => {},
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        },
+        cancel: () => {},
+        close: () => {}
+      }
+    });
+
+    await session.start();
+    const first = document.createElement('p');
+    first.textContent = 'The first post arrived.';
+    document.body.appendChild(first);
+    await wait(130);
+    const second = document.createElement('p');
+    second.textContent = 'The second post arrived right after it.';
+    document.body.appendChild(second);
+    await wait(130);
+
+    expect(modelChecks).toBe(1);
+    releaseModel('Available');
+    await wait(180);
+    expect(calls).toEqual(expect.arrayContaining([
+      'The first post arrived.',
+      'The second post arrived right after it.'
+    ]));
+    session.stop({notify: false});
+    document.documentElement.removeAttribute('lang');
+  });
+
+  it('translates an English block when a SPA reveals it by changing attributes', async () => {
+    document.documentElement.lang = 'ko-KR';
+    document.body.innerHTML = '<p id="revealed" hidden>English content revealed later.</p>';
+    const calls = [];
+    const session = new PageSession({
+      generation: 115,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    await session.start();
+    document.querySelector('#revealed').hidden = false;
+    await wait(220);
+
+    expect(calls).toEqual(['English content revealed later.']);
+    expect(document.querySelector('#revealed + translight-translation')?.textContent)
+      .toBe('ko:English content revealed later.');
+    session.stop({notify: false});
+    document.documentElement.removeAttribute('lang');
+  });
+
+  it('drops late results from the previous route and reuses the prepared provider', async () => {
+    document.body.innerHTML = '<p id="old">Old route content.</p>';
+    const resolvers = new Map();
+    let prepareCalls = 0;
+    const calls = [];
+    const session = new PageSession({
+      generation: 116,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider({
+        prepare: async () => { prepareCalls += 1; },
+        translate: (text) => {
+          calls.push(text);
+          if (text === 'Old route content.') {
+            return new Promise((resolve) => resolvers.set(text, resolve));
+          }
+          return Promise.resolve(`ko:${text}`);
+        }
+      })
+    });
+
+    const run = session.start();
+    await wait(20);
+    expect(calls).toEqual(['Old route content.']);
+
+    expect(session.beginRouteChange({routeGeneration: 1})).toBe(true);
+    expect(session.applyRouteDecision({
+      routeGeneration: 1,
+      continueTranslation: true
+    })).toBe(true);
+    resolvers.get('Old route content.')('ko:Old route content.');
+    document.querySelector('#old').remove();
+    const next = document.createElement('p');
+    next.id = 'next';
+    next.textContent = 'New route content.';
+    document.body.appendChild(next);
+
+    await wait(260);
+    expect(prepareCalls).toBe(1);
+    expect(calls).toEqual(['Old route content.', 'New route content.']);
+    expect(document.querySelector('#old + translight-translation')).toBeNull();
+    expect(document.querySelector('#next + translight-translation')?.textContent)
+      .toBe('ko:New route content.');
+    session.stop({notify: false});
+    await run;
+  });
+
+  it('finds translated blocks after a route replaces the body', async () => {
+    document.body.innerHTML = '<p>Initial route content.</p>';
+    const session = new PageSession({
+      generation: 117,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider()
+    });
+
+    await session.start();
+    expect(session.beginRouteChange({routeGeneration: 1})).toBe(true);
+    expect(session.applyRouteDecision({routeGeneration: 1, continueTranslation: true})).toBe(true);
+
+    const replacement = document.createElement('body');
+    replacement.innerHTML = '<main><p>Content rendered by the next route.</p></main>';
+    document.documentElement.replaceChild(replacement, document.body);
+    await wait(260);
+
+    expect(document.querySelector('main p + translight-translation')?.textContent)
+      .toBe('ko:Content rendered by the next route.');
+    session.stop({notify: false});
+  });
+
+  it('does not let a previous route title result overwrite the next title', async () => {
+    document.title = 'Old route title';
+    document.body.innerHTML = '<p>Old route body.</p>';
+    const resolvers = [];
+    const calls = [];
+    const session = new PageSession({
+      generation: 118,
+      document,
+      settings: {translatePageTitle: true},
+      provider: makeProvider({
+        translate: (text) => {
+          calls.push(text);
+          if (text === 'Old route title') {
+            return new Promise((resolve) => resolvers.push(resolve));
+          }
+          return Promise.resolve(`ko:${text}`);
+        }
+      })
+    });
+
+    const run = session.start();
+    await wait(20);
+    expect(calls).toEqual(['Old route title']);
+    expect(session.beginRouteChange({routeGeneration: 1})).toBe(true);
+    expect(session.applyRouteDecision({routeGeneration: 1, continueTranslation: true})).toBe(true);
+    resolvers[0]('ko:Old route title');
+    document.title = 'New route title';
+    document.body.innerHTML = '<p>New route body.</p>';
+
+    await wait(260);
+    expect(document.title).toBe('ko:New route title');
+    expect(document.body.textContent).toContain('New route body.');
+    expect(document.body.textContent).not.toContain('ko:Old route title');
+    expect(calls).toEqual(expect.arrayContaining(['Old route title', 'New route title', 'New route body.']));
+    session.stop({notify: false});
+    await run;
+  });
+
+  it('applies the route guard to a cache hit as well as a provider response', async () => {
+    document.body.innerHTML = '<p id="old">Cached old route.</p>';
+    const cached = new Map([['default\u0000Cached old route.', 'ko:Cached old route.']]);
+    let session;
+    let triggered = false;
+    class RouteChangingCache extends Map {
+      has(key) {
+        if (!triggered && key === 'default\u0000Cached old route.') {
+          triggered = true;
+          session.beginRouteChange({routeGeneration: 1});
+          document.body.innerHTML = '<p id="new">Cached new route.</p>';
+          session.applyRouteDecision({routeGeneration: 1, continueTranslation: true});
+        }
+        return super.has(key);
+      }
+    }
+    const translationCache = new RouteChangingCache(cached);
+    const calls = [];
+    session = new PageSession({
+      generation: 119,
+      document,
+      settings: {translatePageTitle: false},
+      translationCache,
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    await session.start();
+    await wait(220);
+    expect(calls).toEqual(['Cached new route.']);
+    expect(document.querySelector('#old + translight-translation')).toBeNull();
+    expect(document.querySelector('#new + translight-translation')?.textContent)
+      .toBe('ko:Cached new route.');
+    session.stop({notify: false});
+  });
+
+  it('translates English content on a page whose UI declares Korean', async () => {
+    document.documentElement.lang = 'ko-KR';
+    document.body.innerHTML = `
+      <nav><a href="#">홈</a><a href="#">알림</a></nav>
+      <div lang="ko"><p id="ui">로그인하고 설정을 확인하세요.</p></div>
+      <main>
+        <article>
+          <h1 id="post-title">Why this community keeps growing</h1>
+          <p id="post">This is an English post written by a community member.</p>
+          <p id="comment">The comments are also written in English.</p>
+        </article>
+      </main>
+    `;
+    const calls = [];
+    const session = new PageSession({
+      generation: 111,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    await session.start();
+
+    expect(calls).toEqual([
+      'Why this community keeps growing',
+      'This is an English post written by a community member.',
+      'The comments are also written in English.'
+    ]);
+    expect(document.querySelector('#ui translight-translation')).toBeNull();
+    expect(document.querySelectorAll('translight-translation')).toHaveLength(3);
+    session.stop();
+    document.documentElement.removeAttribute('lang');
+  });
+
+  it('translates an English title without trusting the root language', async () => {
+    document.documentElement.lang = 'ko-KR';
+    document.title = 'An English title for a post';
+    document.body.innerHTML = '<p>한국어 본문이 있는 페이지입니다.</p>';
+    const calls = [];
+    const session = new PageSession({
+      generation: 112,
+      document,
+      settings: {translatePageTitle: true},
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    await session.start();
+
+    expect(calls).toEqual(['An English title for a post']);
+    expect(document.title).toBe('ko:An English title for a post');
+    expect(document.querySelectorAll('translight-translation')).toHaveLength(0);
+    session.stop();
+    document.documentElement.removeAttribute('lang');
   });
 
   it('creates the default provider with the session target language', () => {
@@ -230,6 +562,73 @@ describe('PageSession', () => {
     session.stop();
   });
 
+  it('retranslates a reused source when a SPA removes its generated translation', async () => {
+    document.body.innerHTML = '<p id="source">A reusable post body.</p>';
+    const calls = [];
+    const session = new PageSession({
+      generation: 411,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    await session.start();
+    const source = document.querySelector('#source');
+    const generated = source.nextElementSibling;
+    expect(generated?.tagName.toLowerCase()).toBe('translight-translation');
+    generated.remove();
+    await wait();
+
+    expect(source.nextElementSibling?.textContent).toBe('ko:A reusable post body.');
+    expect(calls).toEqual(['A reusable post body.']);
+    session.stop();
+  });
+
+  it('translates Korean-to-English changes and removes English-to-Korean translations', async () => {
+    document.documentElement.lang = 'ko-KR';
+    document.body.innerHTML = `
+      <p id="changing-korean">처음에는 한국어 콘텐츠입니다.</p>
+      <p id="changing-english">This block starts in English.</p>
+    `;
+    const calls = [];
+    const session = new PageSession({
+      generation: 43,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    await session.start();
+    expect(calls).toEqual(['This block starts in English.']);
+
+    document.querySelector('#changing-korean').firstChild.data =
+      'This block changed from Korean to English.';
+    await wait();
+    expect(document.querySelector('#changing-korean + translight-translation')?.textContent)
+      .toBe('ko:This block changed from Korean to English.');
+
+    document.querySelector('#changing-english').firstChild.data =
+      '이 블록은 이제 한국어 콘텐츠입니다.';
+    await wait();
+    expect(document.querySelector('#changing-english + translight-translation')).toBeNull();
+    expect(calls).toEqual([
+      'This block starts in English.',
+      'This block changed from Korean to English.'
+    ]);
+    session.stop();
+    document.documentElement.removeAttribute('lang');
+  });
+
   it('restores inline source text before retranslation after a replacement update', async () => {
     document.body.innerHTML = '<p id="source">Visit <a href="https://openai.com">OpenAI</a> docs</p>';
     const inputs = [];
@@ -357,6 +756,35 @@ describe('PageSession', () => {
 
     expect(document.title).toBe('ko:Second title');
     session.stop();
+  });
+
+  it('does not translate a title after its content changes to Korean', async () => {
+    document.documentElement.lang = 'ko-KR';
+    document.title = 'Initial English title';
+    document.body.innerHTML = '<p>English body content keeps the session active.</p>';
+    const calls = [];
+    const session = new PageSession({
+      generation: 54,
+      document,
+      settings: {translatePageTitle: true},
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    await session.start();
+    expect(document.title).toBe('ko:Initial English title');
+
+    document.title = '한국어 제목으로 변경되었습니다.';
+    await wait();
+
+    expect(document.title).toBe('한국어 제목으로 변경되었습니다.');
+    expect(calls).toEqual(['Initial English title', 'English body content keeps the session active.']);
+    session.stop();
+    document.documentElement.removeAttribute('lang');
   });
 
   it('starts with visible blocks, then adjacent blocks, then document-order blocks', async () => {

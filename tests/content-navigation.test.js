@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   CONTENT_CONTROLLER_KEY,
   DOCUMENT_TOKEN_KEY,
@@ -8,6 +8,7 @@ import {
 } from '../src/content/controller.js';
 
 afterEach(() => {
+  vi.useRealTimers();
   delete globalThis[CONTENT_CONTROLLER_KEY];
   delete globalThis[DOCUMENT_TOKEN_KEY];
 });
@@ -24,14 +25,26 @@ describe('content navigation notifications', () => {
       }
     };
 
-    installContentController({runtime});
+    const controller = installContentController({runtime});
+    controller.currentSession = {
+      isNavigationWatching: () => true,
+      beginRouteChange: vi.fn()
+    };
     history.pushState({}, '', '#Types');
-    await Promise.resolve();
+    controller.navigationHandler();
 
     expect(messages.at(-1)).toMatchObject({
       type: 'CONTENT_NAVIGATION',
-      url: `${location.origin}/wiki/Well-being#Types`
+      previousUrl: `${location.origin}/wiki/Well-being`,
+      currentUrl: `${location.origin}/wiki/Well-being#Types`,
+      url: `${location.origin}/wiki/Well-being#Types`,
+      documentToken: expect.any(String),
+      routeGeneration: 1
     });
+    expect(controller.currentSession.beginRouteChange).toHaveBeenCalledWith(
+      expect.objectContaining({routeGeneration: 1})
+    );
+    expect(controller.navigationHandler()).toBe(false);
   });
 
   it('reports its current location when automatic rules are refreshed', async () => {
@@ -59,5 +72,39 @@ describe('content navigation notifications', () => {
       documentToken: expect.any(String),
       url: `${location.origin}/wiki/Well-being`
     });
+  });
+
+  it('uses the session-scoped fallback watcher for pushState without patching history', () => {
+    vi.useFakeTimers();
+    history.replaceState({}, '', '/wiki/Well-being');
+    const messages = [];
+    const runtime = {
+      onMessage: {addListener() {}},
+      sendMessage(message) {
+        messages.push(message);
+        return Promise.resolve();
+      }
+    };
+    const controller = installContentController({runtime});
+    const session = {
+      isNavigationWatching: () => true,
+      beginRouteChange: vi.fn()
+    };
+    controller.currentSession = session;
+    controller.startNavigationWatcher(session);
+
+    history.pushState({}, '', '/wiki/Well-being#Types');
+    vi.advanceTimersByTime(499);
+    expect(messages.filter(({type}) => type === 'CONTENT_NAVIGATION')).toHaveLength(0);
+    vi.advanceTimersByTime(1);
+
+    expect(messages.at(-1)).toMatchObject({
+      type: 'CONTENT_NAVIGATION',
+      previousUrl: `${location.origin}/wiki/Well-being`,
+      currentUrl: `${location.origin}/wiki/Well-being#Types`,
+      routeGeneration: 1
+    });
+    controller.stopNavigationWatcher();
+    vi.useRealTimers();
   });
 });
