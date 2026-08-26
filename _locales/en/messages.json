@@ -11,6 +11,9 @@
   "actionCancelTitle": {
     "message": "Translight: Cancel translation"
   },
+  "actionDownloadingTitle": {
+    "message": "Translight: The translation model is downloading."
+  },
   "actionActiveTitle": {
     "message": "Translight: Remove translation"
   },

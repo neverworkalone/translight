@@ -119,7 +119,9 @@ async function refreshAction(tabId, state) {
   let title = t('actionStartTitle');
 
   if (BUSY_STATUSES.has(state.status)) {
-    title = t('actionCancelTitle');
+    title = state.status === TAB_STATUS.DOWNLOADING
+      ? t('actionDownloadingTitle')
+      : t('actionCancelTitle');
   } else if (state.status === TAB_STATUS.ACTIVE) {
     title = t('actionActiveTitle');
   } else if (state.status === TAB_STATUS.ERROR) {
