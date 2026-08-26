@@ -17,11 +17,23 @@ export function createLoadingStatePatch(state = {}, generation) {
     activation: state.activation ?? null,
     origin: state.origin ?? null,
     hostname: state.hostname ?? null,
+    autoTranslateSuppressed: false,
     modelState: null,
     progress: null,
     errorCode: null,
     errorMessage: null
   };
+}
+
+export function documentUrlForUrl(value) {
+  if (typeof value !== 'string' || !value.trim()) return '';
+  try {
+    const parsed = new URL(value);
+    parsed.hash = '';
+    return parsed.href;
+  } catch {
+    return value.split('#', 1)[0];
+  }
 }
 
 export function isNavigationStateCurrent(before, after) {
