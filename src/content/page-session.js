@@ -443,7 +443,7 @@ export class PageSession {
       }
       this.pendingMutationRoots.add(root);
     };
-    for (const element of this.renderer?.pruneMissingTranslations?.() ?? []) {
+    for (const element of this.renderer?.restoreMissingTranslations?.() ?? []) {
       addMutationRoot(element);
     }
     for (const record of records) {

@@ -665,6 +665,34 @@ describe('PageSession', () => {
     session.stop();
   });
 
+  it('restores a translation when a host rerenders the children of a live source', async () => {
+    document.body.innerHTML = '<ul><li id="source">A reusable list item.</li></ul>';
+    const calls = [];
+    const session = new PageSession({
+      generation: 412,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    await session.start();
+    const source = document.querySelector('#source');
+    const generated = source.querySelector('translight-translation');
+    source.innerHTML = 'A reusable list item.';
+    await wait(20);
+
+    expect(source.querySelector('translight-translation')).toBe(generated);
+    expect(source.querySelector('translight-translation')?.textContent)
+      .toBe('ko:A reusable list item.');
+    expect(calls).toEqual(['A reusable list item.']);
+    session.stop();
+  });
+
   it('translates Korean-to-English changes and removes English-to-Korean translations', async () => {
     document.documentElement.lang = 'ko-KR';
     document.body.innerHTML = `

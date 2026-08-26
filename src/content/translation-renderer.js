@@ -769,6 +769,20 @@ export class TranslationRenderer {
     this.applyReplacementAttributes(record, {styled: styledReplacement});
   }
 
+  restoreMissingTranslations() {
+    const restored = [];
+    for (const record of this.records.values()) {
+      // A host renderer can temporarily detach a generated child while it
+      // updates the source element. Keep the existing record and put the
+      // translation back when the source itself is still alive. This avoids a
+      // visible blank interval and preserves the cached queue entry.
+      if (record.replaced || record.element?.isConnected === false || record.translation?.isConnected) continue;
+      restorePlacement(record);
+      if (record.translation?.isConnected) restored.push(record.element);
+    }
+    return restored;
+  }
+
   insert({element, sourceId, sourceHash, translatedText, text, mixedContent = false}) {
     if (!element?.parentNode || !sourceId) return null;
     const existing = this.recordsByElement.get(element) ?? this.records.get(sourceId);
