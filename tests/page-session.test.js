@@ -230,6 +230,38 @@ describe('PageSession', () => {
     session.stop();
   });
 
+  it('restores inline source text before retranslation after a replacement update', async () => {
+    document.body.innerHTML = '<p id="source">Visit <a href="https://openai.com">OpenAI</a> docs</p>';
+    const inputs = [];
+    const session = new PageSession({
+      generation: 42,
+      document,
+      settings: {
+        translationMode: TRANSLATION_MODES.TRANSLATION_ORIGINAL,
+        translatePageTitle: false
+      },
+      provider: makeProvider({
+        translate: async (text) => {
+          inputs.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    await session.start();
+    document.querySelector('a').firstChild.data = 'OpenAI team';
+    await wait();
+
+    expect(inputs).toContain('Visit OpenAI docs');
+    expect(inputs).toContain('Visit OpenAI team docs');
+    expect(inputs).not.toContain(expect.stringContaining('ko:Visit OpenAI team docs'));
+
+    session.stop();
+    expect(document.body.innerHTML).toBe(
+      '<p id="source">Visit <a href="https://openai.com">OpenAI team</a> docs</p>'
+    );
+  });
+
   it('applies mode changes without calling the provider again', async () => {
     document.body.innerHTML = '<p>Mode paragraph.</p>';
     let calls = 0;

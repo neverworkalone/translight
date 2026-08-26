@@ -204,7 +204,10 @@ describe('TranslationRenderer', () => {
     const renderer = new TranslationRenderer({
       document,
       sessionId: 'inline-session',
-      settings: {translationMode: TRANSLATION_MODES.TRANSLATION_ORIGINAL}
+      settings: {
+        translationMode: TRANSLATION_MODES.TRANSLATION_ORIGINAL,
+        displayStyle: TRANSLATION_STYLES.HIGHLIGHT
+      }
     });
 
     renderer.insert({
@@ -214,17 +217,21 @@ describe('TranslationRenderer', () => {
       translatedText: '오픈AI 방문'
     });
 
-    expect(source.querySelector('a')?.textContent).toBe('OpenAI');
-    expect(source.textContent).toBe('오픈AI 방문OpenAI docs');
+    expect(source.querySelector('a')?.textContent).not.toBe('OpenAI');
+    expect(source.textContent).toBe('오픈AI 방문');
     expect(source.querySelector(`[${REPLACEMENT_TEXT_ATTRIBUTE}="true"]`)).not.toBeNull();
+    expect(source.querySelector('a')?.textContent).not.toBe('');
 
-    source.querySelector('a').firstChild.data = 'OpenAI team';
+    source.querySelector('a').textContent = 'OpenAI team';
+    renderer.restoreChangedSources();
     const changedBlock = collectTranslationBlocks(document.body).find((block) => block.element === source);
-    expect(changedBlock?.text).toBe('오픈AI 방문OpenAI team docs');
+    expect(changedBlock?.text).toBe('Visit OpenAI team docs');
 
     renderer.insert({...changedBlock, translatedText: '오픈AI 팀 방문'});
-    expect(source.querySelector('a')?.textContent).toBe('OpenAI team');
-    expect(source.querySelector(`[${REPLACEMENT_TEXT_ATTRIBUTE}="true"]`)?.textContent).toBe('오픈AI 팀 방문');
+    expect(source.querySelector('a')?.textContent).not.toBe('OpenAI team');
+    expect(source.textContent).toBe('오픈AI 팀 방문');
+    expect([...source.querySelectorAll(`[${REPLACEMENT_TEXT_ATTRIBUTE}="true"]`)]
+      .map((node) => node.textContent).join('')).toBe('오픈AI 팀 방문');
 
     renderer.removeAll();
     expect(document.body.innerHTML).toBe(
@@ -311,7 +318,11 @@ describe('TranslationRenderer', () => {
     });
 
     const replacement = cell.querySelector(`[${REPLACEMENT_TEXT_ATTRIBUTE}="true"]`);
-    expect(replacement?.getAttribute('data-translight-style')).toBe(displayStyle);
+    if (displayStyle === TRANSLATION_STYLES.NONE) {
+      expect(replacement).toBeNull();
+    } else {
+      expect(replacement?.getAttribute('data-translight-style')).toBe(displayStyle);
+    }
     expect(cell.hasAttribute('data-translight-style')).toBe(false);
     expect(cell.getAttribute(STYLED_REPLACEMENT_ATTRIBUTE)).toBe('true');
 

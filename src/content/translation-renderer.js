@@ -185,6 +185,64 @@ function setSourceTextNodes(nodes, values) {
   });
 }
 
+function textNodeShape(value) {
+  const text = String(value ?? '');
+  const leading = text.match(/^\s*/u)?.[0] ?? '';
+  const trailing = text.match(/\s*$/u)?.[0] ?? '';
+  const coreEnd = Math.max(leading.length, text.length - trailing.length);
+  return {
+    leading,
+    trailing,
+    core: text.slice(leading.length, coreEnd),
+    raw: text
+  };
+}
+
+function distributeReplacementText(text, weights) {
+  const characters = Array.from(String(text ?? ''));
+  if (!weights.length) return [];
+  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+  const parts = [];
+  let offset = 0;
+  let accumulatedWeight = 0;
+  for (let index = 0; index < weights.length; index += 1) {
+    accumulatedWeight += weights[index];
+    const isLast = index === weights.length - 1;
+    const idealEnd = Math.round(characters.length * accumulatedWeight / totalWeight);
+    const minimumEnd = characters.length >= weights.length ? offset + 1 : offset;
+    const remainingSlots = weights.length - index - 1;
+    const maximumEnd = characters.length - remainingSlots;
+    const end = isLast
+      ? characters.length
+      : Math.min(maximumEnd, Math.max(minimumEnd, idealEnd));
+    parts.push(characters.slice(offset, end).join(''));
+    offset = end;
+  }
+  return parts;
+}
+
+function replacementValuesForNodes(nodes, translatedText) {
+  const shapes = nodes.map((node) => textNodeShape(node.nodeValue));
+  const replacementNodeIndices = [];
+  const weights = [];
+  shapes.forEach((shape, index) => {
+    if (!shape.core) return;
+    replacementNodeIndices.push(index);
+    weights.push(Math.max(1, Array.from(shape.core).length));
+  });
+  if (!replacementNodeIndices.length && nodes.length) {
+    replacementNodeIndices.push(0);
+    weights.push(1);
+  }
+  const parts = distributeReplacementText(translatedText, weights);
+  const partByNode = new Map(replacementNodeIndices.map((index, partIndex) => [index, parts[partIndex] ?? '']));
+  const values = shapes.map((shape, index) => {
+    if (!partByNode.has(index)) return '';
+    return partByNode.get(index);
+  });
+  return {values, replacementNodeIndices};
+}
+
 function snapshotTextNodes(nodes) {
   return nodes.map((node) => node.nodeValue ?? '');
 }
@@ -397,36 +455,45 @@ export class TranslationRenderer {
   }
 
   unwrapReplacementText(record) {
-    const wrapper = record.replacementWrapper;
-    if (!wrapper) return;
-    if (wrapper.parentNode) {
+    const wrappers = record.replacementWrappers?.length
+      ? record.replacementWrappers
+      : record.replacementWrapper
+        ? [record.replacementWrapper]
+        : [];
+    for (const wrapper of wrappers) {
+      if (!wrapper?.parentNode) continue;
       const parent = wrapper.parentNode;
       while (wrapper.firstChild) parent.insertBefore(wrapper.firstChild, wrapper);
       wrapper.remove();
     }
+    record.replacementWrappers = [];
     record.replacementWrapper = null;
   }
 
   wrapReplacementText(record, node) {
-    if (record.replacementWrapper?.parentNode || !node?.parentNode) return record.replacementWrapper;
+    if (!node?.parentNode) return null;
     const wrapper = this.document.createElement('span');
     wrapper.setAttribute('translate', 'no');
     wrapper.setAttribute(REPLACEMENT_TEXT_ATTRIBUTE, GENERATED_VALUE);
     wrapper.setAttribute(SESSION_ATTRIBUTE, this.sessionId);
     node.parentNode.insertBefore(wrapper, node);
     wrapper.appendChild(node);
-    record.replacementWrapper = wrapper;
+    record.replacementWrappers ??= [];
+    record.replacementWrappers.push(wrapper);
+    record.replacementWrapper ??= wrapper;
     return wrapper;
   }
 
-  restoreSourceText(record) {
-    if (!record.replaced) return;
-    this.unwrapReplacementText(record);
-    const nodes = collectSourceTextNodes(record.element, record.mixedContent);
+  restoreSourceText(record, {onlyIfChanged = false} = {}) {
+    if (!record.replaced) return false;
+    const currentNodes = collectSourceTextNodes(record.element, record.mixedContent);
     const presentedValues = record.presentedTextNodeValues ?? [record.presentedText ?? record.translatedText];
     const originalValues = record.originalTextNodeValues ?? [];
-    const siteChanged = nodes.length !== presentedValues.length ||
-      nodes.some((node, index) => (node.nodeValue ?? '') !== (presentedValues[index] ?? ''));
+    const siteChanged = currentNodes.length !== presentedValues.length ||
+      currentNodes.some((node, index) => (node.nodeValue ?? '') !== (presentedValues[index] ?? ''));
+    if (onlyIfChanged && !siteChanged) return false;
+    this.unwrapReplacementText(record);
+    const nodes = collectSourceTextNodes(record.element, record.mixedContent);
     const restoredValues = nodes.map((node, index) => {
       if (!siteChanged || (node.nodeValue ?? '') === (presentedValues[index] ?? '')) {
         return originalValues[index] ?? '';
@@ -440,22 +507,35 @@ export class TranslationRenderer {
     record.replaced = false;
     record.presentedText = null;
     record.presentedTextNodeValues = null;
+    return true;
   }
 
   replaceSourceText(record, {styled = false} = {}) {
     if (record.replaced) this.restoreSourceText(record);
     this.unwrapReplacementText(record);
     const nodes = this.currentSourceTextNodes(record);
-    const originalValues = snapshotTextNodes(nodes);
-    const replacementIndex = Math.max(0, nodes.findIndex((node) => (node.nodeValue ?? '').trim().length > 0));
-    const presentedValues = originalValues.slice();
-    if (nodes.length) presentedValues[replacementIndex] = String(record.translatedText ?? '');
+    const {values: presentedValues, replacementNodeIndices} = replacementValuesForNodes(
+      nodes,
+      record.translatedText
+    );
     setSourceTextNodes(nodes, presentedValues);
-    if (styled) this.wrapReplacementText(record, nodes[replacementIndex]);
+    const shouldWrap = styled && this.presentation.displayStyle !== TRANSLATION_STYLES.NONE;
+    if (shouldWrap) {
+      for (const index of replacementNodeIndices) this.wrapReplacementText(record, nodes[index]);
+    }
     record.replaced = true;
-    record.replacementNodeIndex = replacementIndex;
+    record.replacementNodeIndices = replacementNodeIndices;
+    record.replacementNodeIndex = replacementNodeIndices[0] ?? null;
     record.presentedTextNodeValues = snapshotTextNodes(nodes);
     record.presentedText = record.presentedTextNodeValues.join('');
+  }
+
+  restoreChangedSources() {
+    for (const record of this.records.values()) {
+      if (!record.replaced || !this.restoreSourceText(record, {onlyIfChanged: true})) continue;
+      record.translation.parentNode?.removeChild(record.translation);
+      this.clearReplacementAttributes(record);
+    }
   }
 
   refreshOriginalSnapshot(record, sourceText) {
@@ -476,15 +556,19 @@ export class TranslationRenderer {
       PRESENTATION_HASH_ATTRIBUTE,
       hashSourceText(normalizeSourceText(record.presentedText ?? record.translatedText))
     );
-    const replacementWrapper = record.replacementWrapper;
+    const replacementWrappers = record.replacementWrappers?.length
+      ? record.replacementWrappers
+      : record.replacementWrapper
+        ? [record.replacementWrapper]
+        : [];
     if (styled) {
       element.setAttribute(STYLED_REPLACEMENT_ATTRIBUTE, GENERATED_VALUE);
       restoreAttribute(element, STYLE_ATTRIBUTE, record.originalAttributes?.[STYLE_ATTRIBUTE]);
-      replacementWrapper?.setAttribute(STYLE_ATTRIBUTE, this.presentation.displayStyle);
+      replacementWrappers.forEach((wrapper) => wrapper.setAttribute(STYLE_ATTRIBUTE, this.presentation.displayStyle));
     } else {
       restoreAttribute(element, STYLED_REPLACEMENT_ATTRIBUTE, record.originalAttributes?.[STYLED_REPLACEMENT_ATTRIBUTE]);
       restoreAttribute(element, STYLE_ATTRIBUTE, record.originalAttributes?.[STYLE_ATTRIBUTE]);
-      replacementWrapper?.removeAttribute(STYLE_ATTRIBUTE);
+      replacementWrappers.forEach((wrapper) => wrapper.removeAttribute(STYLE_ATTRIBUTE));
     }
     element.removeAttribute(HIDDEN_ATTRIBUTE);
     element.removeAttribute(HIDDEN_PLACEMENT_ATTRIBUTE);
@@ -599,7 +683,9 @@ export class TranslationRenderer {
       replaced: false,
       presentedText: null,
       presentedTextNodeValues: null,
-      replacementNodeIndex: null
+      replacementNodeIndex: null,
+      replacementNodeIndices: [],
+      replacementWrappers: []
     };
     record.placement = insertAtSafeLocation(element, translation, mixedContent);
 

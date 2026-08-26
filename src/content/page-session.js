@@ -347,6 +347,10 @@ export class PageSession {
       this.mutationTimer = null;
       const roots = [...this.pendingMutationRoots];
       this.pendingMutationRoots.clear();
+      // Replacement modes can leave translated segments in unchanged inline
+      // nodes while a site updates one sibling. Restore changed records before
+      // collecting text so the provider receives the real source text.
+      this.renderer?.restoreChangedSources?.();
       const blocks = [];
       const seen = new Set();
       for (const root of roots) {
