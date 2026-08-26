@@ -11,6 +11,9 @@
   "actionCancelTitle": {
     "message": "Translight: 번역 취소"
   },
+  "actionDownloadingTitle": {
+    "message": "Translight: 번역 모델을 다운로드 중입니다."
+  },
   "actionActiveTitle": {
     "message": "Translight: 번역 해제"
   },

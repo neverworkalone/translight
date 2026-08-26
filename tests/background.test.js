@@ -7,6 +7,7 @@ const removedListeners = [];
 const clickedListeners = [];
 const iconCalls = [];
 const badgeCalls = [];
+const titleCalls = [];
 let settings;
 let runtimeMessage;
 
@@ -39,7 +40,7 @@ function installChrome({
     action: {
       onClicked: {addListener(listener) { clickedListeners.push(listener); }},
       setBadgeText: async (value) => badgeCalls.push(value),
-      setTitle: async () => {},
+      setTitle: async (value) => titleCalls.push(value),
       setIcon: async (value) => iconCalls.push(value)
     },
     runtime: {
@@ -78,10 +79,24 @@ afterEach(() => {
   clickedListeners.length = 0;
   iconCalls.length = 0;
   badgeCalls.length = 0;
+  titleCalls.length = 0;
   runtimeMessage = null;
 });
 
 describe('background automatic translation status', () => {
+  it('shows a model-download tooltip while the model is downloading', async () => {
+    installChrome({statuses: ['DOWNLOADING']});
+    await import('../src/background/index.js?background-downloading-tooltip');
+    await runtimeMessage({
+      type: 'CONTENT_READY',
+      documentToken: 'document-1',
+      url: 'https://example.com/page'
+    }, {tab: {id: 1, url: 'https://example.com/page'}});
+    await settle();
+
+    expect(titleCalls.at(-1)?.title).toBe('Translight: The translation model is downloading.');
+  });
+
   it('shows the active icon as soon as page blocks begin translating', async () => {
     installChrome({statuses: ['TRANSLATING']});
     await import('../src/background/index.js?background-translating-icon');

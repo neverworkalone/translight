@@ -271,7 +271,8 @@ function styleText(sessionId, presentation) {
   const styleSelector = (style) =>
     `${styledSelector}[${STYLE_ATTRIBUTE}="${style}"], ${replacementTextSelector}[${STYLE_ATTRIBUTE}="${style}"]`;
   const tableCellSelector = `td > ${selector}, th > ${selector}`;
-  const translationTextSelector = `${styledSelector} > [${TRANSLATION_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"]`;
+  const translationTextSelector = `${selector} > [${TRANSLATION_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"]`;
+  const styledTranslationTextSelector = `${styledSelector} > [${TRANSLATION_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"]`;
   const textStyleSelector = (style) =>
     `${styledSelector}[${STYLE_ATTRIBUTE}="${style}"], ${replacementTextSelector}[${STYLE_ATTRIBUTE}="${style}"]`;
   const hiddenSelector = `[${HIDDEN_ATTRIBUTE}="true"][${SESSION_ATTRIBUTE}="${escapeAttribute(sessionId)}"]`;
@@ -290,8 +291,13 @@ function styleText(sessionId, presentation) {
       --translight-font-style: ${fontStyle};
       box-sizing: border-box !important;
       display: block !important;
+      position: static !important;
+      inset: auto !important;
       width: auto !important;
+      min-width: 0 !important;
+      max-width: none !important;
       min-height: 0 !important;
+      max-height: none !important;
       margin: 0.45em 0 1em !important;
       padding: 0 !important;
       border: 0 !important;
@@ -311,7 +317,49 @@ function styleText(sessionId, presentation) {
       white-space: pre-wrap !important;
       word-break: normal !important;
       overflow-wrap: anywhere !important;
+      overflow: visible !important;
+      text-overflow: clip !important;
+      float: none !important;
+      clear: none !important;
+      vertical-align: baseline !important;
       visibility: visible !important;
+    }
+
+    ${translationTextSelector},
+    ${replacementTextSelector} {
+      box-sizing: border-box !important;
+      display: inline !important;
+      position: static !important;
+      inset: auto !important;
+      width: auto !important;
+      min-width: 0 !important;
+      max-width: none !important;
+      height: auto !important;
+      min-height: 0 !important;
+      max-height: none !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      border: 0 !important;
+      outline: 0 !important;
+      background: transparent !important;
+      font-family: inherit !important;
+      font-size: inherit !important;
+      font-weight: inherit !important;
+      font-style: inherit !important;
+      font-synthesis: inherit !important;
+      line-height: inherit !important;
+      letter-spacing: inherit !important;
+      text-align: inherit !important;
+      text-decoration: inherit !important;
+      text-transform: inherit !important;
+      white-space: inherit !important;
+      word-break: normal !important;
+      overflow-wrap: inherit !important;
+      overflow: visible !important;
+      text-overflow: clip !important;
+      float: none !important;
+      clear: none !important;
+      vertical-align: baseline !important;
     }
 
     ${replacementTextSelector} {
@@ -331,7 +379,7 @@ function styleText(sessionId, presentation) {
       font-synthesis: style !important;
       line-height: inherit !important;
     }
-    ${translationTextSelector},
+    ${styledTranslationTextSelector},
     ${replacementTextSelector} {
       color: var(--translight-text-color) !important;
       font-weight: var(--translight-font-weight) !important;
