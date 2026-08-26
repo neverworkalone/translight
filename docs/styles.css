@@ -61,9 +61,8 @@ a:hover { text-decoration-thickness: 2px; }
   width: 150px;
   height: 150px;
   place-items: center;
-  background: linear-gradient(145deg, #f4fdff, #dff5fd);
-  border: 1px solid #c8eaf5;
-  border-radius: 34px;
+  background: transparent;
+  border: 0;
 }
 
 .home-logo-wrap img { width: 150px; height: 150px; object-fit: contain; }
@@ -96,23 +95,6 @@ h2 {
   margin: 14px 0 0;
   color: var(--muted);
 }
-
-.language-pair {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 20px;
-  padding: 5px 11px;
-  color: var(--accent-strong);
-  background: var(--accent-soft);
-  border: 1px solid #c8ebf7;
-  border-radius: 999px;
-  font-size: .75rem;
-  font-weight: 800;
-  letter-spacing: .08em;
-}
-
-.language-arrow { color: var(--accent); font-size: 1rem; line-height: 1; }
 
 .card-list { display: grid; gap: 14px; margin: 42px 0; }
 
@@ -181,6 +163,16 @@ h2 {
 }
 
 .product-image--promotion { width: min(100%, 440px); border: 1px solid #2c4252; box-shadow: 0 10px 22px rgb(14 35 49 / 14%); }
+
+figure { margin: 28px 0 36px; }
+
+figure img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
 
 .content { padding-top: 40px; }
 
@@ -397,7 +389,7 @@ code {
   .home,
   .document { width: 100%; margin: 0; padding: 36px 20px 56px; border: 0; border-radius: 0; box-shadow: none; }
   .home-header { align-items: flex-start; gap: 22px; }
-  .home-logo-wrap { flex-basis: 88px; width: 88px; height: 88px; border-radius: 21px; }
+  .home-logo-wrap { flex-basis: 88px; width: 88px; height: 88px; }
   .home-logo-wrap img { width: 88px; height: 88px; }
   .home-heading h1 { font-size: 2rem; }
   .lead { font-size: .92rem; }
