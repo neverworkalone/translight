@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Translight IMDb jitter reproduction</title>
+    <style>
+      html { scroll-behavior: smooth; }
+      body { margin: 0; color: #111827; font: 16px/1.5 Arial, sans-serif; }
+      #report { position: fixed; z-index: 10; top: 0; right: 0; width: 360px; max-height: 90vh; overflow: auto; padding: 12px; background: #111827; color: white; font: 12px/1.4 monospace; white-space: pre-wrap; }
+      #top-filler { height: 1800px; padding: 24px; box-sizing: border-box; background: #f3f4f6; }
+      #app { width: min(720px, calc(100% - 48px)); margin: 0 auto; padding: 36px 0 1800px; }
+      #app p { min-height: 84px; margin: 0 0 28px; padding: 20px; border: 1px solid #d1d5db; border-radius: 8px; background: white; }
+      #app.stress p { min-height: 112px; }
+    </style>
+  </head>
+  <body>
+    <pre id="report">starting…</pre>
+    <div id="top-filler">IMDb-style content above the active viewport.</div>
+    <main id="app"></main>
+    <script type="module" src="/tests/fixtures/imdb-jitter-repro.js"></script>
+  </body>
+</html>

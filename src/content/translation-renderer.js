@@ -27,6 +27,7 @@ export const HIDDEN_PLACEMENT_ATTRIBUTE = 'data-translight-hidden-placement';
 export const REPLACED_ATTRIBUTE = 'data-translight-replaced';
 export const STYLED_REPLACEMENT_ATTRIBUTE = 'data-translight-styled-replacement';
 export const REPLACEMENT_TEXT_ATTRIBUTE = 'data-translight-replacement-text';
+export const SCROLL_ANCHOR_ATTRIBUTE = 'data-translight-scroll-anchor';
 
 const GENERATED_VALUE = 'true';
 const STYLE_ATTRIBUTE = 'data-translight-style';
@@ -307,6 +308,10 @@ function styleText(sessionId, presentation) {
   const fontStyle = presentation.italic ? 'italic' : 'normal';
 
   return `
+    html[${SCROLL_ANCHOR_ATTRIBUTE}="none"] {
+      overflow-anchor: none !important;
+    }
+
     ${selector} {
       --translight-style-color: ${presentation.styleColor};
       --translight-text-color: ${presentation.textColor};
@@ -503,6 +508,9 @@ export class TranslationRenderer {
     this.records = new Map();
     this.recordsByElement = new WeakMap();
     this.presentation = normalizePresentation(settings);
+    this.scrollAnchorElement = document.documentElement;
+    this.originalScrollAnchorAttribute = this.scrollAnchorElement?.getAttribute(SCROLL_ANCHOR_ATTRIBUTE) ?? null;
+    this.scrollAnchorElement?.setAttribute(SCROLL_ANCHOR_ATTRIBUTE, 'none');
     this.style = document.createElement('style');
     this.style.setAttribute(GENERATED_ATTRIBUTE, GENERATED_VALUE);
     this.style.setAttribute(SESSION_ATTRIBUTE, sessionId);
@@ -988,6 +996,13 @@ export class TranslationRenderer {
     }
 
     this.style?.parentNode?.removeChild(this.style);
+    if (this.scrollAnchorElement) {
+      if (this.originalScrollAnchorAttribute == null) {
+        this.scrollAnchorElement.removeAttribute(SCROLL_ANCHOR_ATTRIBUTE);
+      } else {
+        this.scrollAnchorElement.setAttribute(SCROLL_ANCHOR_ATTRIBUTE, this.originalScrollAnchorAttribute);
+      }
+    }
     this.records.clear();
   }
 }

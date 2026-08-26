@@ -11,6 +11,7 @@ import {
   SESSION_ATTRIBUTE,
   SOURCE_ATTRIBUTE,
   SOURCE_HASH_ATTRIBUTE,
+  SCROLL_ANCHOR_ATTRIBUTE,
   STYLED_REPLACEMENT_ATTRIBUTE,
   TRANSLATED_ATTRIBUTE,
   TranslationRenderer
@@ -42,6 +43,18 @@ describe('TranslationRenderer', () => {
     expect(source.getAttribute(TRANSLATED_ATTRIBUTE)).toBe('true');
     expect(source.getAttribute(SESSION_ATTRIBUTE)).toBe('session-1');
     expect(renderer.style.textContent).toContain('overflow-anchor: none !important');
+    expect(document.documentElement.getAttribute(SCROLL_ANCHOR_ATTRIBUTE)).toBe('none');
+    renderer.removeAll();
+    expect(document.documentElement.hasAttribute(SCROLL_ANCHOR_ATTRIBUTE)).toBe(false);
+  });
+
+  it('restores an existing document scroll-anchor setting on cleanup', () => {
+    document.documentElement.setAttribute(SCROLL_ANCHOR_ATTRIBUTE, 'auto');
+    const renderer = new TranslationRenderer({document, sessionId: 'scroll-anchor-session'});
+
+    expect(document.documentElement.getAttribute(SCROLL_ANCHOR_ATTRIBUTE)).toBe('none');
+    renderer.removeAll();
+    expect(document.documentElement.getAttribute(SCROLL_ANCHOR_ATTRIBUTE)).toBe('auto');
   });
 
   it('prevents duplicate insertion and completely restores the DOM on cleanup', () => {
