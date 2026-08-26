@@ -38,6 +38,8 @@ const ERROR_ICON_PATHS = Object.freeze({
   128: 'icon-error128.png'
 });
 
+const ACTIVE_ICON_STATUSES = new Set([TAB_STATUS.TRANSLATING, TAB_STATUS.ACTIVE]);
+
 const ERROR_MESSAGE_KEYS = Object.freeze({
   AVAILABILITY_FAILED: 'errorAvailabilityFailed',
   CONTENT_SCRIPT_UNAVAILABLE: 'errorContentScriptUnavailable',
@@ -133,7 +135,7 @@ async function refreshAction(tabId, state) {
       chrome.action.setIcon({
         tabId,
         path:
-          state.status === TAB_STATUS.ACTIVE
+          ACTIVE_ICON_STATUSES.has(state.status)
             ? ACTIVE_ICON_PATHS
             : state.status === TAB_STATUS.ERROR
               ? ERROR_ICON_PATHS

@@ -21,7 +21,7 @@ function makeArea(value) {
   };
 }
 
-function installChrome({autoTranslateSites = ['example.com']} = {}) {
+function installChrome({autoTranslateSites = ['example.com'], statuses = ['ACTIVE']} = {}) {
   settings = {
     autoTranslateSameSite: true,
     autoTranslateSites
@@ -48,11 +48,11 @@ function installChrome({autoTranslateSites = ['example.com']} = {}) {
       query: async () => [],
       sendMessage: async (tabId, message) => {
         if (message.type === 'TRANSLATION_START') {
-          queueMicrotask(() => runtimeMessage?.({
+          statuses.forEach((status) => queueMicrotask(() => runtimeMessage?.({
             type: 'TRANSLATION_STATUS',
-            status: 'ACTIVE',
+            status,
             generation: message.generation
-          }, {tab: {id: tabId, url: 'https://example.com/page'}}));
+          }, {tab: {id: tabId, url: 'https://example.com/page'}})));
         }
         return {ok: true};
       },
@@ -78,6 +78,19 @@ afterEach(() => {
 });
 
 describe('background automatic translation status', () => {
+  it('shows the active icon as soon as page blocks begin translating', async () => {
+    installChrome({statuses: ['TRANSLATING']});
+    await import('../src/background/index.js?background-translating-icon');
+    await runtimeMessage({
+      type: 'CONTENT_READY',
+      documentToken: 'document-1',
+      url: 'https://example.com/page'
+    }, {tab: {id: 1, url: 'https://example.com/page'}});
+    await settle();
+
+    expect(iconCalls.at(-1)?.path?.[16]).toBe('icon-active16.png');
+  });
+
   it('keeps the active icon after an automatic site translation', async () => {
     installChrome();
     await import('../src/background/index.js?background-auto-site');
