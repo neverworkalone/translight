@@ -21,7 +21,11 @@ function makeArea(value) {
   };
 }
 
-function installChrome({autoTranslateSites = ['example.com'], statuses = ['ACTIVE']} = {}) {
+function installChrome({
+  autoTranslateSites = ['example.com'],
+  statuses = ['ACTIVE'],
+  tabs = []
+} = {}) {
   settings = {
     autoTranslateSameSite: true,
     autoTranslateSites
@@ -45,7 +49,7 @@ function installChrome({autoTranslateSites = ['example.com'], statuses = ['ACTIV
     tabs: {
       onUpdated: {addListener(listener) { updatedListeners.push(listener); }},
       onRemoved: {addListener(listener) { removedListeners.push(listener); }},
-      query: async () => [],
+      query: async () => tabs,
       sendMessage: async (tabId, message) => {
         if (message.type === 'TRANSLATION_START') {
           statuses.forEach((status) => queueMicrotask(() => runtimeMessage?.({
@@ -99,6 +103,51 @@ describe('background automatic translation status', () => {
       documentToken: 'document-1',
       url: 'https://example.com/page'
     }, {tab: {id: 1, url: 'https://example.com/page'}});
+    await settle();
+
+    expect(iconCalls.at(-1)?.path?.[16]).toBe('icon-active16.png');
+  });
+
+  it('turns off an automatic translation when the action is clicked', async () => {
+    installChrome();
+    await import('../src/background/index.js?background-auto-site-toggle');
+    await runtimeMessage({
+      type: 'CONTENT_READY',
+      documentToken: 'document-1',
+      url: 'https://example.com/page'
+    }, {tab: {id: 1, url: 'https://example.com/page'}});
+    await settle();
+
+    await clickedListeners[0]({id: 1, url: 'https://example.com/page'});
+    await settle();
+
+    expect(iconCalls.at(-1)?.path?.[16]).toBe('icon16.png');
+
+    await clickedListeners[0]({id: 1, url: 'https://example.com/page'});
+    await settle();
+
+    expect(iconCalls.at(-1)?.path?.[16]).toBe('icon-active16.png');
+  });
+
+  it('keeps an automatic translation off when content ready arrives after the action stop', async () => {
+    installChrome({tabs: [{id: 1, url: 'https://example.com/page'}]});
+    await import('../src/background/index.js?background-auto-site-late-ready');
+    await settle();
+
+    await clickedListeners[0]({id: 1, url: 'https://example.com/page'});
+    await settle();
+    expect(iconCalls.at(-1)?.path?.[16]).toBe('icon16.png');
+
+    await runtimeMessage({
+      type: 'CONTENT_READY',
+      documentToken: 'document-1',
+      url: 'https://example.com/page'
+    }, {tab: {id: 1, url: 'https://example.com/page'}});
+    await settle();
+
+    expect(iconCalls.at(-1)?.path?.[16]).toBe('icon16.png');
+
+    await clickedListeners[0]({id: 1, url: 'https://example.com/page'});
     await settle();
 
     expect(iconCalls.at(-1)?.path?.[16]).toBe('icon-active16.png');

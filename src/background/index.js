@@ -188,9 +188,14 @@ async function startTranslation(tab, {
   const tabId = tab?.id;
   if (typeof tabId !== 'number') return;
 
+  const current = getState(tabId);
+  const isNewDocument = documentToken != null &&
+    current.documentToken != null &&
+    current.documentToken !== documentToken;
+  const autoTranslateSuppressed = isNewDocument ? false : current.autoTranslateSuppressed;
+  if (activation === TAB_ACTIVATION.AUTO && autoTranslateSuppressed) return;
   const generation = nextGeneration();
   rememberDocumentUrl(tabId, url);
-  const current = getState(tabId);
   await setState(tabId, {
     status: TAB_STATUS.CHECKING,
     generation,
@@ -198,6 +203,9 @@ async function startTranslation(tab, {
     origin: originForUrl(url) || current.origin,
     hostname: hostnameForUrl(url) || current.hostname,
     documentToken: documentToken ?? current.documentToken,
+    autoTranslateSuppressed: activation === TAB_ACTIVATION.MANUAL
+      ? false
+      : autoTranslateSuppressed,
     modelState: null,
     progress: null,
     errorCode: null,
@@ -215,7 +223,7 @@ async function startTranslation(tab, {
   }
 }
 
-async function stopTranslation(tabId, state) {
+async function stopTranslation(tabId, state, {suppressAutomatic = false} = {}) {
   const invalidationGeneration = nextGeneration();
   await setState(tabId, {
     status: TAB_STATUS.OFF,
@@ -223,6 +231,7 @@ async function stopTranslation(tabId, state) {
     activation: null,
     origin: null,
     hostname: null,
+    autoTranslateSuppressed: suppressAutomatic,
     progress: null,
     errorCode: null,
     errorMessage: null
@@ -244,7 +253,7 @@ async function handleAction(tab) {
   if (typeof tabId !== 'number') return;
   const state = getState(tabId);
   if (isBusyOrActive(state)) {
-    await stopTranslation(tabId, state);
+    await stopTranslation(tabId, state, {suppressAutomatic: true});
   } else {
     await startTranslation(tab);
   }
@@ -284,8 +293,16 @@ async function handleContentReady(message, sender) {
     return;
   }
   const settings = await loadSettings();
-  const state = getState(tabId);
+  let state = getState(tabId);
   const currentHost = hostnameForUrl(url);
+  const documentUrl = documentUrlForUrl(url);
+  const knownDocumentUrl = documentUrls.get(String(tabId));
+  const isDifferentDocument = (state.documentToken &&
+      state.documentToken !== message.documentToken) ||
+    (!state.documentToken && documentUrl && knownDocumentUrl && documentUrl !== knownDocumentUrl);
+  if (state.autoTranslateSuppressed && isDifferentDocument) {
+    state = await setState(tabId, {autoTranslateSuppressed: false});
+  }
   const navigation = classifyNavigation({
     state,
     url,
@@ -295,6 +312,22 @@ async function handleContentReady(message, sender) {
 
   if (state.documentToken === message.documentToken) {
     rememberDocumentUrl(tabId, url);
+    return;
+  }
+  if (state.autoTranslateSuppressed && navigation.translate) {
+    rememberDocumentUrl(tabId, url);
+    await setState(tabId, {
+      status: TAB_STATUS.OFF,
+      activation: null,
+      documentToken: message.documentToken,
+      origin: null,
+      hostname: currentHost || null,
+      autoTranslateSuppressed: true,
+      modelState: null,
+      progress: null,
+      errorCode: null,
+      errorMessage: null
+    });
     return;
   }
   if (state.documentToken == null && BUSY_STATUSES.has(state.status)) {
@@ -316,6 +349,7 @@ async function handleContentReady(message, sender) {
       documentToken: message.documentToken,
       origin: null,
       hostname: currentHost || null,
+      autoTranslateSuppressed: false,
       modelState: null,
       progress: null,
       errorCode: null,
@@ -342,7 +376,13 @@ async function handleContentRulesChanged(message, sender) {
   if (typeof tabId !== 'number' || !url) return;
 
   const settings = await loadSettings();
-  const state = getState(tabId);
+  let state = getState(tabId);
+  if (state.autoTranslateSuppressed &&
+      state.documentToken &&
+      message.documentToken &&
+      state.documentToken !== message.documentToken) {
+    state = await setState(tabId, {autoTranslateSuppressed: false});
+  }
   const navigation = classifyNavigation({
     state,
     url,
@@ -352,6 +392,7 @@ async function handleContentRulesChanged(message, sender) {
 
   if (navigation.translate) {
     if (isBusyOrActive(state)) return;
+    if (state.autoTranslateSuppressed) return;
     if (state.activation === TAB_ACTIVATION.MANUAL && state.status !== TAB_STATUS.ERROR) return;
     await startTranslation(
       {id: tabId, url},
@@ -374,8 +415,14 @@ async function handleContentNavigation(message, sender) {
   const tabId = sender?.tab?.id;
   if (typeof tabId !== 'number' || !message.documentToken || !message.url) return;
 
-  const state = getState(tabId);
+  let state = getState(tabId);
   if (state.documentToken && state.documentToken !== message.documentToken) return;
+  if (state.autoTranslateSuppressed) {
+    const currentUrl = documentUrlForUrl(message.url);
+    const suppressedUrl = documentUrls.get(String(tabId));
+    if (!suppressedUrl || currentUrl === suppressedUrl) return;
+    state = await setState(tabId, {autoTranslateSuppressed: false});
+  }
   // SKIPPED only describes the last route. A SPA can replace a target-language
   // view with a foreign-language view without creating a new document.
   if (isBusyOrActive(state)) {
@@ -442,7 +489,8 @@ async function handleTabUpdated(tabId, changeInfo) {
       // the new session and leave the action icon in its default state.
       return;
     }
-    if (state.activation == null && state.status === TAB_STATUS.OFF && state.documentToken == null) return;
+    if (state.activation == null && state.status === TAB_STATUS.OFF &&
+        state.documentToken == null && !state.autoTranslateSuppressed) return;
 
     const loadingState = createLoadingStatePatch(state, nextGeneration());
     await setState(tabId, {
@@ -456,7 +504,8 @@ async function handleTabUpdated(tabId, changeInfo) {
     return;
   }
   const loadingState = createLoadingStatePatch(state, nextGeneration());
-  if (state.activation == null && state.status === TAB_STATUS.OFF && state.documentToken == null) return;
+  if (state.activation == null && state.status === TAB_STATUS.OFF &&
+      state.documentToken == null && !state.autoTranslateSuppressed) return;
   await setState(tabId, {
     ...loadingState,
     activation: null,
@@ -483,7 +532,7 @@ async function syncAutomaticTranslationRules() {
     if (typeof tab?.id !== 'number' || typeof tab.url !== 'string') continue;
     const state = getState(tab.id);
     const shouldTranslate = matchesAutoTranslateSite(hostnameForUrl(tab.url), settings.autoTranslateSites);
-    if (shouldTranslate && !isBusyOrActive(state) &&
+    if (shouldTranslate && !state.autoTranslateSuppressed && !isBusyOrActive(state) &&
         (state.activation !== TAB_ACTIVATION.MANUAL || state.status === TAB_STATUS.ERROR)) {
       void enqueueTabOperation(tab.id, () => startTranslation(tab, {
         activation: TAB_ACTIVATION.AUTO,

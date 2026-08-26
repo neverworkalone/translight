@@ -17,6 +17,7 @@ export function createLoadingStatePatch(state = {}, generation) {
     activation: state.activation ?? null,
     origin: state.origin ?? null,
     hostname: state.hostname ?? null,
+    autoTranslateSuppressed: false,
     modelState: null,
     progress: null,
     errorCode: null,

@@ -27,6 +27,7 @@ export function createTabState(patch = {}) {
     origin: null,
     hostname: null,
     documentToken: null,
+    autoTranslateSuppressed: false,
     modelState: null,
     progress: null,
     errorCode: null,
@@ -35,7 +36,8 @@ export function createTabState(patch = {}) {
     ...patch,
     activation: normalizeActivation(patch.activation),
     origin: typeof patch.origin === 'string' ? patch.origin : null,
-    hostname: typeof patch.hostname === 'string' ? patch.hostname : null
+    hostname: typeof patch.hostname === 'string' ? patch.hostname : null,
+    autoTranslateSuppressed: patch.autoTranslateSuppressed === true
   };
 }
 

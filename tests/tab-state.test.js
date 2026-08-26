@@ -26,6 +26,7 @@ describe('tab state', () => {
       generation: 0
     });
     expect(createTabState().status).toBe(TAB_STATUS.OFF);
+    expect(createTabState({autoTranslateSuppressed: true}).autoTranslateSuppressed).toBe(true);
   });
 
   it('removes only the requested tab', () => {
