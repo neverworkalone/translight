@@ -126,6 +126,56 @@ describe('TranslationRenderer', () => {
     expect(computedStyle.display).toBe('inline');
   });
 
+  it('does not replace visually hidden accessibility text in a visible source block', () => {
+    document.head.innerHTML = `
+      <style>
+        .sr-only {
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          padding: 0;
+          margin: -1px;
+          overflow: hidden;
+          clip: rect(0, 0, 0, 0);
+          clip-path: inset(50%);
+          white-space: nowrap;
+          border: 0;
+        }
+      </style>
+    `;
+    document.body.innerHTML = `
+      <div id="source">
+        <span class="sr-only">Screen reader label</span>
+        <span id="visible">Visible label</span>
+      </div>
+    `;
+    const source = document.querySelector('#source');
+    const renderer = new TranslationRenderer({
+      document,
+      sessionId: 'hidden-label-session',
+      settings: {translationMode: TRANSLATION_MODES.TRANSLATION_ONLY}
+    });
+
+    renderer.insert({
+      element: source,
+      sourceId: 'hidden-label-source',
+      sourceHash: hashSourceText('Visible label'),
+      text: 'Visible label',
+      translatedText: '번역'
+    });
+
+    expect(source.querySelector('.sr-only')?.textContent).toBe('Screen reader label');
+    expect(source.querySelector('#visible')?.textContent).toBe('번역');
+
+    renderer.removeAll();
+    expect(document.body.innerHTML).toBe(`
+      <div id="source">
+        <span class="sr-only">Screen reader label</span>
+        <span id="visible">Visible label</span>
+      </div>
+    `);
+  });
+
   it.each(['flex', 'grid'])('does not create a second %s item for a layout child', (display) => {
     document.body.innerHTML = `<div id="layout" style="display:${display}"><div id="source">Layout child</div></div>`;
     const source = document.querySelector('#source');

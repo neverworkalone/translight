@@ -7,7 +7,8 @@ import {
 import {
   SEGMENT_ATTRIBUTE,
   SEGMENT_ID_ATTRIBUTE,
-  SEGMENT_SELECTOR
+  SEGMENT_SELECTOR,
+  isHidden
 } from './block-collector.js';
 import {hashSourceText} from './translation-queue.js';
 
@@ -171,6 +172,7 @@ function collectSourceTextNodes(element, mixedContent = false, {includeReplaceme
         continue;
       }
       if (child.nodeType !== 1) continue;
+      if (isHidden(child, {includeAncestors: false})) continue;
       if (child.matches(EXCLUDED_CONTENT_SELECTOR)) continue;
       if (child.matches(GENERATED_SELECTOR)) {
         if (includeReplacementText && child.matches(`[${REPLACEMENT_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"]`)) {
