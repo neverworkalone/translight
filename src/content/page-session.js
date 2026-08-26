@@ -1,4 +1,4 @@
-import { collectTranslationBlocks } from './block-collector.js';
+import { collectTranslationBlocks, SEGMENT_SELECTOR } from './block-collector.js';
 import { TranslationQueue } from './translation-queue.js';
 import { ChromeTranslateProvider } from '../translation/chrome-provider.js';
 import { MODEL_STATE } from '../translation/model-state.js';
@@ -11,6 +11,7 @@ const DEFAULT_CONCURRENCY = 3;
 const MUTATION_DEBOUNCE_MS = 100;
 const MAX_MUTATION_ROOTS = 64;
 const BLOCK_SELECTOR = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,figcaption,div,td,th';
+const CANDIDATE_SELECTOR = `${BLOCK_SELECTOR},${SEGMENT_SELECTOR}`;
 const ROUTE_SETTLE_DELAYS = Object.freeze([100, 500]);
 let sessionSequence = 0;
 
@@ -27,8 +28,8 @@ function getView(document) {
 
 function getClosestBlock(node) {
   if (!node) return null;
-  if (node.nodeType === 1 && node.matches?.(BLOCK_SELECTOR)) return node;
-  return node.parentElement?.closest?.(BLOCK_SELECTOR) ?? null;
+  if (node.nodeType === 1 && node.matches?.(CANDIDATE_SELECTOR)) return node;
+  return node.parentElement?.closest?.(CANDIDATE_SELECTOR) ?? null;
 }
 
 export class PageSession {

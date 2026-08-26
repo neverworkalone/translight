@@ -107,4 +107,35 @@ describe('content navigation notifications', () => {
     controller.stopNavigationWatcher();
     vi.useRealTimers();
   });
+
+  it('keeps a cached session and sends a resume handshake on pageshow', () => {
+    history.replaceState({}, '', '/questions');
+    const messages = [];
+    const runtime = {
+      onMessage: {addListener() {}},
+      sendMessage(message) {
+        messages.push(message);
+        return Promise.resolve();
+      }
+    };
+    const controller = installContentController({runtime});
+    const session = {
+      isNavigationWatching: () => true,
+      stop: vi.fn()
+    };
+    controller.currentSession = session;
+
+    controller.pageLifecycleHandler({persisted: true});
+    expect(session.stop).not.toHaveBeenCalled();
+
+    controller.pageShowHandler({persisted: true});
+    expect(messages.at(-1)).toMatchObject({
+      type: 'CONTENT_READY',
+      documentToken: expect.any(String),
+      url: `${location.origin}/questions`,
+      resume: true,
+      contentSessionActive: true
+    });
+    controller.stopNavigationWatcher();
+  });
 });

@@ -313,7 +313,8 @@ async function handleContentReady(message, sender) {
 
   const url = message.url || sender?.tab?.url || '';
   const initialState = getState(tabId);
-  if (initialState.documentToken === message.documentToken) {
+  const isResume = message.resume === true;
+  if (initialState.documentToken === message.documentToken && !isResume) {
     rememberDocumentUrl(tabId, url);
     return;
   }
@@ -335,7 +336,12 @@ async function handleContentReady(message, sender) {
     autoTranslateSameSite: settings.autoTranslateSameSite
   });
 
-  if (state.documentToken === message.documentToken) {
+  if (state.documentToken === message.documentToken && !isResume) {
+    rememberDocumentUrl(tabId, url);
+    return;
+  }
+  if (state.documentToken === message.documentToken && message.contentSessionActive === true &&
+      (isBusyOrActive(state) || state.status === TAB_STATUS.SKIPPED)) {
     rememberDocumentUrl(tabId, url);
     return;
   }

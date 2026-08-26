@@ -45,6 +45,7 @@ export function installContentController({
     settingsReady: null,
     unsubscribeSettings: null,
     pageLifecycleHandler: null,
+    pageShowHandler: null,
     navigationHandler: null,
     lastNavigationUrl: globalThis.location?.href ?? '',
     routeGeneration: 0,
@@ -64,7 +65,10 @@ export function installContentController({
     controller.settings = normalizeSettings(settings);
     controller.currentSession?.applySettings(controller.settings);
   });
-  controller.pageLifecycleHandler = () => {
+  controller.pageLifecycleHandler = (event) => {
+    // A history back/forward can restore this document from the back-forward
+    // cache. Keep its live session and translated DOM intact until pageshow.
+    if (event?.persisted) return;
     if (controller.navigationTimer != null) {
       const clearInterval = controller.navigationView?.clearInterval ?? globalThis.clearInterval;
       clearInterval?.(controller.navigationTimer);
@@ -73,7 +77,21 @@ export function installContentController({
     controller.currentSession?.stop({notify: false});
     controller.currentSession = null;
   };
+  controller.pageShowHandler = (event) => {
+    if (!event?.persisted) return;
+    const session = controller.currentSession;
+    if (session) controller.startNavigationWatcher(session);
+    sendRuntimeMessage(runtime, {
+      type: 'CONTENT_READY',
+      documentToken: controller.documentToken,
+      url: globalThis.location?.href ?? '',
+      origin: globalThis.location?.origin ?? '',
+      resume: true,
+      contentSessionActive: Boolean(session?.isNavigationWatching?.() ?? session?.running === true)
+    });
+  };
   globalThis.addEventListener?.('pagehide', controller.pageLifecycleHandler);
+  globalThis.addEventListener?.('pageshow', controller.pageShowHandler);
   controller.navigationHandler = () => {
     const session = controller.currentSession;
     const isWatching = session?.isNavigationWatching?.() ?? session?.running === true;

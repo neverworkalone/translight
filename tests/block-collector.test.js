@@ -65,6 +65,27 @@ describe('collectTranslationBlocks', () => {
     ]);
   });
 
+  it('splits direct text paragraphs separated by double line breaks', () => {
+    document.body.innerHTML = `
+      <div id="guide">
+        First paragraph with a <a href="#first">link</a>.<br><br>
+        Second paragraph with an <strong>inline label</strong>.
+      </div>
+    `;
+
+    const guide = document.querySelector('#guide');
+    const blocks = collectTranslationBlocks(document.body);
+
+    expect(blocks.map((block) => block.text)).toEqual([
+      'First paragraph with a link.',
+      'Second paragraph with an inline label.'
+    ]);
+    expect(blocks.every(({element}) => element.parentElement === guide)).toBe(true);
+    expect(guide.querySelectorAll('[data-translight-segment="true"]')).toHaveLength(2);
+    expect(collectTranslationBlocks(document.body).map((block) => block.sourceId))
+      .toEqual(blocks.map((block) => block.sourceId));
+  });
+
   it('collects plain table cells without collecting the table row', () => {
     document.body.innerHTML = `
       <table>
@@ -78,6 +99,21 @@ describe('collectTranslationBlocks', () => {
       'First cell',
       'Second cell'
     ]);
+  });
+
+  it('splits table-cell paragraphs without moving them out of the cell', () => {
+    document.body.innerHTML = `
+      <table><tbody><tr><td id="cell">First cell paragraph.<br><br>Second cell paragraph.</td></tr></tbody></table>
+    `;
+
+    const cell = document.querySelector('#cell');
+    const blocks = collectTranslationBlocks(document.body);
+
+    expect(blocks.map((block) => block.text)).toEqual([
+      'First cell paragraph.',
+      'Second cell paragraph.'
+    ]);
+    expect(blocks.every(({element}) => element.parentElement === cell)).toBe(true);
   });
 
   it('filters localized UI blocks while keeping English content under a Korean root', () => {
