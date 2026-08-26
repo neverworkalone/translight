@@ -84,6 +84,38 @@ afterEach(() => {
 });
 
 describe('background automatic translation status', () => {
+  it('uses the active-tab injection fallback for a manual action', async () => {
+    installChrome();
+    const sendMessage = vi.spyOn(globalThis.chrome.tabs, 'sendMessage')
+      .mockRejectedValueOnce(new Error('content script is not ready'))
+      .mockResolvedValue({ok: true});
+    const executeScript = vi.fn().mockResolvedValue([]);
+    globalThis.chrome.scripting = {executeScript};
+
+    await import('../src/background/index.js?background-manual-injection-fallback');
+    await clickedListeners[0]({id: 1, url: 'https://example.com/page'});
+    await settle();
+
+    expect(executeScript).toHaveBeenCalledWith({
+      target: {tabId: 1},
+      files: ['content.js']
+    });
+    expect(sendMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not use the injection fallback for automatic translation', async () => {
+    installChrome({tabs: [{id: 1, url: 'https://example.com/page'}]});
+    const executeScript = vi.fn().mockResolvedValue([]);
+    globalThis.chrome.scripting = {executeScript};
+    vi.spyOn(globalThis.chrome.tabs, 'sendMessage')
+      .mockRejectedValue(new Error('content script is not ready'));
+
+    await import('../src/background/index.js?background-auto-no-injection-fallback');
+    await settle();
+
+    expect(executeScript).not.toHaveBeenCalled();
+  });
+
   it('shows a model-download tooltip while the model is downloading', async () => {
     installChrome({statuses: ['DOWNLOADING']});
     await import('../src/background/index.js?background-downloading-tooltip');
