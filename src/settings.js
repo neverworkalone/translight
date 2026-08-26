@@ -33,7 +33,7 @@ const MODE_VALUES = new Set(Object.values(TRANSLATION_MODES));
 const STYLE_VALUES = new Set(Object.values(TRANSLATION_STYLES));
 const PROVIDER_VALUES = new Set(Object.values(TRANSLATION_PROVIDERS));
 const TARGET_LANGUAGE_VALUES = new Set(Object.values(TARGET_LANGUAGES));
-const DEFAULT_STYLE_COLOR = '#F0F6FF';
+const DEFAULT_STYLE_COLOR = '#FFF4BF';
 const DEFAULT_TEXT_COLOR = '#111827';
 const SETTINGS_FIELDS = new Set([
   'schemaVersion',
@@ -53,14 +53,14 @@ const SETTINGS_FIELDS = new Set([
 export const DEFAULT_SETTINGS = Object.freeze({
   schemaVersion: SETTINGS_SCHEMA_VERSION,
   translationMode: TRANSLATION_MODES.ORIGINAL_TRANSLATION,
-  displayStyle: TRANSLATION_STYLES.NONE,
+  displayStyle: TRANSLATION_STYLES.HIGHLIGHT,
   styleColor: DEFAULT_STYLE_COLOR,
   textColor: DEFAULT_TEXT_COLOR,
   bold: false,
   italic: false,
   targetLanguage: TARGET_LANGUAGES.KOREAN,
   translationProvider: TRANSLATION_PROVIDERS.CHROME,
-  autoTranslateSameSite: true,
+  autoTranslateSameSite: false,
   translatePageTitle: false,
   autoTranslateSites: []
 });
@@ -188,8 +188,8 @@ export function migrateSettings(value) {
       schemaVersion: SETTINGS_SCHEMA_VERSION,
       targetLanguage: value.targetLanguage ?? TARGET_LANGUAGES.KOREAN,
       translationProvider: value.translationProvider ?? TRANSLATION_PROVIDERS.CHROME,
-      autoTranslateSameSite: value.autoTranslateSameSite ?? true,
-      translatePageTitle: value.translatePageTitle ?? true
+      autoTranslateSameSite: value.autoTranslateSameSite ?? DEFAULT_SETTINGS.autoTranslateSameSite,
+      translatePageTitle: value.translatePageTitle ?? DEFAULT_SETTINGS.translatePageTitle
     };
   }
   return {...value, schemaVersion: SETTINGS_SCHEMA_VERSION};
@@ -199,7 +199,6 @@ export function normalizeSettings(value) {
   const source = isRecord(value) ? value : {};
   const mode = normalizeString(source.translationMode, DEFAULT_SETTINGS.translationMode);
   const style = normalizeString(source.displayStyle, DEFAULT_SETTINGS.displayStyle);
-  const schemaVersion = sourceSchemaVersion(source);
 
   return {
     schemaVersion: SETTINGS_SCHEMA_VERSION,
@@ -221,7 +220,7 @@ export function normalizeSettings(value) {
     ),
     translatePageTitle: normalizeBoolean(
       source.translatePageTitle ?? source.translateTitle,
-      schemaVersion < SETTINGS_SCHEMA_VERSION ? true : DEFAULT_SETTINGS.translatePageTitle
+      DEFAULT_SETTINGS.translatePageTitle
     ),
     autoTranslateSites: normalizeHostnameList(source.autoTranslateSites)
   };

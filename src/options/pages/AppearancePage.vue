@@ -165,7 +165,7 @@ function updateText(field, event) {
             :aria-selected="props.settings.displayStyle === option.value"
             :disabled="disabled"
             :style="{
-              '--tile-style-color': isStyleColorValid ? props.settings.styleColor : '#F0F6FF',
+              '--tile-style-color': isStyleColorValid ? props.settings.styleColor : '#FFF4BF',
               '--tile-text-color': isTextColorValid ? props.settings.textColor : '#111827'
             }"
             @click="props.settings.displayStyle = option.value"
@@ -189,7 +189,7 @@ function updateText(field, event) {
       </div>
 
       <div class="live-preview" :style="{
-        '--preview-style-color': isStyleColorValid ? props.settings.styleColor : '#F0F6FF',
+        '--preview-style-color': isStyleColorValid ? props.settings.styleColor : '#FFF4BF',
         '--preview-text-color': isTextColorValid ? props.settings.textColor : '#111827',
         fontWeight: props.settings.bold ? '700' : '400',
         fontStyle: props.settings.italic ? 'italic' : 'normal'

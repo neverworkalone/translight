@@ -194,7 +194,7 @@
     "message": "Preview"
   },
   "settingsColorInvalid": {
-    "message": "Enter colors as six-digit hexadecimal values, such as #F0F6FF."
+    "message": "Enter colors as six-digit hexadecimal values, such as #FFF4BF."
   },
   "servicePageTitle": {
     "message": "Translation service"

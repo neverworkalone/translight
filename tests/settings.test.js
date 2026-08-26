@@ -4,6 +4,7 @@ import {
   SETTINGS_KEY,
   TRANSLATION_MODES,
   TRANSLATION_STYLES,
+  createDefaultSettings,
   loadSettings,
   matchesAutoTranslateSite,
   normalizeHostname,
@@ -16,6 +17,20 @@ import {
 } from '../src/settings.js';
 
 describe('settings normalization', () => {
+  it('uses the requested defaults for new settings', () => {
+    expect(DEFAULT_SETTINGS).toMatchObject({
+      displayStyle: TRANSLATION_STYLES.HIGHLIGHT,
+      styleColor: '#FFF4BF',
+      textColor: '#111827',
+      bold: false,
+      italic: false,
+      autoTranslateSameSite: false,
+      translatePageTitle: false
+    });
+    expect(createDefaultSettings()).toEqual(DEFAULT_SETTINGS);
+    expect(normalizeSettings({schemaVersion: 1})).toMatchObject(DEFAULT_SETTINGS);
+  });
+
   it('normalizes URL and hostname entries into unique hostnames', () => {
     expect(normalizeHostnameList([
       ' HTTPS://WWW.Example.com/path/ ',
