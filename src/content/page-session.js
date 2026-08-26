@@ -335,6 +335,10 @@ export class PageSession {
 
   handleMutations(records) {
     if (!this.isCurrent()) return;
+    for (const element of this.renderer?.pruneMissingTranslations?.() ?? []) {
+      if (this.pendingMutationRoots.size >= MAX_MUTATION_ROOTS) break;
+      this.pendingMutationRoots.add(element);
+    }
     for (const record of records) {
       if (record.type === 'characterData') {
         const block = getClosestBlock(record.target);
@@ -389,6 +393,7 @@ export class PageSession {
     const currentUrl = this.document.location?.href ?? '';
     if (!currentUrl || currentUrl === this.lastUrl) return;
     this.lastUrl = currentUrl;
+    this.renderer?.pruneMissingTranslations?.();
     this.renderer?.pruneDisconnected?.();
     this.renderer?.restoreChangedSources?.();
     const shouldTranslateTitle = this.settings.translatePageTitle || this.legacyTranslatePageTitle;

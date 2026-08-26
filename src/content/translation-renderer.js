@@ -640,6 +640,23 @@ export class TranslationRenderer {
     }
   }
 
+  pruneMissingTranslations() {
+    const missing = [];
+    for (const record of this.records.values()) {
+      // Translation-only replacement intentionally removes the generated
+      // translation node, so the replaced source text is the live result in
+      // that mode. Every other presentation needs its generated node to stay
+      // connected; hosts such as SPA renderers may remove it while reusing
+      // the source element for a new route.
+      const hasLivePresentation = record.replaced || record.translation?.isConnected;
+      if (record.element?.isConnected !== false && !hasLivePresentation) {
+        missing.push(record.element);
+      }
+    }
+    for (const element of missing) this.remove(element);
+    return missing;
+  }
+
   refreshOriginalSnapshot(record, sourceText) {
     const wasReplaced = record.replaced;
     if (wasReplaced) this.restoreSourceText(record);

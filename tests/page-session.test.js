@@ -337,6 +337,33 @@ describe('PageSession', () => {
     session.stop();
   });
 
+  it('retranslates a reused source when a SPA removes its generated translation', async () => {
+    document.body.innerHTML = '<p id="source">A reusable post body.</p>';
+    const calls = [];
+    const session = new PageSession({
+      generation: 411,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    await session.start();
+    const source = document.querySelector('#source');
+    const generated = source.nextElementSibling;
+    expect(generated?.tagName.toLowerCase()).toBe('translight-translation');
+    generated.remove();
+    await wait();
+
+    expect(source.nextElementSibling?.textContent).toBe('ko:A reusable post body.');
+    expect(calls).toEqual(['A reusable post body.']);
+    session.stop();
+  });
+
   it('translates Korean-to-English changes and removes English-to-Korean translations', async () => {
     document.documentElement.lang = 'ko-KR';
     document.body.innerHTML = `
