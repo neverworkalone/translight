@@ -155,10 +155,11 @@ async function setState(tabId, patch) {
   return tabStates[String(tabId)];
 }
 
-async function sendContentMessage(tabId, message) {
+async function sendContentMessage(tabId, message, {allowInjection = false} = {}) {
   try {
     return await chrome.tabs.sendMessage(tabId, message);
   } catch (firstError) {
+    if (!allowInjection) throw firstError;
     try {
       await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
       return await chrome.tabs.sendMessage(tabId, message);
@@ -215,7 +216,11 @@ async function startTranslation(tab, {
   });
 
   try {
-    await sendContentMessage(tabId, { type: 'TRANSLATION_START', generation });
+    await sendContentMessage(
+      tabId,
+      { type: 'TRANSLATION_START', generation },
+      {allowInjection: activation === TAB_ACTIVATION.MANUAL}
+    );
   } catch (error) {
     await setState(tabId, {
       status: TAB_STATUS.ERROR,

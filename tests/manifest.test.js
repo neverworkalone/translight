@@ -6,8 +6,9 @@ const manifest = JSON.parse(
 );
 
 describe('extension manifest', () => {
-  it('declares permissions for the content-script injection fallback', () => {
+  it('uses temporary access for the manual content-script injection fallback', () => {
+    expect(manifest.permissions).toContain('activeTab');
     expect(manifest.permissions).toContain('scripting');
-    expect(manifest.host_permissions).toContain('<all_urls>');
+    expect(manifest.host_permissions).toBeUndefined();
   });
 });
