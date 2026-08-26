@@ -5,7 +5,7 @@ import { MODEL_STATE } from '../translation/model-state.js';
 import { isTranslationCancelled, TranslationCancelledError } from '../translation/provider.js';
 import { TranslationRenderer } from './translation-renderer.js';
 import { createDefaultSettings, normalizeSettings } from '../settings.js';
-import { isDocumentInLanguage } from './language.js';
+import { isTranslatableTitle } from './language.js';
 
 const DEFAULT_CONCURRENCY = 3;
 const MUTATION_DEBOUNCE_MS = 100;
@@ -30,10 +30,6 @@ function getClosestBlock(node) {
   if (!node) return null;
   if (node.nodeType === 1 && node.matches?.(BLOCK_SELECTOR)) return node;
   return node.parentElement?.closest?.(BLOCK_SELECTOR) ?? null;
-}
-
-function isMeaningfulTitle(value) {
-  return typeof value === 'string' && value.trim().length >= 2;
 }
 
 function installHistoryPatch(view) {
@@ -98,6 +94,7 @@ export class PageSession {
     this.titleRequest = 0;
     this.updatingTitle = false;
     this.running = false;
+    this.watchOnly = false;
     this.runPromise = null;
     this.translatedCount = 0;
     this.failedCount = 0;
@@ -128,6 +125,7 @@ export class PageSession {
   stop({notify = true} = {}) {
     const wasRunning = this.running;
     this.running = false;
+    this.watchOnly = false;
     this.controller?.abort();
     this.queue?.cancel();
     this.queue = null;
@@ -143,8 +141,15 @@ export class PageSession {
   async run() {
     const signal = this.controller.signal;
     try {
-      if (isDocumentInLanguage(this.document, this.settings.targetLanguage)) {
-        this.running = false;
+      const initialBlocks = collectTranslationBlocks(this.document.body, {
+        targetLanguage: this.settings.targetLanguage
+      });
+      const shouldTranslateTitle = this.settings.translatePageTitle || this.legacyTranslatePageTitle;
+      const hasTranslatableTitle = shouldTranslateTitle &&
+        isTranslatableTitle(this.document, this.settings.targetLanguage);
+      if (!initialBlocks.length && !hasTranslatableTitle) {
+        this.watchOnly = true;
+        this.installObservers();
         this.notify('SKIPPED', {reason: 'TARGET_LANGUAGE'});
         return;
       }
@@ -177,13 +182,16 @@ export class PageSession {
       });
       if (!this.isCurrent()) throw new TranslationCancelledError();
 
+      const blocks = collectTranslationBlocks(this.document.body, {
+        targetLanguage: this.settings.targetLanguage,
+        onExcluded: (element) => this.renderer?.remove(element)
+      });
       this.createQueue(signal);
-      const blocks = collectTranslationBlocks(this.document.body);
       this.notify('TRANSLATING', {count: blocks.length});
       this.installObservers();
       // Translate the title before the document queue so a long page cannot
       // leave the browser tab showing the original title for a long time.
-      if (this.settings.translatePageTitle || this.legacyTranslatePageTitle) {
+      if (shouldTranslateTitle) {
         await this.translateTitle(signal);
       }
       if (!this.isCurrent()) throw new TranslationCancelledError();
@@ -289,7 +297,12 @@ export class PageSession {
     const titleRoot = this.document.head ?? this.document.documentElement;
     if (!titleRoot || typeof MutationObserverClass !== 'function') return;
     this.titleObserver = new MutationObserverClass(() => {
-      if (!this.updatingTitle) void this.translateTitle(this.controller.signal);
+      if (this.updatingTitle) return;
+      if (this.watchOnly) {
+        if (isTranslatableTitle(this.document, this.settings.targetLanguage)) void this.start();
+        return;
+      }
+      void this.translateTitle(this.controller.signal);
     });
     // Observe the head rather than only the initial <title> node. SPA sites
     // commonly replace the node itself when updating their document title.
@@ -354,13 +367,19 @@ export class PageSession {
       const blocks = [];
       const seen = new Set();
       for (const root of roots) {
-        for (const block of collectTranslationBlocks(root)) {
+        for (const block of collectTranslationBlocks(root, {
+          targetLanguage: this.settings.targetLanguage,
+          onExcluded: (element) => this.renderer?.remove(element)
+        })) {
           if (seen.has(block.element)) continue;
           seen.add(block.element);
           blocks.push(block);
         }
       }
-      if (blocks.length) void this.enqueueBlocks(blocks);
+      if (blocks.length) {
+        if (this.watchOnly) void this.start();
+        else void this.enqueueBlocks(blocks);
+      }
       this.renderer?.pruneDisconnected?.();
     }, MUTATION_DEBOUNCE_MS);
   }
@@ -371,19 +390,34 @@ export class PageSession {
     if (!currentUrl || currentUrl === this.lastUrl) return;
     this.lastUrl = currentUrl;
     this.renderer?.pruneDisconnected?.();
-    if (this.settings.translatePageTitle || this.legacyTranslatePageTitle) {
-      await this.translateTitle(this.controller.signal, {force: true});
+    this.renderer?.restoreChangedSources?.();
+    const shouldTranslateTitle = this.settings.translatePageTitle || this.legacyTranslatePageTitle;
+    const hasTranslatableTitle = shouldTranslateTitle &&
+      isTranslatableTitle(this.document, this.settings.targetLanguage);
+    const blocks = collectTranslationBlocks(this.document.body, {
+      targetLanguage: this.settings.targetLanguage,
+      onExcluded: (element) => this.renderer?.remove(element)
+    });
+    if (this.watchOnly) {
+      if (blocks.length || hasTranslatableTitle) void this.start();
+      return;
     }
-    const blocks = collectTranslationBlocks(this.document.body);
+    if (shouldTranslateTitle) {
+      await this.translateTitle(this.controller.signal);
+    }
     await this.enqueueBlocks(blocks);
   }
 
-  async translateTitle(signal, {force = false} = {}) {
+  async translateTitle(signal) {
     if (!this.isCurrent() ||
         (!(this.settings.translatePageTitle || this.legacyTranslatePageTitle)) ||
-        !isMeaningfulTitle(this.document.title)) return;
+        !this.document.title?.trim()) return;
     const currentTitle = this.document.title;
-    if (!force && currentTitle === this.translatedTitle) return;
+    if (currentTitle === this.translatedTitle) return;
+    if (!isTranslatableTitle(this.document, this.settings.targetLanguage)) {
+      this.restoreTitle();
+      return;
+    }
     if (currentTitle !== this.translatedTitle) this.originalTitle = currentTitle;
     const request = ++this.titleRequest;
     try {
@@ -438,7 +472,10 @@ export class PageSession {
       // During startup the provider may not be prepared yet. The main run
       // translates the title after preparation; avoid recording a spurious
       // NOT_READY error from this settings update.
-      if (this.renderer) void this.translateTitle(this.controller.signal, {force: true});
+      if (this.renderer) void this.translateTitle(this.controller.signal);
+      else if (this.watchOnly && isTranslatableTitle(this.document, this.settings.targetLanguage)) {
+        void this.start();
+      }
     }
   }
 }

@@ -1,4 +1,5 @@
 import { hashSourceText } from './translation-queue.js';
+import { isTranslatableBlock } from './language.js';
 
 const BLOCK_SELECTOR = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,figcaption,div,td,th';
 const EXCLUDED_CONTENT_SELECTOR = 'script,style,noscript,code,pre,input,textarea,select,button';
@@ -104,7 +105,10 @@ function hasBlockDescendant(element, candidateSet) {
   return Array.from(element.querySelectorAll(BLOCK_SELECTOR)).some((descendant) => candidateSet.has(descendant));
 }
 
-export function collectTranslationBlocks(root = globalThis.document?.body) {
+export function collectTranslationBlocks(
+  root = globalThis.document?.body,
+  {targetLanguage = 'ko', onExcluded} = {}
+) {
   if (!root || typeof root.querySelectorAll !== 'function') return [];
 
   const candidates = getCandidates(root);
@@ -116,13 +120,23 @@ export function collectTranslationBlocks(root = globalThis.document?.body) {
     if (isGenerated(element) || isExcluded(element)) continue;
     const existingSourceId = element.getAttribute(SOURCE_ID_ATTRIBUTE);
     const isExistingSource = Boolean(existingSourceId);
+    const excludeExisting = () => {
+      if (isExistingSource) onExcluded?.(element);
+    };
     if (isHidden(element) && !isExistingSource) continue;
     const hasNestedBlocks = hasBlockDescendant(element, candidateSet);
     const directText = hasNestedBlocks ? normalizeSourceText(directTextFromNode(element, element)) : '';
     if (hasNestedBlocks && !directText) continue;
 
     const text = hasNestedBlocks ? directText : normalizeSourceText(textFromNode(element, element));
-    if (text.length < 2 || !hasLettersOrNumbers(text) || isNavigationLike(element, text)) continue;
+    if (text.length < 2 || !hasLettersOrNumbers(text) || isNavigationLike(element, text)) {
+      excludeExisting();
+      continue;
+    }
+    if (!isTranslatableBlock(element, text, targetLanguage)) {
+      excludeExisting();
+      continue;
+    }
     const sourceHash = hashSourceText(text);
     if (isExistingSource && !element.getAttribute(SOURCE_HASH_ATTRIBUTE)) continue;
     if (isExistingSource && element.getAttribute(PRESENTATION_HASH_ATTRIBUTE) === sourceHash) continue;

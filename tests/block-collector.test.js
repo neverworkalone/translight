@@ -79,4 +79,24 @@ describe('collectTranslationBlocks', () => {
       'Second cell'
     ]);
   });
+
+  it('filters localized UI blocks while keeping English content under a Korean root', () => {
+    document.documentElement.lang = 'ko-KR';
+    document.body.lang = 'ko-KR';
+    document.body.innerHTML = `
+      <header lang="ko"><p>검색하고 설정을 확인하세요.</p></header>
+      <article>
+        <h1>English post title</h1>
+        <p>English post content that should be translated.</p>
+      </article>
+    `;
+
+    expect(collectTranslationBlocks(document.body).map((block) => block.text)).toEqual([
+      'English post title',
+      'English post content that should be translated.'
+    ]);
+
+    document.documentElement.removeAttribute('lang');
+    document.body.removeAttribute('lang');
+  });
 });

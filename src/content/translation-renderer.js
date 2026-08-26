@@ -812,6 +812,20 @@ export class TranslationRenderer {
     return translation;
   }
 
+  remove(element) {
+    const record = this.recordsByElement.get(element);
+    if (!record) return false;
+
+    record.translation?.parentNode?.removeChild(record.translation);
+    if (element?.getAttribute(SESSION_ATTRIBUTE) === this.sessionId) {
+      this.restoreSourceText(record);
+      for (const name of ATTRIBUTE_NAMES) restoreAttribute(element, name, record.originalAttributes[name]);
+    }
+    this.recordsByElement.delete(element);
+    this.records.delete(record.sourceId);
+    return true;
+  }
+
   pruneDisconnected() {
     for (const [sourceId, record] of this.records) {
       if (record.element?.isConnected !== false) continue;

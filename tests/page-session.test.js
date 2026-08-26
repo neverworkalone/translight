@@ -41,31 +41,138 @@ describe('PageSession', () => {
     session.stop();
   });
 
-  it('skips a document whose declared language is the target language', async () => {
+  it('skips a document with no translatable blocks', async () => {
     document.documentElement.lang = 'ko-KR';
     document.body.innerHTML = '<p>한국어 문서는 이미 대상 언어로 작성되어 있습니다.</p>';
     let calls = 0;
+    let providerChecks = 0;
     const statuses = [];
     const session = new PageSession({
       generation: 11,
       document,
-      provider: makeProvider({
+      provider: {
+        getModelState: async () => {
+          providerChecks += 1;
+          return 'Available';
+        },
+        prepare: async () => {
+          providerChecks += 1;
+        },
         translate: async (text) => {
           calls += 1;
           return `ko:${text}`;
-        }
-      }),
+        },
+        cancel: () => {},
+        close: () => {}
+      },
       sendStatus: (status) => statuses.push(status)
     });
 
     await session.start();
 
     expect(calls).toBe(0);
+    expect(providerChecks).toBe(0);
     expect(document.querySelector('p').textContent).toBe('한국어 문서는 이미 대상 언어로 작성되어 있습니다.');
     expect(document.querySelector('translight-translation')).toBeNull();
     expect(statuses.at(-1)).toMatchObject({status: 'SKIPPED', reason: 'TARGET_LANGUAGE'});
     document.documentElement.removeAttribute('lang');
     session.stop({notify: false});
+  });
+
+  it('waits for English content after an initially Korean-only page', async () => {
+    document.documentElement.lang = 'ko-KR';
+    document.body.innerHTML = '<p>처음에는 한국어 콘텐츠만 있습니다.</p>';
+    const calls = [];
+    const session = new PageSession({
+      generation: 113,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    await session.start();
+    expect(calls).toEqual([]);
+
+    const added = document.createElement('p');
+    added.textContent = 'A new English post arrived after the first route.';
+    document.body.appendChild(added);
+    await wait(180);
+
+    expect(calls).toEqual(['A new English post arrived after the first route.']);
+    expect(added.nextElementSibling?.textContent)
+      .toBe('ko:A new English post arrived after the first route.');
+    session.stop({notify: false});
+    document.documentElement.removeAttribute('lang');
+  });
+
+  it('translates English content on a page whose UI declares Korean', async () => {
+    document.documentElement.lang = 'ko-KR';
+    document.body.innerHTML = `
+      <nav><a href="#">홈</a><a href="#">알림</a></nav>
+      <div lang="ko"><p id="ui">로그인하고 설정을 확인하세요.</p></div>
+      <main>
+        <article>
+          <h1 id="post-title">Why this community keeps growing</h1>
+          <p id="post">This is an English post written by a community member.</p>
+          <p id="comment">The comments are also written in English.</p>
+        </article>
+      </main>
+    `;
+    const calls = [];
+    const session = new PageSession({
+      generation: 111,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    await session.start();
+
+    expect(calls).toEqual([
+      'Why this community keeps growing',
+      'This is an English post written by a community member.',
+      'The comments are also written in English.'
+    ]);
+    expect(document.querySelector('#ui translight-translation')).toBeNull();
+    expect(document.querySelectorAll('translight-translation')).toHaveLength(3);
+    session.stop();
+    document.documentElement.removeAttribute('lang');
+  });
+
+  it('translates an English title without trusting the root language', async () => {
+    document.documentElement.lang = 'ko-KR';
+    document.title = 'An English title for a post';
+    document.body.innerHTML = '<p>한국어 본문이 있는 페이지입니다.</p>';
+    const calls = [];
+    const session = new PageSession({
+      generation: 112,
+      document,
+      settings: {translatePageTitle: true},
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    await session.start();
+
+    expect(calls).toEqual(['An English title for a post']);
+    expect(document.title).toBe('ko:An English title for a post');
+    expect(document.querySelectorAll('translight-translation')).toHaveLength(0);
+    session.stop();
+    document.documentElement.removeAttribute('lang');
   });
 
   it('creates the default provider with the session target language', () => {
@@ -230,6 +337,46 @@ describe('PageSession', () => {
     session.stop();
   });
 
+  it('translates Korean-to-English changes and removes English-to-Korean translations', async () => {
+    document.documentElement.lang = 'ko-KR';
+    document.body.innerHTML = `
+      <p id="changing-korean">처음에는 한국어 콘텐츠입니다.</p>
+      <p id="changing-english">This block starts in English.</p>
+    `;
+    const calls = [];
+    const session = new PageSession({
+      generation: 43,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    await session.start();
+    expect(calls).toEqual(['This block starts in English.']);
+
+    document.querySelector('#changing-korean').firstChild.data =
+      'This block changed from Korean to English.';
+    await wait();
+    expect(document.querySelector('#changing-korean + translight-translation')?.textContent)
+      .toBe('ko:This block changed from Korean to English.');
+
+    document.querySelector('#changing-english').firstChild.data =
+      '이 블록은 이제 한국어 콘텐츠입니다.';
+    await wait();
+    expect(document.querySelector('#changing-english + translight-translation')).toBeNull();
+    expect(calls).toEqual([
+      'This block starts in English.',
+      'This block changed from Korean to English.'
+    ]);
+    session.stop();
+    document.documentElement.removeAttribute('lang');
+  });
+
   it('restores inline source text before retranslation after a replacement update', async () => {
     document.body.innerHTML = '<p id="source">Visit <a href="https://openai.com">OpenAI</a> docs</p>';
     const inputs = [];
@@ -357,6 +504,35 @@ describe('PageSession', () => {
 
     expect(document.title).toBe('ko:Second title');
     session.stop();
+  });
+
+  it('does not translate a title after its content changes to Korean', async () => {
+    document.documentElement.lang = 'ko-KR';
+    document.title = 'Initial English title';
+    document.body.innerHTML = '<p>English body content keeps the session active.</p>';
+    const calls = [];
+    const session = new PageSession({
+      generation: 54,
+      document,
+      settings: {translatePageTitle: true},
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    await session.start();
+    expect(document.title).toBe('ko:Initial English title');
+
+    document.title = '한국어 제목으로 변경되었습니다.';
+    await wait();
+
+    expect(document.title).toBe('한국어 제목으로 변경되었습니다.');
+    expect(calls).toEqual(['Initial English title', 'English body content keeps the session active.']);
+    session.stop();
+    document.documentElement.removeAttribute('lang');
   });
 
   it('starts with visible blocks, then adjacent blocks, then document-order blocks', async () => {
