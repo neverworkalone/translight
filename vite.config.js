@@ -4,6 +4,7 @@ import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
 
 const projectRoot = fileURLToPath(new URL('.', import.meta.url));
+const noMinify = process.env.TRANSLIGHT_NO_MINIFY === 'true';
 
 function copyChromeLocales() {
   return {
@@ -21,6 +22,8 @@ export default defineConfig({
   plugins: [vue(), copyChromeLocales()],
   build: {
     target: 'es2022',
+    minify: noMinify ? false : 'esbuild',
+    cssMinify: noMinify ? false : 'esbuild',
     emptyOutDir: true,
     rollupOptions: {
       input: {
