@@ -6,6 +6,7 @@ import {hashSourceText} from '../src/content/translation-queue.js';
 
 describe('collectTranslationBlocks', () => {
   beforeEach(() => {
+    document.head.innerHTML = '';
     document.body.innerHTML = '';
     resetSourceSequence();
   });
@@ -40,6 +41,39 @@ describe('collectTranslationBlocks', () => {
     `;
 
     expect(collectTranslationBlocks(document.body).map((block) => block.text)).toEqual(['Fresh paragraph']);
+  });
+
+  it('ignores visually hidden accessibility text in page layout blocks', () => {
+    document.head.innerHTML = `
+      <style>
+        .sr-only {
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          padding: 0;
+          margin: -1px;
+          overflow: hidden;
+          clip: rect(0, 0, 0, 0);
+          clip-path: inset(50%);
+          white-space: nowrap;
+          border: 0;
+        }
+      </style>
+    `;
+    document.body.innerHTML = `
+      <div id="header" style="display:flex">
+        <div id="menu"><a href="#"><span class="sr-only">Open menu</span></a></div>
+        <div id="search"><span class="sr-only">Search or jump to...</span></div>
+      </div>
+      <div id="content">
+        <span class="sr-only">Screen reader context</span>
+        <span>Visible article text.</span>
+      </div>
+      <h2 class="sr-only">Navigation Menu</h2>
+    `;
+
+    expect(collectTranslationBlocks(document.body).map((block) => block.text))
+      .toEqual(['Visible article text.']);
   });
 
   it('does not re-collect text that the renderer has replaced for presentation', () => {

@@ -40,7 +40,18 @@ function isExcluded(element) {
   return false;
 }
 
-function isHidden(element) {
+function isVisuallyHiddenStyle(style) {
+  const width = Number.parseFloat(style.width);
+  const height = Number.parseFloat(style.height);
+  const hasTinyBox = Number.isFinite(width) && Number.isFinite(height) && width <= 1 && height <= 1;
+  const hasHiddenOverflow = style.overflow === 'hidden' || style.overflow === 'clip';
+  const hasClip = (style.clip && style.clip !== 'auto' && style.clip !== 'none') ||
+    (style.clipPath && style.clipPath !== 'none');
+  const isOutOfFlow = style.position === 'absolute' || style.position === 'fixed';
+  return isOutOfFlow && hasTinyBox && (hasHiddenOverflow || hasClip);
+}
+
+export function isHidden(element, {includeAncestors = true} = {}) {
   if (!isElement(element)) return true;
   if (element.hidden || element.getAttribute('aria-hidden') === 'true') return true;
 
@@ -54,10 +65,12 @@ function isHidden(element) {
       style.display === 'none' ||
       style.visibility === 'hidden' ||
       style.visibility === 'collapse' ||
-      style.opacity === '0'
+      style.opacity === '0' ||
+      isVisuallyHiddenStyle(style)
     ) {
       return true;
     }
+    if (!includeAncestors) break;
     current = current.parentElement;
   }
   return false;
@@ -66,6 +79,7 @@ function isHidden(element) {
 function textFromNode(node, root) {
   if (node.nodeType === 3) return node.nodeValue ?? '';
   if (!isElement(node)) return '';
+  if (isHidden(node)) return '';
   if (node !== root && node.matches(EXCLUDED_CONTENT_SELECTOR)) return '';
   if (node !== root && node.matches(GENERATED_SELECTOR)) return '';
   if (node !== root && node.matches(SEGMENT_SELECTOR)) return '';
@@ -75,6 +89,7 @@ function textFromNode(node, root) {
 function directTextFromNode(node, root) {
   if (node.nodeType === 3) return node.nodeValue ?? '';
   if (!isElement(node)) return '';
+  if (isHidden(node)) return '';
   if (node !== root && node.matches(EXCLUDED_CONTENT_SELECTOR)) return '';
   if (node !== root && node.matches(GENERATED_SELECTOR)) return '';
   if (node !== root && node.matches(SEGMENT_SELECTOR)) return '';
