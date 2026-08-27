@@ -143,6 +143,56 @@ describe('PageSession', () => {
     expect(expanded.querySelector('[data-translight-segment="true"]')).toBeNull();
   });
 
+  it('places a YouTube comment translation after the original comment', async () => {
+    document.body.innerHTML = `
+      <div id="main" style="display:flex; flex-direction:column">
+        <div id="header"></div>
+        <ytd-expander id="expander">
+          <div id="content">
+            <yt-pdg-comment-chip-renderer id="paid-comment-chip" hidden>
+              <div id="comment-chip-container"></div>
+            </yt-pdg-comment-chip-renderer>
+            <yt-attributed-string id="content-text">
+              <span class="ytAttributedStringHost ytAttributedStringWhiteSpacePreWrap">
+                China is an incredibly beautiful country. And your videos are simply wonderful!
+              </span>
+            </yt-attributed-string>
+          </div>
+        </ytd-expander>
+        <div id="actions"></div>
+      </div>
+    `;
+    const comment = document.querySelector('#content-text');
+    const originalComment = comment.textContent.trim();
+    const calls = [];
+    const session = new PageSession({
+      generation: 602,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    try {
+      await session.start();
+
+      const translation = document.querySelector('translight-translation');
+      expect(calls).toEqual([originalComment]);
+      expect(translation).not.toBeNull();
+      expect(Boolean(comment.compareDocumentPosition(translation) & Node.DOCUMENT_POSITION_FOLLOWING))
+        .toBe(true);
+    } finally {
+      session.stop({notify: false});
+    }
+
+    expect(comment.textContent.trim()).toBe(originalComment);
+    expect(document.querySelector('translight-translation')).toBeNull();
+  });
+
   it('skips a document with no translatable blocks', async () => {
     document.documentElement.lang = 'ko-KR';
     document.body.innerHTML = '<p>한국어 문서는 이미 대상 언어로 작성되어 있습니다.</p>';
@@ -927,6 +977,70 @@ describe('PageSession', () => {
     } finally {
       hostObserver.disconnect();
       session.stop();
+    }
+  });
+
+  it('stops recovering a YouTube comment after its hidden chip removes the translation twice', async () => {
+    document.body.innerHTML = `
+      <div id="main" style="display:flex; flex-direction:column">
+        <div id="header"></div>
+        <ytd-expander id="expander">
+          <div id="content">
+            <yt-pdg-comment-chip-renderer id="paid-comment-chip" hidden>
+              <div id="comment-chip-container"></div>
+            </yt-pdg-comment-chip-renderer>
+            <yt-attributed-string id="content-text">
+              <span class="ytAttributedStringHost ytAttributedStringWhiteSpacePreWrap">
+                China is an incredibly beautiful country. And your videos are simply wonderful!
+              </span>
+            </yt-attributed-string>
+          </div>
+        </ytd-expander>
+        <div id="actions"></div>
+      </div>
+    `;
+    const content = document.querySelector('#content');
+    const comment = document.querySelector('#content-text');
+    const originalComment = comment.textContent.trim();
+    const calls = [];
+    let hostRemovals = 0;
+    const session = new PageSession({
+      generation: 418,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+    const hostObserver = new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.addedNodes ?? []) {
+          if (node.nodeType !== 1 || !node.matches('translight-translation') ||
+              node.previousElementSibling !== content) continue;
+          hostRemovals += 1;
+          node.remove();
+        }
+      }
+    });
+    hostObserver.observe(document.body, {childList: true, subtree: true});
+
+    try {
+      await session.start();
+      await wait(900);
+
+      expect(hostRemovals).toBe(2);
+      expect(session.recoveryTimer).toBeNull();
+      expect(session.pendingRecoveryElements.size).toBe(0);
+      expect(content.nextElementSibling).toBeNull();
+      expect(calls).toEqual([originalComment]);
+      expect(session.renderer.records.size).toBe(1);
+      expect([...session.renderer.records.values()][0].recoveryAttempts).toBe(1);
+    } finally {
+      hostObserver.disconnect();
+      session.stop({notify: false});
     }
   });
 

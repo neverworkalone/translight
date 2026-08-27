@@ -8,6 +8,7 @@ import {
   SEGMENT_ATTRIBUTE,
   SEGMENT_ID_ATTRIBUTE,
   SEGMENT_SELECTOR,
+  hasVisibleBlockDescendant,
   isExcluded,
   isHidden
 } from './block-collector.js';
@@ -160,7 +161,7 @@ function insertAtSafeLocation(element, translation, mixedContent = false) {
 }
 
 function hasNestedBlocks(element) {
-  return Boolean(element?.querySelector?.(`${BLOCK_SELECTOR},${SEGMENT_SELECTOR}`));
+  return hasVisibleBlockDescendant(element);
 }
 
 function restorePlacement(record) {

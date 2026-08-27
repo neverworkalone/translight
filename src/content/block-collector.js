@@ -309,14 +309,22 @@ function getCandidates(root) {
   return candidates;
 }
 
+function getVisibleBlockDescendants(element, candidateSet) {
+  return Array.from(element?.querySelectorAll?.(CANDIDATE_SELECTOR) ?? [])
+    .filter((descendant) => (!candidateSet || candidateSet.has(descendant)) && !isHidden(descendant));
+}
+
+export function hasVisibleBlockDescendant(element, candidateSet) {
+  return getVisibleBlockDescendants(element, candidateSet).length > 0;
+}
+
 function hasBlockDescendant(element, candidateSet) {
-  return Array.from(element.querySelectorAll(CANDIDATE_SELECTOR))
-    .some((descendant) => candidateSet.has(descendant));
+  return hasVisibleBlockDescendant(element, candidateSet);
 }
 
 function hasNonSegmentBlockDescendant(element, candidateSet) {
-  return Array.from(element.querySelectorAll(CANDIDATE_SELECTOR))
-    .some((descendant) => candidateSet.has(descendant) && !descendant.matches(SEGMENT_SELECTOR));
+  return getVisibleBlockDescendants(element, candidateSet)
+    .some((descendant) => !descendant.matches(SEGMENT_SELECTOR));
 }
 
 export function collectTranslationBlocks(
