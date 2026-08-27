@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Translight Amazon review visibility reproduction</title>
+    <style>
+      html { scroll-behavior: auto; }
+      body {
+        margin: 0;
+        color: #0f1111;
+        background: #fff;
+        font: 14px/20px Arial, sans-serif;
+      }
+      #report {
+        position: fixed;
+        z-index: 10;
+        top: 0;
+        right: 0;
+        width: 430px;
+        max-height: 90vh;
+        overflow: auto;
+        box-sizing: border-box;
+        padding: 12px;
+        background: #111827;
+        color: white;
+        font: 12px/1.4 monospace;
+        white-space: pre-wrap;
+      }
+      #reviews {
+        width: min(760px, calc(100% - 48px));
+        margin: 96px auto 120px;
+      }
+      [data-hook="reviewContainer"] {
+        border-bottom: 1px solid #d5d9d9;
+        padding: 24px 0;
+      }
+      [data-hook="reviewHeader"] {
+        display: flex;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+      [data-hook="reviewText"] {
+        margin-top: 12px;
+      }
+      [data-a-card-type="basic"] {
+        height: 80px;
+        overflow: hidden;
+        padding: 0;
+      }
+      .a-cardui-body,
+      .a-reactive-container,
+      .a-cardui-content,
+      [data-hook="reviewRichContentContainer"] {
+        display: block;
+      }
+      .a-reactive-container {
+        height: 80px;
+      }
+      [data-hook="reviewRichContentContainer"] * {
+        max-width: 100%;
+        word-break: break-word;
+      }
+      #review-body {
+        margin: 0;
+        font-size: 16px;
+        line-height: 20px;
+      }
+      [data-hook="reviewActions"] {
+        margin-top: 12px;
+        color: #565959;
+      }
+      button {
+        margin-right: 12px;
+        border: 0;
+        background: transparent;
+        color: inherit;
+      }
+    </style>
+  </head>
+  <body>
+    <pre id="report">starting…</pre>
+    <main id="reviews">
+      <div data-hook="reviewContainer">
+        <div data-hook="reviewHeader" lang="ko">
+          <span>Deborah Henderson</span>
+          <span>데보라 헨더슨</span>
+        </div>
+        <h5 lang="ko">도시락 포장에 적합합니다.</h5>
+        <div data-hook="review-by-line" lang="ko">2026년 8월 20일 미국에서 검토되었습니다</div>
+        <div data-hook="reviewText">
+          <div data-a-card-type="basic" class="peek-expand">
+            <div class="a-cardui-body">
+              <div class="a-reactive-container">
+                <div>
+                  <div class="a-cardui-content">
+                    <div data-hook="reviewRichContentContainer" lang="en-US">
+                      <p id="review-body">I absolutely love this bento box! It’s the perfect size for packing a variety of foods without everything getting mixed together. The compartments are great for keeping snacks, fruits, sandwiches, and other foods organized and fresh.</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div data-hook="reviewActions">
+          <button type="button">Helpful</button>
+          <button type="button">Report</button>
+        </div>
+      </div>
+    </main>
+    <script type="module" src="/tests/fixtures/amazon-review-visibility-repro.js"></script>
+  </body>
+</html>

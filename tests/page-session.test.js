@@ -94,6 +94,68 @@ describe('PageSession', () => {
     session.stop({notify: false});
   });
 
+  it('keeps Amazon review translations outside a collapsed card in paragraph order', async () => {
+    document.head.innerHTML = `
+      <style>
+        [data-a-card-type="basic"] { overflow: hidden; }
+      </style>
+    `;
+    document.body.innerHTML = `
+      <div data-hook="reviewContainer">
+        <div data-hook="reviewText">
+          <div data-a-card-type="basic" class="peek-expand">
+            <div class="a-cardui-body">
+              <div class="a-reactive-container" style="height:80px">
+                <div>
+                  <div data-hook="reviewRichContentContainer" lang="en-US">
+                    <p id="review-body-first">I absolutely love this bento box! It is the perfect size for packing lunches.</p>
+                    <p id="review-body-second">The compartments keep snacks, fruit, and sandwiches organized and fresh.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div data-hook="reviewActions"></div>
+      </div>
+    `;
+    const card = document.querySelector('[data-a-card-type="basic"]');
+    const reviewBodies = Array.from(document.querySelectorAll('[data-hook="reviewRichContentContainer"] p'));
+    const originalReviews = reviewBodies.map((reviewBody) => reviewBody.textContent);
+    const calls = [];
+    const session = new PageSession({
+      generation: 604,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          if (text === originalReviews[0]) await wait(20);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    try {
+      await session.start();
+
+      const translations = Array.from(document.querySelectorAll('translight-translation'));
+      expect(calls).toEqual(originalReviews);
+      expect(translations.map((translation) => translation.textContent)).toEqual(
+        originalReviews.map((review) => `ko:${review}`)
+      );
+      expect(translations.every((translation) => translation.parentElement === card.parentElement)).toBe(true);
+      expect(translations[0].previousElementSibling).toBe(card);
+      expect(translations[1].previousElementSibling).toBe(translations[0]);
+    } finally {
+      session.stop({notify: false});
+      document.head.innerHTML = '';
+    }
+
+    expect(reviewBodies.map((reviewBody) => reviewBody.textContent)).toEqual(originalReviews);
+    expect(document.querySelector('translight-translation')).toBeNull();
+  });
+
   it('interleaves translations for blank-line paragraphs in a YouTube description', async () => {
     document.body.innerHTML = `
       <div id="description-inline-expander">
