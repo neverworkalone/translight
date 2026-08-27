@@ -91,9 +91,9 @@ function getSourceTypographyElement(record) {
     totalWeight += weight;
     let depth = 1;
     for (let parent = node.parentElement; parent && parent !== element; parent = parent.parentElement) {
-      const current = textWeights.get(parent) ?? {weight: 0, depth: 0};
+      const current = textWeights.get(parent) ?? {weight: 0, depth: Number.POSITIVE_INFINITY};
       current.weight += weight;
-      current.depth = Math.max(current.depth, depth);
+      current.depth = Math.min(current.depth, depth);
       textWeights.set(parent, current);
       depth += 1;
     }
@@ -103,10 +103,10 @@ function getSourceTypographyElement(record) {
   let typographyElement = element;
   const minimumWeight = totalWeight * MAIN_TEXT_RATIO;
   let bestWeight = minimumWeight;
-  let bestDepth = 0;
+  let bestDepth = Number.POSITIVE_INFINITY;
   for (const [candidate, {weight, depth}] of textWeights) {
     if (weight <= minimumWeight || weight < bestWeight ||
-        (weight === bestWeight && depth <= bestDepth)) continue;
+        (weight === bestWeight && depth >= bestDepth)) continue;
     typographyElement = candidate;
     bestWeight = weight;
     bestDepth = depth;

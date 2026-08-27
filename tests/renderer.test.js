@@ -452,7 +452,9 @@ describe('TranslationRenderer', () => {
   it('matches the typography of a nested source text wrapper', () => {
     document.body.innerHTML = `
       <div id="source" style="font-size:14px;line-height:20px">
-        <span id="comment-text" style="font-size:16px;line-height:24px">Comment text</span>
+        <yt-attributed-string>
+          <span id="comment-text" style="font-size:16px;line-height:24px">Comment text</span>
+        </yt-attributed-string>
       </div>
     `;
     const source = document.querySelector('#source');
