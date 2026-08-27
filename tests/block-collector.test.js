@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it } from 'vitest';
-import { collectTranslationBlocks, resetSourceSequence } from '../src/content/block-collector.js';
+import {
+  collectTranslationBlocks,
+  hasVisibleBlockDescendant,
+  resetSourceSequence
+} from '../src/content/block-collector.js';
 import {hashSourceText} from '../src/content/translation-queue.js';
 
 describe('collectTranslationBlocks', () => {
@@ -92,6 +96,24 @@ describe('collectTranslationBlocks', () => {
 
     expect(collectTranslationBlocks(document.body).map((block) => block.text))
       .toEqual(['Visible article text.']);
+  });
+
+  it('stops visible nested-block checks after the first visible candidate', () => {
+    const first = document.createElement('div');
+    const second = document.createElement('div');
+    let visited = 0;
+    const descendants = {
+      *[Symbol.iterator]() {
+        visited += 1;
+        yield first;
+        visited += 1;
+        yield second;
+      }
+    };
+    const root = {querySelectorAll: () => descendants};
+
+    expect(hasVisibleBlockDescendant(root)).toBe(true);
+    expect(visited).toBe(1);
   });
 
   it('does not re-collect text that the renderer has replaced for presentation', () => {

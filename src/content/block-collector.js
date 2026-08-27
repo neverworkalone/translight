@@ -309,13 +309,16 @@ function getCandidates(root) {
   return candidates;
 }
 
-function getVisibleBlockDescendants(element, candidateSet) {
-  return Array.from(element?.querySelectorAll?.(CANDIDATE_SELECTOR) ?? [])
-    .filter((descendant) => (!candidateSet || candidateSet.has(descendant)) && !isHidden(descendant));
-}
-
-export function hasVisibleBlockDescendant(element, candidateSet) {
-  return getVisibleBlockDescendants(element, candidateSet).length > 0;
+export function hasVisibleBlockDescendant(element, candidateSet, predicate = () => true) {
+  const descendants = element?.querySelectorAll?.(CANDIDATE_SELECTOR);
+  if (!descendants) return false;
+  for (const descendant of descendants) {
+    if ((!candidateSet || candidateSet.has(descendant)) &&
+        !isHidden(descendant) && predicate(descendant)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function hasBlockDescendant(element, candidateSet) {
@@ -323,8 +326,11 @@ function hasBlockDescendant(element, candidateSet) {
 }
 
 function hasNonSegmentBlockDescendant(element, candidateSet) {
-  return getVisibleBlockDescendants(element, candidateSet)
-    .some((descendant) => !descendant.matches(SEGMENT_SELECTOR));
+  return hasVisibleBlockDescendant(
+    element,
+    candidateSet,
+    (descendant) => !descendant.matches(SEGMENT_SELECTOR)
+  );
 }
 
 export function collectTranslationBlocks(
