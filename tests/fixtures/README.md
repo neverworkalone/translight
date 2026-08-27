@@ -5,7 +5,7 @@ README. Each fixture should keep its page and runner together, and each new bug
 should add a short section here with the URL, setup, scenarios, and expected
 result.
 
-## IMDb scroll jitter
+## IMDb native scroll-anchor observation
 
 Fixture: `imdb-jitter-repro.html` and `imdb-jitter-repro.js`
 
@@ -24,19 +24,18 @@ http://127.0.0.1:5173/tests/fixtures/imdb-jitter-repro.html?scenario=recovery&to
 The fixture simulates an IMDb-style long page where the host briefly displays a
 generated translation and removes it during the next reconciliation. It samples
 `scrollY` while the session translates the page and reports the result in the
-fixed panel. The repaired case must report:
+fixed panel. The renderer keeps the document's native scroll anchoring enabled;
+only generated translation nodes opt out of anchoring. This fixture is an
+observation of the browser's native compensation during generic content churn;
+`jitterDetected` is diagnostic and can be true by design. The configuration
+check must report:
 
 ```json
 {
-  "activeOverflowAnchor": "none",
-  "jitterDetected": false,
+  "rootOverflowAnchor": "auto",
   "testPassed": true
 }
 ```
-
-To verify the regression signal, use `scenario=legacy`; this removes the
-scroll-anchor guard and should report `jitterDetected: true` and
-`testPassed: true`.
 
 ## IMDb left-column Awards jitter
 

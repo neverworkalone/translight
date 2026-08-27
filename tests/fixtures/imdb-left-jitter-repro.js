@@ -104,7 +104,7 @@ async function run() {
     final,
     cardHeight: metrics,
     stablePlacement,
-    scrollAnchor: document.documentElement.getAttribute('data-translight-scroll-anchor'),
+    rootOverflowAnchor: getComputedStyle(document.documentElement).overflowAnchor,
     testPassed: !metrics.jitterDetected && stablePlacement
   };
   report.textContent = JSON.stringify(result, null, 2);

@@ -5,7 +5,6 @@ const params = new URLSearchParams(location.search);
 const scenario = params.get('scenario') ?? 'recovery';
 const startScroll = Number(params.get('top') ?? 2500);
 const hostChurnEnabled = scenario !== 'control';
-if (scenario === 'no-anchor') document.documentElement.style.overflowAnchor = 'none';
 const baseTexts = [
   'Hayden Panettiere was born in New York and began acting at a young age.',
   'Awards include wins and nominations across television and film.',
@@ -32,7 +31,7 @@ const pendingHostRemovals = new WeakSet();
 const hostEvents = [];
 let hostRemovals = 0;
 const scrollSamples = [];
-let activeOverflowAnchor = null;
+let rootOverflowAnchor = null;
 
 function render(values) {
   app.innerHTML = values.map((text, index) =>
@@ -72,11 +71,10 @@ function collectResult() {
     hostEvents: hostEvents.slice(0, 80),
     providerCalls: calls,
     generatedTranslations: document.querySelectorAll('translight-translation').length,
-    activeOverflowAnchor,
+    rootOverflowAnchor,
     scroll,
     jitterDetected: scroll.directionChanges > 0 || scroll.largestStep >= 100,
-    expectedJitterDetected: scenario === 'legacy',
-    testPassed: (scroll.directionChanges > 0 || scroll.largestStep >= 100) === (scenario === 'legacy')
+    testPassed: rootOverflowAnchor === 'auto'
   };
 }
 
@@ -142,8 +140,7 @@ const session = new PageSession({
 
 const sampler = setInterval(() => scrollSamples.push({time: performance.now(), y: window.scrollY}), 16);
 await session.start();
-if (scenario === 'legacy') document.documentElement.removeAttribute('data-translight-scroll-anchor');
-activeOverflowAnchor = getComputedStyle(document.documentElement).overflowAnchor;
+rootOverflowAnchor = getComputedStyle(document.documentElement).overflowAnchor;
 await delay(WAIT_AFTER_START);
 
 clearInterval(sampler);

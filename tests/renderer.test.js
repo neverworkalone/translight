@@ -11,7 +11,6 @@ import {
   SESSION_ATTRIBUTE,
   SOURCE_ATTRIBUTE,
   SOURCE_HASH_ATTRIBUTE,
-  SCROLL_ANCHOR_ATTRIBUTE,
   STYLED_REPLACEMENT_ATTRIBUTE,
   TRANSLATED_ATTRIBUTE,
   TranslationRenderer
@@ -43,18 +42,10 @@ describe('TranslationRenderer', () => {
     expect(source.getAttribute(TRANSLATED_ATTRIBUTE)).toBe('true');
     expect(source.getAttribute(SESSION_ATTRIBUTE)).toBe('session-1');
     expect(renderer.style.textContent).toContain('overflow-anchor: none !important');
-    expect(document.documentElement.getAttribute(SCROLL_ANCHOR_ATTRIBUTE)).toBe('none');
+    expect(renderer.style.textContent).not.toContain('html[data-translight-scroll-anchor="none"]');
+    expect(document.documentElement.hasAttribute('data-translight-scroll-anchor')).toBe(false);
     renderer.removeAll();
-    expect(document.documentElement.hasAttribute(SCROLL_ANCHOR_ATTRIBUTE)).toBe(false);
-  });
-
-  it('restores an existing document scroll-anchor setting on cleanup', () => {
-    document.documentElement.setAttribute(SCROLL_ANCHOR_ATTRIBUTE, 'auto');
-    const renderer = new TranslationRenderer({document, sessionId: 'scroll-anchor-session'});
-
-    expect(document.documentElement.getAttribute(SCROLL_ANCHOR_ATTRIBUTE)).toBe('none');
-    renderer.removeAll();
-    expect(document.documentElement.getAttribute(SCROLL_ANCHOR_ATTRIBUTE)).toBe('auto');
+    expect(document.documentElement.hasAttribute('data-translight-scroll-anchor')).toBe(false);
   });
 
   it('prevents duplicate insertion and completely restores the DOM on cleanup', () => {
@@ -189,6 +180,59 @@ describe('TranslationRenderer', () => {
     renderer.removeAll();
     expect(document.querySelectorAll('translight-translation')).toHaveLength(0);
     expect(replacement.textContent).toBe('1 win & 3 nominations total');
+  });
+
+  it('does not bind duplicate inline-list records to the same replacement item', () => {
+    document.body.innerHTML = `
+      <ul id="awards">
+        <li id="card" style="display:flex;flex-wrap:wrap">
+          <div>
+            <ul id="inline-list" style="display:inline">
+              <li id="source-one"><span>1 win &amp; 3 nominations total</span></li>
+              <li id="source-two"><span>1 win &amp; 3 nominations total</span></li>
+            </ul>
+          </div>
+        </li>
+      </ul>
+    `;
+    const sourceOne = document.querySelector('#source-one');
+    const sourceTwo = document.querySelector('#source-two');
+    const renderer = new TranslationRenderer({document, sessionId: 'inline-duplicate-session'});
+    renderer.insert({
+      element: sourceOne,
+      sourceId: 'inline-duplicate-one',
+      sourceHash: hashSourceText(sourceOne.textContent),
+      translatedText: '총 1개의 우승 및 3개의 후보 지명'
+    });
+    renderer.insert({
+      element: sourceTwo,
+      sourceId: 'inline-duplicate-two',
+      sourceHash: hashSourceText(sourceTwo.textContent),
+      translatedText: '총 1개의 우승 및 3개의 후보 지명'
+    });
+
+    const replacementList = document.createElement('ul');
+    replacementList.id = 'inline-list';
+    replacementList.style.display = 'inline';
+    replacementList.innerHTML = `
+      <li id="replacement-one"><span>1 win &amp; 3 nominations total</span></li>
+      <li id="replacement-two"><span>1 win &amp; 3 nominations total</span></li>
+    `;
+    document.querySelector('#inline-list').replaceWith(replacementList);
+    const replacementOne = replacementList.querySelector('#replacement-one');
+    const replacementTwo = replacementList.querySelector('#replacement-two');
+
+    renderer.pruneDisconnected();
+
+    expect(renderer.hasRecord(replacementOne)).toBe(true);
+    expect(renderer.hasRecord(replacementTwo)).toBe(true);
+    expect(new Set(Array.from(renderer.records.values(), (record) => record.element)).size).toBe(2);
+    expect(document.querySelectorAll('translight-translation')).toHaveLength(2);
+
+    renderer.removeAll();
+    expect(document.querySelectorAll('translight-translation')).toHaveLength(0);
+    expect(replacementOne.textContent).toBe('1 win & 3 nominations total');
+    expect(replacementTwo.textContent).toBe('1 win & 3 nominations total');
   });
 
   it('limits recovery to one attempt when a host repeatedly removes a translation', () => {
