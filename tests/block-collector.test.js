@@ -276,6 +276,150 @@ describe('collectTranslationBlocks', () => {
     expect(collectTranslationBlocks(expanded, {isActiveSource: () => true})).toEqual([]);
   });
 
+  it('splits blank-line paragraphs inside a Goodreads formatted review', () => {
+    document.body.innerHTML = `
+      <div id="review-text">
+        <span class="Formatted">First review paragraph has enough English text to translate.<br><br>Second review paragraph has enough English text to translate as well.<br><br>Third review paragraph remains separate from the others.</span>
+      </div>
+    `;
+
+    const reviewText = document.querySelector('#review-text');
+    const formatted = document.querySelector('.Formatted');
+    const blocks = collectTranslationBlocks(reviewText);
+
+    expect(blocks.map((block) => block.text)).toEqual([
+      'First review paragraph has enough English text to translate.',
+      'Second review paragraph has enough English text to translate as well.',
+      'Third review paragraph remains separate from the others.'
+    ]);
+    expect(blocks.every(({element}) => element.matches('[data-translight-segment="true"]')))
+      .toBe(true);
+    expect(blocks.every(({element}) => element.parentElement === formatted)).toBe(true);
+    expect(formatted.querySelectorAll('[data-translight-segment="true"]')).toHaveLength(3);
+  });
+
+  it('splits Goodreads paragraphs around nested blockquotes', () => {
+    document.body.innerHTML = `
+      <div id="review-text">
+        <span class="Formatted">
+          First review paragraph has enough English text to translate.<br><br>
+          Second review paragraph has enough English text to translate as well.<br><br>
+          <blockquote><em>First quoted paragraph has enough English text to translate.</em></blockquote><br><br>
+          Third review paragraph has enough English text to translate too.<br><br>
+          <blockquote><br><div><em>Second quoted paragraph has enough English text to translate.</em></div></blockquote><br><br>
+          Final review paragraph has enough English text to translate.
+        </span>
+      </div>
+    `;
+
+    const blocks = collectTranslationBlocks(document.querySelector('#review-text'));
+
+    expect(blocks.map((block) => block.text)).toEqual([
+      'First review paragraph has enough English text to translate.',
+      'Second review paragraph has enough English text to translate as well.',
+      'First quoted paragraph has enough English text to translate.',
+      'Third review paragraph has enough English text to translate too.',
+      'Second quoted paragraph has enough English text to translate.',
+      'Final review paragraph has enough English text to translate.'
+    ]);
+    expect(blocks.filter(({element}) => element.matches('[data-translight-segment="true"]')))
+      .toHaveLength(4);
+    expect(blocks.some(({text}) => text.includes('First review paragraph') && text.includes('Final review paragraph')))
+      .toBe(false);
+  });
+
+  it('keeps residual segmentation inside the supplied root', () => {
+    document.body.innerHTML = `
+      <span id="outside">Outside text should never be collected.</span>
+      <div id="root">
+        Opening review text has enough English words.<br>
+        <blockquote>Nested quote has enough English words.</blockquote>
+      </div>
+    `;
+
+    const root = document.querySelector('#root');
+    const outside = document.querySelector('#outside');
+    const outsideParent = outside.parentElement;
+    const outsideMarkup = outside.outerHTML;
+    const blocks = collectTranslationBlocks(root);
+
+    expect(blocks.map((block) => block.text)).toEqual([
+      'Opening review text has enough English words.',
+      'Nested quote has enough English words.'
+    ]);
+    expect(blocks.every(({element}) => root.contains(element))).toBe(true);
+    expect(outside.parentElement).toBe(outsideParent);
+    expect(outside.outerHTML).toBe(outsideMarkup);
+    expect(outside.closest('[data-translight-segment="true"]')).toBeNull();
+  });
+
+  it.each([
+    ['hidden', '<span hidden>Hidden first paragraph.<br><br>Hidden second paragraph.</span>'],
+    ['excluded', '<code>Excluded first paragraph.<br><br>Excluded second paragraph.</code>'],
+    ['generated', '<span data-translight-generated="true">Generated first paragraph.<br><br>Generated second paragraph.</span>']
+  ])('does not let a %s descendant hide visible Goodreads review paragraphs', (_label, ignoredContent) => {
+    document.body.innerHTML = `
+      <div id="review-text">
+        Visible first paragraph has enough English text.
+        ${ignoredContent}
+        Visible second paragraph has enough English text.
+      </div>
+    `;
+
+    const reviewText = document.querySelector('#review-text');
+    const ignored = reviewText.querySelector('[hidden],code,[data-translight-generated="true"]');
+    const ignoredMarkup = ignored.outerHTML;
+    const blocks = collectTranslationBlocks(reviewText);
+
+    expect(blocks.map((block) => block.text)).toEqual([
+      'Visible first paragraph has enough English text. Visible second paragraph has enough English text.'
+    ]);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].element).toBe(reviewText);
+    expect(ignored.outerHTML).toBe(ignoredMarkup);
+    expect(ignored.querySelector('[data-translight-segment="true"]')).toBeNull();
+  });
+
+  it('keeps source coverage across sibling formatted review containers and unsplit surrounding text', () => {
+    document.body.innerHTML = '<div id="review-text">Introductory review text has enough English words.<span class="Formatted">First review paragraph has enough English text.<br><br>Second review paragraph has enough English text.</span><span class="Formatted">Third review paragraph has enough English text.<br><br>Fourth review paragraph has enough English text.</span>Concluding review text has enough English words.</div>';
+
+    const reviewText = document.querySelector('#review-text');
+    const blocks = collectTranslationBlocks(reviewText);
+    const secondPass = collectTranslationBlocks(reviewText);
+
+    expect(blocks.map((block) => block.text)).toEqual([
+      'Introductory review text has enough English words.',
+      'First review paragraph has enough English text.',
+      'Second review paragraph has enough English text.',
+      'Third review paragraph has enough English text.',
+      'Fourth review paragraph has enough English text.',
+      'Concluding review text has enough English words.'
+    ]);
+    expect(blocks.every(({element}) => element.matches('[data-translight-segment="true"]')))
+      .toBe(true);
+    expect(secondPass.map((block) => block.text)).toEqual(blocks.map((block) => block.text));
+  });
+
+  it('keeps source coverage through nested inline wrappers around formatted paragraphs', () => {
+    document.body.innerHTML = '<div id="review-text"><span class="outer-one">Introductory outer text has enough English words.<span class="outer-two">Introductory inner text has enough English words.<span class="Formatted">First review paragraph has enough English text.<br><br>Second review paragraph has enough English text.</span>Concluding inner text has enough English words.</span>Concluding outer text has enough English words.</span></div>';
+
+    const reviewText = document.querySelector('#review-text');
+    const blocks = collectTranslationBlocks(reviewText);
+    const secondPass = collectTranslationBlocks(reviewText);
+
+    expect(blocks.map((block) => block.text)).toEqual([
+      'Introductory outer text has enough English words.',
+      'Introductory inner text has enough English words.',
+      'First review paragraph has enough English text.',
+      'Second review paragraph has enough English text.',
+      'Concluding inner text has enough English words.',
+      'Concluding outer text has enough English words.'
+    ]);
+    expect(blocks.every(({element}) => element.matches('[data-translight-segment="true"]')))
+      .toBe(true);
+    expect(secondPass.map((block) => block.text)).toEqual(blocks.map((block) => block.text));
+  });
+
   it('collects plain table cells without collecting the table row', () => {
     document.body.innerHTML = `
       <table>

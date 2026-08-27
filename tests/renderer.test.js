@@ -687,6 +687,76 @@ describe('TranslationRenderer', () => {
     );
   });
 
+  it('keeps original-translation order when a short translation cannot be distributed', () => {
+    document.body.innerHTML = '<p id="source"><a href="https://example.com">Open</a> or <em>close</em></p>';
+    const source = document.querySelector('#source');
+    const renderer = new TranslationRenderer({
+      document,
+      sessionId: 'short-inline-original-translation-session',
+      settings: {translationMode: TRANSLATION_MODES.ORIGINAL_TRANSLATION}
+    });
+
+    renderer.insert({
+      element: source,
+      sourceId: 'short-inline-original-translation-source',
+      sourceHash: hashSourceText('Open or close'),
+      translatedText: '번역'
+    });
+
+    const translation = document.querySelector('translight-translation');
+    expect(document.body.firstElementChild).toBe(source);
+    expect(document.body.lastElementChild).toBe(translation);
+    expect(translation?.textContent).toBe('번역');
+    expect(source.textContent).toBe('Open or close');
+    expect(source.querySelector('a')?.textContent).toBe('Open');
+    expect(source.querySelector('em')?.textContent).toBe('close');
+    expect(source.hasAttribute(REPLACED_ATTRIBUTE)).toBe(false);
+    expect(source.hasAttribute(HIDDEN_ATTRIBUTE)).toBe(false);
+
+    renderer.removeAll();
+    expect(document.body.innerHTML).toBe(
+      '<p id="source"><a href="https://example.com">Open</a> or <em>close</em></p>'
+    );
+  });
+
+  it.each([
+    [TRANSLATION_MODES.ORIGINAL_TRANSLATION, 'original-translation'],
+    [TRANSLATION_MODES.TRANSLATION_ORIGINAL, 'translation-original']
+  ])('keeps %s order for Goodreads-style mixed review content', (mode, label) => {
+    document.body.innerHTML = `
+      <div id="source">
+        <span class="Formatted">
+          Opening review text with <i>inline emphasis</i> and enough content.<br><br>
+          <blockquote>Quoted review text remains a nested block.</blockquote><br><br>
+          Closing review paragraph also has enough content.
+        </span>
+      </div>
+    `;
+    const source = document.querySelector('#source');
+    const renderer = new TranslationRenderer({
+      document,
+      sessionId: `mixed-order-${label}`,
+      settings: {translationMode: mode}
+    });
+
+    renderer.insert({
+      element: source,
+      sourceId: `mixed-order-source-${label}`,
+      sourceHash: hashSourceText(source.textContent),
+      mixedContent: true,
+      translatedText: '번역된 리뷰입니다. 충분히 긴 번역문입니다.'
+    });
+
+    const translation = source.querySelector('translight-translation');
+    expect(translation).not.toBeNull();
+    expect(source.lastElementChild).toBe(translation);
+    expect(source.querySelector('.Formatted')?.nextElementSibling).toBe(translation);
+
+    renderer.removeAll();
+    expect(source.querySelector('translight-translation')).toBeNull();
+    expect(source.textContent).toContain('Opening review text with');
+  });
+
   it('keeps mixed parent and nested block translations visible in translation-only mode', () => {
     document.body.innerHTML = '<div id="mixed">Direct text.<p id="nested">Nested text.</p></div>';
     const mixed = document.querySelector('#mixed');
