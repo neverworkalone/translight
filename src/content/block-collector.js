@@ -250,6 +250,13 @@ function splitTextNodeAtDoubleLineBreaks(textNode, targetLanguage) {
 }
 
 function splitPhrasingContainerAtDoubleBreaks(container, targetLanguage) {
+  if (
+    isExcluded(container) ||
+    isGenerated(container) ||
+    isHidden(container) ||
+    container.matches(SEGMENT_SELECTOR) ||
+    container.closest(SEGMENT_SELECTOR)
+  ) return [];
   const childNodes = Array.from(container.childNodes ?? []);
   if (!isPhrasingContent(childNodes)) return [];
 
@@ -274,6 +281,51 @@ function splitPhrasingContainerAtDoubleBreaks(container, targetLanguage) {
   return wrappers;
 }
 
+function splitUnsegmentedDirectChildrenIntoSegments(element, processedContainers, targetLanguage) {
+  if (!processedContainers.length) return [];
+
+  const ranges = [];
+  let current = [];
+  const flush = () => {
+    if (current.length) ranges.push(current);
+    current = [];
+  };
+
+  for (const node of Array.from(element.childNodes ?? [])) {
+    const isProcessedBoundary = processedContainers.some((container) =>
+      container === node || container.contains?.(node) || node.contains?.(container)
+    );
+    if (isProcessedBoundary) {
+      flush();
+      continue;
+    }
+    if (node.nodeType === 1 && (
+      node.matches?.(SEGMENT_SELECTOR) ||
+      isNestedBlockNode(node) ||
+      isExcluded(node) ||
+      isGenerated(node) ||
+      isHidden(node)
+    )) {
+      flush();
+      continue;
+    }
+    current.push(node);
+  }
+  flush();
+
+  const wrappers = [];
+  for (const nodes of [...ranges].reverse()) {
+    const text = normalizeSourceText(textFromNodes(nodes, element));
+    if (text.length < 2 || !isTranslatableBlock(element, text, targetLanguage)) continue;
+
+    const wrapper = createSegmentWrapper(element);
+    element.insertBefore(wrapper, nodes[0]);
+    for (const node of nodes) wrapper.appendChild(node);
+    wrappers.unshift(wrapper);
+  }
+  return wrappers;
+}
+
 function splitNestedBreaksIntoSegments(element, targetLanguage) {
   const containers = [];
   const seenContainers = new Set();
@@ -283,11 +335,18 @@ function splitNestedBreaksIntoSegments(element, targetLanguage) {
     seenContainers.add(container);
     containers.push(container);
   }
-  for (const container of containers.reverse()) {
-    const wrappers = splitPhrasingContainerAtDoubleBreaks(container, targetLanguage);
-    if (wrappers.length) return wrappers;
+  const wrappers = [];
+  const processedContainers = [];
+  for (const container of containers) {
+    if (processedContainers.some((processed) => processed.contains(container))) continue;
+    const containerWrappers = splitPhrasingContainerAtDoubleBreaks(container, targetLanguage);
+    if (!containerWrappers.length) continue;
+    processedContainers.push(container);
+    wrappers.push(...containerWrappers);
   }
-  return [];
+  return wrappers.concat(
+    splitUnsegmentedDirectChildrenIntoSegments(element, processedContainers, targetLanguage)
+  );
 }
 
 function splitNestedNewlineTextIntoSegments(element, targetLanguage) {
