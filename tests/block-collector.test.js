@@ -276,6 +276,28 @@ describe('collectTranslationBlocks', () => {
     expect(collectTranslationBlocks(expanded, {isActiveSource: () => true})).toEqual([]);
   });
 
+  it('splits blank-line paragraphs inside a Goodreads formatted review', () => {
+    document.body.innerHTML = `
+      <div id="review-text">
+        <span class="Formatted">First review paragraph has enough English text to translate.<br><br>Second review paragraph has enough English text to translate as well.<br><br>Third review paragraph remains separate from the others.</span>
+      </div>
+    `;
+
+    const reviewText = document.querySelector('#review-text');
+    const formatted = document.querySelector('.Formatted');
+    const blocks = collectTranslationBlocks(reviewText);
+
+    expect(blocks.map((block) => block.text)).toEqual([
+      'First review paragraph has enough English text to translate.',
+      'Second review paragraph has enough English text to translate as well.',
+      'Third review paragraph remains separate from the others.'
+    ]);
+    expect(blocks.every(({element}) => element.matches('[data-translight-segment="true"]')))
+      .toBe(true);
+    expect(blocks.every(({element}) => element.parentElement === formatted)).toBe(true);
+    expect(formatted.querySelectorAll('[data-translight-segment="true"]')).toHaveLength(3);
+  });
+
   it('collects plain table cells without collecting the table row', () => {
     document.body.innerHTML = `
       <table>

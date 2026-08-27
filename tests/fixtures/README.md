@@ -80,6 +80,27 @@ The repaired case must report `cardHeight.distinctHeights: [49]`,
 scenario reported alternating card heights `[49, 95]` and kept the generated
 translation inside the replaceable card.
 
+## Goodreads review paragraph placement
+
+Fixture: `goodreads-review-paragraphs-repro.html` and
+`goodreads-review-paragraphs-repro.js`
+
+Open this URL in Chrome while the Vite development server is running:
+
+```text
+http://127.0.0.1:5173/tests/fixtures/goodreads-review-paragraphs-repro.html
+```
+
+This fixture models the supplied Goodreads book page at
+`https://www.goodreads.com/book/show/34066798-a-gentleman-in-moscow`. Goodreads
+renders a review as one formatted inline span and uses consecutive `<br>`
+elements for blank-line paragraph boundaries. The collector must split those
+paragraphs and place each translation directly after its own paragraph.
+
+The repaired case must report `segmentCount: 3`, `translationCount: 3`,
+`translationsInsideReview: true`, `interleaved: true`, `testPassed: true`,
+and `restoredAfterStop: true`.
+
 ## Craigslist posting-body translation
 
 Fixture: `craigslist-body-translation-repro.html` and

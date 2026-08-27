@@ -249,13 +249,54 @@ function splitTextNodeAtDoubleLineBreaks(textNode, targetLanguage) {
   return wrappers;
 }
 
+function splitPhrasingContainerAtDoubleBreaks(container, targetLanguage) {
+  const childNodes = Array.from(container.childNodes ?? []);
+  if (!isPhrasingContent(childNodes)) return [];
+
+  const ranges = splitNodesAtDoubleBreaks(childNodes);
+  if (ranges.length < 2) return [];
+
+  const translatableRanges = ranges.filter(({nodes}) => {
+    const text = normalizeSourceText(textFromNodes(nodes, container));
+    return text.length >= 2 && isTranslatableBlock(container, text, targetLanguage);
+  });
+  if (!translatableRanges.length) return [];
+
+  const wrappers = [];
+  for (const {nodes} of [...translatableRanges].reverse()) {
+    const firstNode = nodes[0];
+    if (!firstNode?.parentNode) continue;
+    const wrapper = createSegmentWrapper(container);
+    container.insertBefore(wrapper, firstNode);
+    for (const node of nodes) wrapper.appendChild(node);
+    wrappers.unshift(wrapper);
+  }
+  return wrappers;
+}
+
+function splitNestedBreaksIntoSegments(element, targetLanguage) {
+  const containers = [];
+  const seenContainers = new Set();
+  for (const breakNode of element.querySelectorAll('br')) {
+    const container = breakNode.parentElement;
+    if (!container || seenContainers.has(container)) continue;
+    seenContainers.add(container);
+    containers.push(container);
+  }
+  for (const container of containers.reverse()) {
+    const wrappers = splitPhrasingContainerAtDoubleBreaks(container, targetLanguage);
+    if (wrappers.length) return wrappers;
+  }
+  return [];
+}
+
 function splitNestedNewlineTextIntoSegments(element, targetLanguage) {
   for (const textNode of getTextNodes(element, element)) {
     if (!DOUBLE_LINE_BREAK_PATTERN.test(textNode.nodeValue ?? '')) continue;
     const wrappers = splitTextNodeAtDoubleLineBreaks(textNode, targetLanguage);
     if (wrappers.length) return wrappers;
   }
-  return [];
+  return splitNestedBreaksIntoSegments(element, targetLanguage);
 }
 
 function directContentRanges(element) {

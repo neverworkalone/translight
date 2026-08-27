@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Translight Goodreads review paragraphs reproduction</title>
+    <style>
+      html { scroll-behavior: auto; }
+      body {
+        margin: 0;
+        color: #382110;
+        background: #fff;
+        font: 16px/1.5 Georgia, serif;
+      }
+      #report {
+        position: fixed;
+        z-index: 10;
+        top: 0;
+        right: 0;
+        width: 440px;
+        max-height: 90vh;
+        overflow: auto;
+        box-sizing: border-box;
+        padding: 12px;
+        background: #111827;
+        color: white;
+        font: 12px/1.4 monospace;
+        white-space: pre-wrap;
+      }
+      #review-card {
+        width: min(760px, calc(100% - 48px));
+        margin: 96px auto 120px;
+      }
+      #review-text {
+        padding: 24px;
+        border: 1px solid #d6d0c4;
+        border-radius: 8px;
+        background: #fbfaf8;
+      }
+      .Formatted {
+        display: inline;
+        white-space: normal;
+      }
+    </style>
+  </head>
+  <body>
+    <pre id="report">starting…</pre>
+    <main id="review-card">
+      <div id="review-text">
+        <span class="Formatted">First review paragraph has enough English text to represent the opening of a Goodreads review.<br><br>Second review paragraph stays separate so its translation should follow this paragraph instead of the whole review.<br><br>Third review paragraph also needs its own translation at the paragraph boundary.</span>
+      </div>
+    </main>
+    <script type="module" src="/tests/fixtures/goodreads-review-paragraphs-repro.js"></script>
+  </body>
+</html>
