@@ -42,13 +42,14 @@ const LAYOUT_DISPLAYS = new Set(['flex', 'inline-flex', 'grid', 'inline-grid']);
 const TABLE_CELL_TAGS = new Set(['td', 'th']);
 const MAX_RECOVERY_ATTEMPTS = 1;
 const STABLE_LIST_SIBLING_PLACEMENT = 'stable-list-sibling';
-const GRID_LAYOUT_WRAPPER_PLACEMENT = 'grid-layout-wrapper';
+const GRID_LAYOUT_ANCHORED_PLACEMENT = 'grid-layout-anchored';
 const COLLAPSED_REVIEW_CARD_PLACEMENT = 'collapsed-review-card-sibling';
 const COLLAPSED_REVIEW_TRANSLATION_AFTER_CARD = 'after-card';
 const COLLAPSED_REVIEW_TRANSLATION_BEFORE_CARD = 'before-card';
 const AMAZON_REVIEW_CONTENT_SELECTOR = '[data-hook="reviewRichContentContainer"]';
 const AMAZON_REVIEW_CARD_SELECTOR = '[data-a-card-type="basic"]';
 const DOCUMENT_POSITION_FOLLOWING = 4;
+const gridLayoutReservations = new WeakMap();
 const ATTRIBUTE_NAMES = [
   SOURCE_ATTRIBUTE,
   SOURCE_HASH_ATTRIBUTE,
@@ -184,15 +185,25 @@ function getSourceLayoutWidth(element, computedStyle) {
 function syncSourceLayout(record) {
   const {element, translation, placement} = record ?? {};
   if (!element || !translation?.style) return;
-  let isGridOwnedLayout = placement?.kind === GRID_LAYOUT_WRAPPER_PLACEMENT;
-  if (!isGridOwnedLayout && placement === 'inside' &&
-      ['grid', 'inline-grid'].includes(getDisplay(element.parentElement))) {
-    isGridOwnedLayout = LAYOUT_DISPLAYS.has(getDisplay(element));
+  let isGridOwnedLayout = placement?.kind === GRID_LAYOUT_ANCHORED_PLACEMENT;
+  let sourceIsLayout = null;
+  if (!isGridOwnedLayout && placement === 'inside') {
+    const parentDisplay = getDisplay(element.parentElement);
+    if (['grid', 'inline-grid'].includes(parentDisplay)) {
+      isGridOwnedLayout = LAYOUT_DISPLAYS.has(getDisplay(element));
+    }
+  } else if (!isGridOwnedLayout && placement === 'sibling') {
+    sourceIsLayout = LAYOUT_DISPLAYS.has(getDisplay(element));
+    if (sourceIsLayout) isGridOwnedLayout = LAYOUT_DISPLAYS.has(getDisplay(element.parentElement));
   }
   // A layout control that owns a grid cell must not inherit paragraph
   // spacing from the generated-node stylesheet; that spacing would enlarge
   // the grid row even though the source control itself is unchanged.
   setStyleValue(translation.style, 'margin', isGridOwnedLayout ? '0' : '');
+  if (placement?.kind === GRID_LAYOUT_ANCHORED_PLACEMENT) {
+    syncGridLayoutReservation(record);
+    return;
+  }
   // A sibling translation does not receive the source block's width and
   // centering rules because host styles usually target the source class. A
   // source that is itself a flex/grid container is kept content-sized so its
@@ -205,7 +216,7 @@ function syncSourceLayout(record) {
     return;
   }
 
-  if (LAYOUT_DISPLAYS.has(getDisplay(element))) {
+  if (sourceIsLayout ?? LAYOUT_DISPLAYS.has(getDisplay(element))) {
     clearSourceLayout(translation);
     return;
   }
@@ -312,30 +323,40 @@ function getStableListItem(element) {
   return containingListItem;
 }
 
-function shouldWrapGridLayoutSource(element) {
+function shouldAnchorGridLayoutSource(element) {
   if (!LAYOUT_DISPLAYS.has(getDisplay(element))) return false;
   return ['grid', 'inline-grid'].includes(getDisplay(element.parentElement));
 }
 
 function placeGridLayoutTranslation(element, translation) {
-  const wrapper = element.ownerDocument.createElement('span');
-  wrapper.setAttribute('data-translight-layout-wrapper', GENERATED_VALUE);
-  // Keep the source as the host's direct grid item. The generated label gets
-  // an explicit, separate grid item on the next available row so it cannot
-  // paint over a neighboring control in a fixed grid track. Reparenting the
-  // source would also break host selectors and explicit grid placement.
-  wrapper.style.setProperty('display', 'grid', 'important');
-  wrapper.style.setProperty('align-items', 'center', 'important');
-  wrapper.style.setProperty('grid-column', '1 / -1', 'important');
-  wrapper.style.setProperty('grid-row', 'auto', 'important');
-  wrapper.style.setProperty('width', 'max-content', 'important');
-  wrapper.style.setProperty('min-width', '0', 'important');
-  wrapper.style.setProperty('justify-self', 'start', 'important');
-  element.parentNode.insertBefore(wrapper, element.nextSibling);
-  wrapper.appendChild(translation);
+  const view = element.ownerDocument?.defaultView;
+  const sourcePosition = view?.getComputedStyle?.(element)?.position;
+  const inlinePosition = {
+    value: element.style.getPropertyValue('position'),
+    priority: element.style.getPropertyPriority('position')
+  };
+  const sourcePositionChanged = !sourcePosition || sourcePosition === 'static';
+  if (sourcePositionChanged) element.style.setProperty('position', 'relative', 'important');
+
+  // Keep the source as the host's direct grid item. The generated label is an
+  // absolutely positioned child, so it can be painted below the source
+  // without becoming another grid item and moving the host's following
+  // controls. Reparenting the source would break host selectors and explicit
+  // grid placement.
+  translation.style.setProperty('position', 'absolute', 'important');
+  translation.style.setProperty('top', '100%', 'important');
+  translation.style.setProperty('left', '0', 'important');
+  translation.style.setProperty('width', 'max-content', 'important');
+  translation.style.setProperty('max-width', 'none', 'important');
+  translation.style.setProperty('white-space', 'nowrap', 'important');
+  translation.style.setProperty('margin', '0', 'important');
+  element.appendChild(translation);
   return {
-    kind: GRID_LAYOUT_WRAPPER_PLACEMENT,
-    anchor: wrapper
+    kind: GRID_LAYOUT_ANCHORED_PLACEMENT,
+    anchor: element,
+    reservationParent: element.parentElement,
+    sourcePositionChanged,
+    inlinePosition
   };
 }
 
@@ -431,7 +452,7 @@ function insertAtSafeLocation(element, translation, mixedContent = false, source
     return placeMixedContentTranslation(element, translation, sourceTextNodes);
   }
 
-  if (shouldWrapGridLayoutSource(element)) {
+  if (shouldAnchorGridLayoutSource(element)) {
     return placeGridLayoutTranslation(element, translation);
   }
 
@@ -472,12 +493,9 @@ function restorePlacement(record) {
     }
     return;
   }
-  if (placement?.kind === GRID_LAYOUT_WRAPPER_PLACEMENT) {
-    const wrapper = placement.anchor;
-    if (element?.parentNode && wrapper?.parentNode !== element.parentNode) {
-      element.parentNode.insertBefore(wrapper, element.nextSibling);
-    }
-    if (wrapper?.parentNode && translation.parentNode !== wrapper) wrapper.appendChild(translation);
+  if (placement?.kind === GRID_LAYOUT_ANCHORED_PLACEMENT) {
+    const anchor = placement.anchor ?? element;
+    if (anchor?.parentNode && translation.parentNode !== anchor) anchor.appendChild(translation);
     return;
   }
   if (!element?.parentNode) return;
@@ -517,15 +535,64 @@ function placeTranslationAfterSource(record) {
   restorePlacement(record);
 }
 
-function unwrapGridLayoutPlacement(record) {
-  if (record?.placement?.kind !== GRID_LAYOUT_WRAPPER_PLACEMENT) return;
+function updateGridLayoutReservation(parent, entry) {
+  if (!parent || !entry) return;
+  const reservedHeight = Math.max(...entry.heights.values(), 0);
+  if (reservedHeight > 0) {
+    parent.style.setProperty(
+      'margin-bottom',
+      `${entry.baseMarginBottom + Math.ceil(reservedHeight)}px`,
+      'important'
+    );
+    return;
+  }
+  const {value, priority} = entry.inlineMarginBottom;
+  if (value) parent.style.setProperty('margin-bottom', value, priority);
+  else parent.style.removeProperty('margin-bottom');
+  gridLayoutReservations.delete(parent);
+}
+
+function syncGridLayoutReservation(record) {
+  if (record?.placement?.kind !== GRID_LAYOUT_ANCHORED_PLACEMENT) return;
   const {translation} = record;
-  const wrapper = record.placement.anchor;
-  if (!wrapper?.parentNode) return;
-  if (translation?.parentNode === wrapper) wrapper.removeChild(translation);
-  // The wrapper is renderer-owned, but do not remove host content if a page
-  // reconciliation inserted anything into it before cleanup.
-  if (!wrapper.firstChild) wrapper.parentNode.removeChild(wrapper);
+  const parent = record.placement.reservationParent;
+  if (!parent) return;
+  let entry = gridLayoutReservations.get(parent);
+  if (!translation?.isConnected || translation.parentNode !== record.placement.anchor) {
+    if (!entry) return;
+    entry.heights.delete(record);
+    updateGridLayoutReservation(parent, entry);
+    return;
+  }
+  if (!entry) {
+    const view = parent.ownerDocument?.defaultView;
+    const computedStyle = view?.getComputedStyle?.(parent);
+    entry = {
+      heights: new Map(),
+      baseMarginBottom: Number.parseFloat(getStyleValue(computedStyle, 'margin-bottom')) || 0,
+      inlineMarginBottom: {
+        value: parent.style.getPropertyValue('margin-bottom'),
+        priority: parent.style.getPropertyPriority('margin-bottom')
+      }
+    };
+    gridLayoutReservations.set(parent, entry);
+  }
+  const rect = translation.getBoundingClientRect?.();
+  const height = Number(rect?.height) || Number(translation.offsetHeight) || 0;
+  if (height > 0) entry.heights.set(record, height);
+  else entry.heights.delete(record);
+  updateGridLayoutReservation(parent, entry);
+}
+
+function cleanupGridLayoutAnchor(record) {
+  if (record?.placement?.kind !== GRID_LAYOUT_ANCHORED_PLACEMENT) return;
+  const {element, translation} = record;
+  translation?.parentNode?.removeChild(translation);
+  syncGridLayoutReservation(record);
+  if (!record.placement.sourcePositionChanged || !element?.style) return;
+  const {value, priority} = record.placement.inlinePosition ?? {};
+  if (value) element.style.setProperty('position', value, priority);
+  else element.style.removeProperty('position');
 }
 
 function getOriginalAttributes(element) {
@@ -956,10 +1023,11 @@ export class TranslationRenderer {
 
   observeSourceLayout(record) {
     if (!this.layoutObserver || !record?.element) return;
-    const nextTargets = record.placement === 'sibling' &&
-      !LAYOUT_DISPLAYS.has(getDisplay(record.element))
-      ? [record.element, record.element.parentElement].filter(Boolean)
-      : [];
+    const nextTargets = record.placement?.kind === GRID_LAYOUT_ANCHORED_PLACEMENT
+      ? [record.element, record.placement.reservationParent].filter(Boolean)
+      : record.placement === 'sibling' && !LAYOUT_DISPLAYS.has(getDisplay(record.element))
+        ? [record.element, record.element.parentElement].filter(Boolean)
+        : [];
     const previousTargets = record.layoutTargets ?? [];
     for (const target of previousTargets) {
       if (!nextTargets.includes(target)) this.unobserveLayoutTarget(target, record);
@@ -1131,11 +1199,8 @@ export class TranslationRenderer {
   placeTranslationBeforeSource(record) {
     const {element, translation} = record;
     if (!element?.parentNode || !translation) return;
-    if (record.placement?.kind === GRID_LAYOUT_WRAPPER_PLACEMENT) {
-      const wrapper = record.placement.anchor;
-      if (!wrapper) return;
-      element.parentNode.insertBefore(wrapper, element);
-      if (translation.parentNode !== wrapper) wrapper.appendChild(translation);
+    if (record.placement?.kind === GRID_LAYOUT_ANCHORED_PLACEMENT) {
+      if (translation.parentNode !== element) element.appendChild(translation);
       return;
     }
     if (record.placement === 'sibling') {
@@ -1168,7 +1233,7 @@ export class TranslationRenderer {
       element.setAttribute(HIDDEN_ATTRIBUTE, GENERATED_VALUE);
       const hasExternalPlacement = record.placement === 'sibling' ||
         record.placement?.kind === COLLAPSED_REVIEW_CARD_PLACEMENT ||
-        record.placement?.kind === GRID_LAYOUT_WRAPPER_PLACEMENT;
+        record.placement?.kind === GRID_LAYOUT_ANCHORED_PLACEMENT;
       if (!hasExternalPlacement) {
         element.setAttribute(
           HIDDEN_PLACEMENT_ATTRIBUTE,
@@ -1271,6 +1336,7 @@ export class TranslationRenderer {
       setTranslationText(translation, record.translatedText);
       placeTranslationAfterSource(record);
       this.clearReplacementAttributes(record);
+      syncGridLayoutReservation(record);
       return;
     }
 
@@ -1282,6 +1348,7 @@ export class TranslationRenderer {
       else translation.setAttribute(STYLE_ATTRIBUTE, this.presentation.displayStyle);
       setTranslationText(translation, record.translatedText);
       this.applyFallbackPresentation(record, mode);
+      syncGridLayoutReservation(record);
       return;
     }
     if (mode === TRANSLATION_MODES.TRANSLATION_ORIGINAL) {
@@ -1296,6 +1363,7 @@ export class TranslationRenderer {
       translation.parentNode?.removeChild(translation);
     }
     this.applyReplacementAttributes(record, {styled: styledReplacement});
+    syncGridLayoutReservation(record);
   }
 
   hasRecord(element) {
@@ -1434,6 +1502,7 @@ export class TranslationRenderer {
       const sourceChanged = Boolean(sourceHash && sourceHash !== existing.sourceHash) || Boolean(pendingHash);
       const structureChanged = existing.mixedContent !== nextMixedContent;
       if (existing.mixedContent !== nextMixedContent) {
+        cleanupGridLayoutAnchor(existing);
         existing.translation.parentNode?.removeChild(existing.translation);
         existing.mixedContent = nextMixedContent;
         existing.placement = insertAtSafeLocation(element, existing.translation, nextMixedContent);
@@ -1513,7 +1582,7 @@ export class TranslationRenderer {
       this.restoreSourceText(record);
       for (const name of ATTRIBUTE_NAMES) restoreAttribute(element, name, record.originalAttributes[name]);
     }
-    unwrapGridLayoutPlacement(record);
+    cleanupGridLayoutAnchor(record);
     this.unwrapSegment(record);
     this.recordsByElement.delete(element);
     this.records.delete(record.sourceId);
@@ -1529,7 +1598,7 @@ export class TranslationRenderer {
       if (record.element?.getAttribute(SESSION_ATTRIBUTE) === this.sessionId) {
         for (const name of ATTRIBUTE_NAMES) restoreAttribute(record.element, name, record.originalAttributes[name]);
       }
-      unwrapGridLayoutPlacement(record);
+      cleanupGridLayoutAnchor(record);
       this.recordsByElement.delete(record.element);
       this.records.delete(sourceId);
     }
@@ -1540,10 +1609,10 @@ export class TranslationRenderer {
       const {element, translation, originalAttributes} = record;
       this.unobserveSourceLayout(record);
       translation?.parentNode?.removeChild(translation);
+      cleanupGridLayoutAnchor(record);
       if (element?.getAttribute(SESSION_ATTRIBUTE) !== this.sessionId) continue;
       this.restoreSourceText(record);
       for (const name of ATTRIBUTE_NAMES) restoreAttribute(element, name, originalAttributes[name]);
-      unwrapGridLayoutPlacement(record);
       this.unwrapSegment(record);
       this.recordsByElement.delete(element);
     }

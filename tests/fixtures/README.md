@@ -265,8 +265,9 @@ panel keeps the legacy child-placement state from the attached snapshot so the
 vertical failure remains visible; the lower panel runs the current renderer on
 the same layout. The repaired case must report a vertical legacy probe, stable
 source rectangles, horizontal non-overlapping translations,
-`translationCount: 11`, `ownedWrapperCountAfterStop: 0`, `restoredAfterStop: true`,
-and `testPassed: true`.
+`translationCount: 11`, a stable live/tabs grid relationship, and no overlap
+between the anchored label and the following article content,
+`restoredAfterStop: true`, and `testPassed: true`.
 
 ## YouTube long description paragraph placement
 

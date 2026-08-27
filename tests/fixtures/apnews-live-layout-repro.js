@@ -49,10 +49,11 @@ function isVertical(value) {
 
 function overlaps(first, second) {
   if (!first || !second) return false;
-  return first.x < second.x + second.width &&
-    first.x + first.width > second.x &&
-    first.y < second.y + second.height &&
-    first.y + first.height > second.y;
+  const epsilon = 0.5;
+  return first.x < second.x + second.width - epsilon &&
+    first.x + first.width > second.x + epsilon &&
+    first.y < second.y + second.height - epsilon &&
+    first.y + first.height > second.y + epsilon;
 }
 
 function translationDoesNotOverlapNextControl(id, translationRect) {
@@ -100,9 +101,49 @@ function snapshot() {
   return Object.fromEntries(sourceById.entries().map(([id, {element}]) => [id, rect(element)]));
 }
 
+function controlLayoutSnapshot() {
+  const controls = {
+    live: document.querySelector('#live-source'),
+    tabs: document.querySelector('.current-panel .LiveBlogPage-tabs'),
+    all: document.querySelector('#all-source'),
+    breaking: document.querySelector('#breaking-source')
+  };
+  return Object.fromEntries(Object.entries(controls).map(([id, element]) => [id, rect(element)]));
+}
+
+function nearlyEqual(first, second, tolerance = 1) {
+  return Number.isFinite(first) && Number.isFinite(second) && Math.abs(first - second) <= tolerance;
+}
+
+function sameRelativePosition(before, after, first, second) {
+  const beforeFirst = before[first];
+  const beforeSecond = before[second];
+  const afterFirst = after[first];
+  const afterSecond = after[second];
+  if (!beforeFirst || !beforeSecond || !afterFirst || !afterSecond) return false;
+  return nearlyEqual(
+    beforeSecond.x - beforeFirst.x,
+    afterSecond.x - afterFirst.x
+  ) && nearlyEqual(
+    beforeSecond.y - beforeFirst.y,
+    afterSecond.y - afterFirst.y
+  );
+}
+
+function controlsKeepOriginalGridPlacement(before, after) {
+  if (!sameRelativePosition(before, after, 'live', 'tabs')) return false;
+  if (!['all', 'breaking'].every((id) =>
+    nearlyEqual(before[id].y - before.tabs.y, after[id].y - after.tabs.y)
+  )) return false;
+  return after.live.x < after.tabs.x &&
+    after.tabs.x < after.breaking.x &&
+    nearlyEqual(after.all.y, after.breaking.y);
+}
+
 async function run() {
   const calls = [];
   const before = snapshot();
+  const beforeControlLayout = controlLayoutSnapshot();
   const legacy = legacyProbe();
   const session = new PageSession({
     generation: 9702,
@@ -132,16 +173,14 @@ async function run() {
     const currentSourceText = id === 'live-source'
       ? element.querySelector('.live-text')?.textContent.trim()
       : element.textContent.trim();
-    const isGridWrapper = record?.placement?.kind === 'grid-layout-wrapper';
-    const wrapper = isGridWrapper ? translation?.parentElement : null;
+    const isGridPlacement = record?.placement?.kind === 'grid-layout-anchored';
     return [id, {
       originalTextUnchanged: currentSourceText === original,
       translationParentIsSibling: translation?.parentElement === element.parentElement,
       placement: record?.placement?.kind ?? record?.placement ?? null,
       mixedContent: record?.mixedContent ?? null,
-      placementIsSafe: isGridWrapper
-        ? wrapper?.parentElement === element.parentElement &&
-          wrapper?.previousElementSibling === element
+      placementIsSafe: isGridPlacement
+        ? translation?.parentElement === element
         : translation?.parentElement === element.parentElement,
       beforeRect: before[id],
       sourceRect: rect(element),
@@ -157,6 +196,17 @@ async function run() {
       } : undefined
     }];
   }));
+  const afterControlLayout = controlLayoutSnapshot();
+  const nextContentRect = rect(document.querySelector('.current-panel .LiveBlogPage-lede'));
+  const liveTranslationRect = sourceReports['live-source']?.translationRect;
+  const liveTranslationDoesNotOverlapNextContent = !overlaps(
+    liveTranslationRect,
+    nextContentRect
+  );
+  const controlsKeepOriginalPlacement = controlsKeepOriginalGridPlacement(
+    beforeControlLayout,
+    afterControlLayout
+  );
   const currentPassed = calls.length === expectedTexts.length &&
     calls.every((text) => expectedTexts.includes(text)) &&
     generated.length === expectedTexts.length &&
@@ -164,8 +214,11 @@ async function run() {
       source.originalTextUnchanged && source.placementIsSafe &&
       source.sourceRectStable && source.notVertical &&
       source.translationDoesNotOverlapNextControl &&
-      (!compactLayoutIds.has(id) || !source.translationWidthStyle)
-    );
+      (!compactLayoutIds.has(id) ||
+        (id === 'live-source'
+          ? source.translationWidthStyle === 'max-content'
+          : !source.translationWidthStyle))
+    ) && controlsKeepOriginalPlacement && liveTranslationDoesNotOverlapNextContent;
 
   const result = {
     fixture: 'apnews-live-layout-repro',
@@ -179,18 +232,26 @@ async function run() {
     legacyProbe: legacy,
     providerCalls: calls,
     translationCount: generated.length,
+    controlLayout: {
+      before: beforeControlLayout,
+      after: afterControlLayout,
+      relationStable: controlsKeepOriginalPlacement
+    },
+    contentLayout: {
+      nextContent: nextContentRect,
+      liveTranslation: liveTranslationRect,
+      translationDoesNotOverlapNextContent: liveTranslationDoesNotOverlapNextContent
+    },
     sourceReports,
     testPassed: currentPassed && Object.values(legacy).some(({vertical}) => vertical)
   };
 
   session.stop({notify: false});
-  result.ownedWrapperCountAfterStop = document.querySelectorAll('[data-translight-layout-wrapper]').length;
   result.restoredAfterStop = generated.every((translation) => !translation.isConnected) &&
     Array.from(sourceById.values()).every(({element, original}) =>
       element.textContent.trim() === original
     );
-  result.testPassed = result.testPassed && result.restoredAfterStop &&
-    result.ownedWrapperCountAfterStop === 0;
+  result.testPassed = result.testPassed && result.restoredAfterStop;
   report.textContent = JSON.stringify(result, null, 2);
 }
 
