@@ -67,6 +67,25 @@ function getDisplay(element) {
   return view?.getComputedStyle?.(element)?.display || element?.style?.display || '';
 }
 
+const SOURCE_TYPOGRAPHY_PROPERTIES = ['font-size', 'line-height'];
+
+function getComputedStyleValue(element, property) {
+  const view = element?.ownerDocument?.defaultView;
+  const computedStyle = view?.getComputedStyle?.(element);
+  if (!computedStyle) return '';
+  return computedStyle.getPropertyValue?.(property) || computedStyle[property] || '';
+}
+
+function syncSourceTypography(record) {
+  const {element, translation} = record;
+  if (!element || !translation?.style) return;
+  for (const property of SOURCE_TYPOGRAPHY_PROPERTIES) {
+    const value = getComputedStyleValue(element, property);
+    if (value) translation.style.setProperty(property, value, 'important');
+    else translation.style.removeProperty(property);
+  }
+}
+
 function getDirectNestedList(element) {
   return Array.from(element.children ?? []).find((child) => {
     const tagName = child.tagName?.toLowerCase();
@@ -775,6 +794,7 @@ export class TranslationRenderer {
     const {element, translation} = record;
     if (!element || !translation) return;
     const mode = this.presentation.translationMode;
+    syncSourceTypography(record);
     this.clearFallbackPresentation(record);
     translation.setAttribute(MODE_ATTRIBUTE, mode);
     if (mode === TRANSLATION_MODES.ORIGINAL_TRANSLATION) {

@@ -423,6 +423,32 @@ describe('TranslationRenderer', () => {
     );
   });
 
+  it('matches the source block typography when its parent uses a smaller base size', () => {
+    document.body.innerHTML = `
+      <section id="article-body" style="font-size:10px;line-height:12.31px">
+        <div class="content-block-regular">
+          <p id="source" style="font-size:18px;line-height:28.8px">Article paragraph</p>
+        </div>
+      </section>
+    `;
+    const source = document.querySelector('#source');
+    const sourceStyle = window.getComputedStyle(source);
+    const renderer = new TranslationRenderer({document, sessionId: 'source-typography-session'});
+
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'source-typography-source',
+      translatedText: '번역된 문단'
+    });
+
+    expect(sourceStyle.fontSize).toBe('18px');
+    expect(sourceStyle.lineHeight).toBe('28.8px');
+    expect(translation.style.getPropertyValue('font-size')).toBe(sourceStyle.fontSize);
+    expect(translation.style.getPropertyValue('line-height')).toBe(sourceStyle.lineHeight);
+
+    renderer.removeAll();
+  });
+
   it('replaces the source text for replacement modes and restores it on cleanup', () => {
     const source = document.querySelector('#source');
     const renderer = new TranslationRenderer({

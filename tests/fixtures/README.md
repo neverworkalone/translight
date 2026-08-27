@@ -81,6 +81,29 @@ The repaired case must report `sourceSegmentCount: 3`,
 `bodyTranslationCount: 3`, `rootOverflowAnchor: "auto"`, and
 `testPassed: true`.
 
+## XDA article translation font size
+
+Fixture: `xda-translation-font-size-repro.html` and
+`xda-translation-font-size-repro.js`
+
+Open this URL in Chrome while the Vite development server is running:
+
+```text
+http://127.0.0.1:5173/tests/fixtures/xda-translation-font-size-repro.html
+```
+
+This fixture models the supplied XDA article at
+`https://www.xda-developers.com/routers-channel-width-setting-sabotaging-gaming-fix-takes-seconds/`.
+The article container and its regular content wrapper use a `10px` base size,
+while the article paragraphs use `18px` text and `28.8px` line height. The
+translation is inserted as a sibling of each paragraph, so it must copy the
+source paragraph's computed typography instead of inheriting the smaller
+wrapper values.
+
+The repaired case must report equal `sourceFontSize` and `translationFontSize`,
+equal `sourceLineHeight` and `translationLineHeight`,
+`bodyTranslationCount: 2`, and `testPassed: true`.
+
 When adding another browser regression, use a descriptive `<bug-name>-repro`
 fixture name and document its reproducible URL and pass/fail signal in this
 file.
