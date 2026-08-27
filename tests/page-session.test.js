@@ -156,6 +156,76 @@ describe('PageSession', () => {
     expect(document.querySelector('translight-translation')).toBeNull();
   });
 
+  it('keeps Amazon fallback review translations before a collapsed card in paragraph order', async () => {
+    document.head.innerHTML = `
+      <style>
+        [data-a-card-type="basic"] { overflow: hidden; }
+      </style>
+    `;
+    document.body.innerHTML = `
+      <div data-hook="reviewContainer">
+        <div data-hook="reviewText">
+          <div data-a-card-type="basic" class="peek-expand">
+            <div class="a-cardui-body">
+              <div class="a-reactive-container" style="height:80px">
+                <div>
+                  <div data-hook="reviewRichContentContainer" lang="en-US">
+                    <p id="review-body-first"><span>First review paragraph.</span><span>More first paragraph.</span></p>
+                    <p id="review-body-second"><span>Second review paragraph.</span><span>More second paragraph.</span></p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    const card = document.querySelector('[data-a-card-type="basic"]');
+    const reviewBodies = Array.from(document.querySelectorAll('[data-hook="reviewRichContentContainer"] p'));
+    const originalReviews = reviewBodies.map((reviewBody) => reviewBody.textContent);
+    const translatedReviews = ['가', '나'];
+    const calls = [];
+    const session = new PageSession({
+      generation: 605,
+      document,
+      settings: {
+        translatePageTitle: false,
+        translationMode: TRANSLATION_MODES.TRANSLATION_ORIGINAL
+      },
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          if (text === originalReviews[0]) await wait(20);
+          return text === originalReviews[0] ? translatedReviews[0] : translatedReviews[1];
+        }
+      })
+    });
+
+    try {
+      await session.start();
+
+      let translations = Array.from(document.querySelectorAll('translight-translation'));
+      expect(calls).toEqual(originalReviews);
+      expect(translations.map((translation) => translation.textContent)).toEqual(translatedReviews);
+      expect(translations.every((translation) => translation.parentElement === card.parentElement)).toBe(true);
+      expect(translations[0].nextElementSibling).toBe(translations[1]);
+      expect(translations[1].nextElementSibling).toBe(card);
+      expect(reviewBodies.map((reviewBody) => reviewBody.textContent)).toEqual(originalReviews);
+
+      session.applySettings({translationMode: TRANSLATION_MODES.ORIGINAL_TRANSLATION});
+      translations = Array.from(document.querySelectorAll('translight-translation'));
+      expect(translations.map((translation) => translation.textContent)).toEqual(translatedReviews);
+      expect(translations[0].previousElementSibling).toBe(card);
+      expect(translations[1].previousElementSibling).toBe(translations[0]);
+    } finally {
+      session.stop({notify: false});
+      document.head.innerHTML = '';
+    }
+
+    expect(reviewBodies.map((reviewBody) => reviewBody.textContent)).toEqual(originalReviews);
+    expect(document.querySelector('translight-translation')).toBeNull();
+  });
+
   it('interleaves translations for blank-line paragraphs in a YouTube description', async () => {
     document.body.innerHTML = `
       <div id="description-inline-expander">
