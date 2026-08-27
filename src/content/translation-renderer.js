@@ -43,6 +43,7 @@ const TABLE_CELL_TAGS = new Set(['td', 'th']);
 const MAX_RECOVERY_ATTEMPTS = 1;
 const STABLE_LIST_SIBLING_PLACEMENT = 'stable-list-sibling';
 const GRID_LAYOUT_ANCHORED_PLACEMENT = 'grid-layout-anchored';
+const GRID_LAYOUT_ANCHORED_HIDDEN_PLACEMENT = 'anchored';
 const COLLAPSED_REVIEW_CARD_PLACEMENT = 'collapsed-review-card-sibling';
 const COLLAPSED_REVIEW_TRANSLATION_AFTER_CARD = 'after-card';
 const COLLAPSED_REVIEW_TRANSLATION_BEFORE_CARD = 'before-card';
@@ -182,7 +183,10 @@ function getSourceLayoutWidth(element, computedStyle) {
   return `${width + horizontalExtras}px`;
 }
 
-function syncSourceLayout(record) {
+function syncSourceLayout(record, {
+  deferGridReservation = false,
+  reservationParents
+} = {}) {
   const {element, translation, placement} = record ?? {};
   if (!element || !translation?.style) return;
   let isGridOwnedLayout = placement?.kind === GRID_LAYOUT_ANCHORED_PLACEMENT;
@@ -201,7 +205,8 @@ function syncSourceLayout(record) {
   // the grid row even though the source control itself is unchanged.
   setStyleValue(translation.style, 'margin', isGridOwnedLayout ? '0' : '');
   if (placement?.kind === GRID_LAYOUT_ANCHORED_PLACEMENT) {
-    syncGridLayoutReservation(record);
+    const parent = syncGridLayoutReservation(record, {defer: deferGridReservation});
+    if (deferGridReservation && parent) reservationParents?.add(parent);
     return;
   }
   // A sibling translation does not receive the source block's width and
@@ -323,9 +328,116 @@ function getStableListItem(element) {
   return containingListItem;
 }
 
-function shouldAnchorGridLayoutSource(element) {
+function splitCssTrackList(value) {
+  const source = String(value ?? '').trim();
+  if (!source || source === 'none') return [];
+  const tokens = [];
+  let depth = 0;
+  let start = 0;
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (character === '(') depth += 1;
+    else if (character === ')') depth = Math.max(0, depth - 1);
+    else if (/\s/u.test(character) && depth === 0) {
+      if (index > start) tokens.push(source.slice(start, index));
+      start = index + 1;
+    }
+  }
+  if (start < source.length) tokens.push(source.slice(start));
+  return tokens;
+}
+
+function countGridTracks(value) {
+  const normalized = String(value ?? '').trim();
+  if (!normalized || normalized === 'none') return 1;
+  const tokens = splitCssTrackList(normalized);
+  if (!tokens.length) return null;
+  let count = 0;
+  for (const token of tokens) {
+    const repeat = token.match(/^repeat\(\s*(\d+)\s*,/iu);
+    if (repeat) {
+      count += Number(repeat[1]);
+      continue;
+    }
+    if (/^repeat\(/iu.test(token)) return null;
+    count += 1;
+  }
+  return count || null;
+}
+
+function gridLineNumber(value) {
+  const normalized = String(value ?? '').trim();
+  if (!normalized || normalized === 'auto') return null;
+  const match = normalized.match(/^-?\d+/u);
+  return match ? Number(match[0]) : null;
+}
+
+function gridChildIsInFirstRow(element) {
+  const view = element?.ownerDocument?.defaultView;
+  const style = view?.getComputedStyle?.(element);
+  if (!style) return true;
+  const rowStart = getStyleValue(style, 'grid-row-start');
+  const rowEnd = getStyleValue(style, 'grid-row-end');
+  for (const [property, value] of [
+    ['grid-row-start', rowStart],
+    ['grid-row-end', rowEnd]
+  ]) {
+    const normalized = String(value ?? '').trim();
+    if (!normalized || normalized === 'auto') continue;
+    const span = normalized.match(/^span\s+(\d+)/iu);
+    if (span) {
+      if (Number(span[1]) > 1) return false;
+      continue;
+    }
+    const line = gridLineNumber(normalized);
+    if (line == null) return false;
+    if (property === 'grid-row-start' && line > 1) return false;
+    if (property === 'grid-row-end' && line > 2) return false;
+  }
+  return true;
+}
+
+function visualGridRowCount(parent, children) {
+  const rects = children.map((child) => child.getBoundingClientRect?.());
+  if (!rects.length || rects.some((rect) => {
+    const width = Number(rect?.width);
+    const height = Number(rect?.height);
+    return !Number.isFinite(rect?.top) || (!Number.isFinite(width) || !Number.isFinite(height)) ||
+      (width <= 0 && height <= 0);
+  })) return null;
+  const firstTop = Number(rects[0].top);
+  return rects.every((rect) => Math.abs(Number(rect.top) - firstTop) <= 1) ? 1 : 2;
+}
+
+function gridHasSingleRow(parent) {
+  const children = Array.from(parent?.children ?? [])
+    .filter((child) => !child.matches?.(GENERATED_SELECTOR));
+  const view = parent?.ownerDocument?.defaultView;
+  const style = view?.getComputedStyle?.(parent);
+  const rowCount = countGridTracks(getStyleValue(style, 'grid-template-rows'));
+  if (rowCount != null && rowCount > 1) return false;
+  if (children.some((child) => !gridChildIsInFirstRow(child))) return false;
+
+  const visualRows = visualGridRowCount(parent, children);
+  if (visualRows != null) return visualRows === 1;
+  if (children.length <= 1) return true;
+
+  const columnCount = countGridTracks(getStyleValue(style, 'grid-template-columns'));
+  if (columnCount == null) return false;
+  const autoFlow = getStyleValue(style, 'grid-auto-flow');
+  if (/\bcolumn\b/iu.test(autoFlow)) return true;
+  return children.length <= columnCount;
+}
+
+function isGridLayoutSource(element) {
   if (!LAYOUT_DISPLAYS.has(getDisplay(element))) return false;
   return ['grid', 'inline-grid'].includes(getDisplay(element.parentElement));
+}
+
+function shouldAnchorGridLayoutSource(element) {
+  if (!isGridLayoutSource(element)) return false;
+  const parent = element.parentElement;
+  return gridHasSingleRow(parent) && !hasHiddenOverflowBetween(element, parent);
 }
 
 function placeGridLayoutTranslation(element, translation) {
@@ -373,6 +485,14 @@ function hasHiddenOverflow(element) {
   if (!style) return false;
   return [style.overflow, style.overflowX, style.overflowY]
     .some((value) => value === 'hidden' || value === 'clip');
+}
+
+function hasHiddenOverflowBetween(element, stopAt) {
+  for (let current = element; current; current = current.parentElement) {
+    if (hasHiddenOverflow(current)) return true;
+    if (current === stopAt) break;
+  }
+  return false;
 }
 
 const collapsedReviewTranslationSources = new WeakMap();
@@ -537,32 +657,40 @@ function placeTranslationAfterSource(record) {
 
 function updateGridLayoutReservation(parent, entry) {
   if (!parent || !entry) return;
-  const reservedHeight = Math.max(...entry.heights.values(), 0);
+  if (!entry.dirty) return;
+  entry.dirty = false;
+  let reservedHeight = 0;
+  for (const height of entry.heights.values()) reservedHeight = Math.max(reservedHeight, height);
   if (reservedHeight > 0) {
-    parent.style.setProperty(
-      'margin-bottom',
-      `${entry.baseMarginBottom + Math.ceil(reservedHeight)}px`,
-      'important'
-    );
+    const value = `${entry.baseMarginBottom + Math.ceil(reservedHeight)}px`;
+    if (parent.style.getPropertyValue('margin-bottom') !== value ||
+        parent.style.getPropertyPriority('margin-bottom') !== 'important') {
+      parent.style.setProperty('margin-bottom', value, 'important');
+    }
     return;
   }
   const {value, priority} = entry.inlineMarginBottom;
-  if (value) parent.style.setProperty('margin-bottom', value, priority);
-  else parent.style.removeProperty('margin-bottom');
+  if (value) {
+    if (parent.style.getPropertyValue('margin-bottom') !== value ||
+        parent.style.getPropertyPriority('margin-bottom') !== priority) {
+      parent.style.setProperty('margin-bottom', value, priority);
+    }
+  } else if (parent.style.getPropertyValue('margin-bottom')) {
+    parent.style.removeProperty('margin-bottom');
+  }
   gridLayoutReservations.delete(parent);
 }
 
-function syncGridLayoutReservation(record) {
-  if (record?.placement?.kind !== GRID_LAYOUT_ANCHORED_PLACEMENT) return;
+function syncGridLayoutReservation(record, {defer = false} = {}) {
+  if (record?.placement?.kind !== GRID_LAYOUT_ANCHORED_PLACEMENT) return null;
   const {translation} = record;
   const parent = record.placement.reservationParent;
-  if (!parent) return;
+  if (!parent) return null;
   let entry = gridLayoutReservations.get(parent);
   if (!translation?.isConnected || translation.parentNode !== record.placement.anchor) {
-    if (!entry) return;
-    entry.heights.delete(record);
-    updateGridLayoutReservation(parent, entry);
-    return;
+    if (entry?.heights.delete(record)) entry.dirty = true;
+    if (!defer) updateGridLayoutReservation(parent, entry);
+    return parent;
   }
   if (!entry) {
     const view = parent.ownerDocument?.defaultView;
@@ -573,15 +701,29 @@ function syncGridLayoutReservation(record) {
       inlineMarginBottom: {
         value: parent.style.getPropertyValue('margin-bottom'),
         priority: parent.style.getPropertyPriority('margin-bottom')
-      }
+      },
+      dirty: true
     };
     gridLayoutReservations.set(parent, entry);
   }
   const rect = translation.getBoundingClientRect?.();
   const height = Number(rect?.height) || Number(translation.offsetHeight) || 0;
-  if (height > 0) entry.heights.set(record, height);
-  else entry.heights.delete(record);
-  updateGridLayoutReservation(parent, entry);
+  if (height > 0) {
+    if (entry.heights.get(record) !== height) {
+      entry.heights.set(record, height);
+      entry.dirty = true;
+    }
+  } else if (entry.heights.delete(record)) {
+    entry.dirty = true;
+  }
+  if (!defer) updateGridLayoutReservation(parent, entry);
+  return parent;
+}
+
+function flushGridLayoutReservations(parents) {
+  for (const parent of parents ?? []) {
+    updateGridLayoutReservation(parent, gridLayoutReservations.get(parent));
+  }
 }
 
 function cleanupGridLayoutAnchor(record) {
@@ -589,10 +731,39 @@ function cleanupGridLayoutAnchor(record) {
   const {element, translation} = record;
   translation?.parentNode?.removeChild(translation);
   syncGridLayoutReservation(record);
+  restoreAnchoredFallbackDisplay(record);
   if (!record.placement.sourcePositionChanged || !element?.style) return;
   const {value, priority} = record.placement.inlinePosition ?? {};
   if (value) element.style.setProperty('position', value, priority);
   else element.style.removeProperty('position');
+}
+
+function preserveAnchoredFallbackDisplay(record) {
+  const placement = record?.placement;
+  const element = record?.element;
+  if (placement?.kind !== GRID_LAYOUT_ANCHORED_PLACEMENT || !element?.style ||
+      placement.fallbackDisplay) return;
+  const display = getDisplay(element);
+  if (!display || display === 'none') return;
+  placement.fallbackDisplay = {
+    appliedValue: display,
+    value: element.style.getPropertyValue('display'),
+    priority: element.style.getPropertyPriority('display')
+  };
+  element.style.setProperty('display', display, 'important');
+}
+
+function restoreAnchoredFallbackDisplay(record) {
+  const placement = record?.placement;
+  const element = record?.element;
+  const fallbackDisplay = placement?.fallbackDisplay;
+  if (!fallbackDisplay || !element?.style) return;
+  if (element.style.getPropertyValue('display') === fallbackDisplay.appliedValue &&
+      element.style.getPropertyPriority('display') === 'important') {
+    if (fallbackDisplay.value) element.style.setProperty('display', fallbackDisplay.value, fallbackDisplay.priority);
+    else element.style.removeProperty('display');
+  }
+  placement.fallbackDisplay = null;
 }
 
 function getOriginalAttributes(element) {
@@ -944,6 +1115,12 @@ function styleText(sessionId, presentation) {
       display: block !important;
       visibility: hidden !important;
     }
+    ${hiddenSelector}[${HIDDEN_PLACEMENT_ATTRIBUTE}="${GRID_LAYOUT_ANCHORED_HIDDEN_PLACEMENT}"] {
+      visibility: hidden !important;
+    }
+    ${hiddenSelector}[${HIDDEN_PLACEMENT_ATTRIBUTE}="${GRID_LAYOUT_ANCHORED_HIDDEN_PLACEMENT}"] > ${TRANSLATION_TAG} {
+      visibility: visible !important;
+    }
   `;
 }
 
@@ -992,10 +1169,12 @@ export class TranslationRenderer {
       if (currentWidth != null && previousWidth != null && currentWidth === previousWidth) continue;
       for (const record of records) affectedRecords.add(record);
     }
+    const reservationParents = new Set();
     for (const record of affectedRecords) {
       if (this.records.get(record.sourceId) !== record) continue;
-      syncSourceLayout(record);
+      syncSourceLayout(record, {deferGridReservation: true, reservationParents});
     }
+    flushGridLayoutReservations(reservationParents);
   }
 
   observeLayoutTarget(element, record) {
@@ -1044,10 +1223,12 @@ export class TranslationRenderer {
   }
 
   syncLayouts() {
+    const reservationParents = new Set();
     for (const record of this.records.values()) {
       this.observeSourceLayout(record);
-      syncSourceLayout(record);
+      syncSourceLayout(record, {deferGridReservation: true, reservationParents});
     }
+    flushGridLayoutReservations(reservationParents);
   }
 
   scheduleLayoutSync() {
@@ -1192,6 +1373,7 @@ export class TranslationRenderer {
     if (record.fallbackMode === TRANSLATION_MODES.TRANSLATION_ORIGINAL) {
       restorePlacement(record);
     }
+    restoreAnchoredFallbackDisplay(record);
     record.fallbackMode = null;
     this.clearReplacementAttributes(record);
   }
@@ -1230,6 +1412,9 @@ export class TranslationRenderer {
     this.clearReplacementAttributes(record);
     if (mode === TRANSLATION_MODES.TRANSLATION_ONLY) {
       restorePlacement(record);
+      if (record.placement?.kind === GRID_LAYOUT_ANCHORED_PLACEMENT) {
+        preserveAnchoredFallbackDisplay(record);
+      }
       element.setAttribute(HIDDEN_ATTRIBUTE, GENERATED_VALUE);
       const hasExternalPlacement = record.placement === 'sibling' ||
         record.placement?.kind === COLLAPSED_REVIEW_CARD_PLACEMENT ||
@@ -1239,6 +1424,8 @@ export class TranslationRenderer {
           HIDDEN_PLACEMENT_ATTRIBUTE,
           record.mixedContent ? 'mixed' : 'inside'
         );
+      } else if (record.placement?.kind === GRID_LAYOUT_ANCHORED_PLACEMENT) {
+        element.setAttribute(HIDDEN_PLACEMENT_ATTRIBUTE, GRID_LAYOUT_ANCHORED_HIDDEN_PLACEMENT);
       }
     } else if (mode === TRANSLATION_MODES.TRANSLATION_ORIGINAL) {
       this.placeTranslationBeforeSource(record);

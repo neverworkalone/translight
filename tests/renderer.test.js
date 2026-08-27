@@ -491,6 +491,133 @@ describe('TranslationRenderer', () => {
     expect(layout.querySelector('#tabs')?.textContent).toBe('ALL');
   });
 
+  it('keeps an anchored translation visible when translation-only cannot replace flex text nodes', () => {
+    document.head.innerHTML = '<style>.grid-source { display:flex; }</style>';
+    document.body.innerHTML = `
+      <div id="layout" style="display:grid;grid-template-columns:60px 1fr">
+        <div id="source" class="grid-source"><span>L</span><span>I</span><span>V</span><span>E</span></div>
+        <div id="tabs">ALL</div>
+      </div>
+    `;
+    const source = document.querySelector('#source');
+    const renderer = new TranslationRenderer({
+      document,
+      sessionId: 'grid-fallback-session',
+      settings: {translationMode: TRANSLATION_MODES.TRANSLATION_ONLY}
+    });
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'grid-fallback-source',
+      translatedText: '번역'
+    });
+
+    expect(translation.parentElement).toBe(source);
+    expect(source.getAttribute(HIDDEN_ATTRIBUTE)).toBe('true');
+    expect(source.getAttribute(HIDDEN_PLACEMENT_ATTRIBUTE)).toBe('anchored');
+    expect(source.style.getPropertyValue('display')).toBe('flex');
+    expect(source.style.getPropertyPriority('display')).toBe('important');
+    expect(window.getComputedStyle(source).display).toBe('flex');
+    expect(renderer.style.textContent).toContain(
+      '[data-translight-hidden-placement="anchored"] {\n      visibility: hidden !important;'
+    );
+    expect(renderer.style.textContent).toContain(
+      '[data-translight-hidden-placement="anchored"] > translight-translation {\n      visibility: visible !important;'
+    );
+
+    renderer.removeAll();
+    expect(source.style.getPropertyValue('display')).toBe('');
+    expect(source.textContent).toBe('LIVE');
+  });
+
+  it('falls back to a grid sibling when the grid has multiple rows', () => {
+    document.body.innerHTML = `
+      <div id="layout" style="display:grid;grid-template-columns:100px 100px;grid-auto-rows:20px">
+        <div id="source" style="display:flex">One</div>
+        <div style="display:flex">Two</div>
+        <div style="display:flex">Three</div>
+        <div style="display:flex">Four</div>
+      </div>
+    `;
+    const source = document.querySelector('#source');
+    const layout = document.querySelector('#layout');
+    const renderer = new TranslationRenderer({document, sessionId: 'multi-row-grid-session'});
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'multi-row-grid-source',
+      translatedText: '첫 번째'
+    });
+
+    expect(translation.parentElement).toBe(layout);
+    expect(translation.parentElement).not.toBe(source);
+    expect(translation.style.getPropertyValue('position')).toBe('');
+    expect(source.querySelector('translight-translation')).toBeNull();
+
+    renderer.removeAll();
+    expect(layout.children).toHaveLength(4);
+    expect(source.textContent).toBe('One');
+  });
+
+  it('falls back to a grid sibling when the source clips overflowing content', () => {
+    document.body.innerHTML = `
+      <div id="layout" style="display:grid;grid-template-columns:60px 1fr">
+        <div id="source" style="display:flex;overflow:hidden">LIVE</div>
+        <div id="tabs">ALL</div>
+      </div>
+    `;
+    const source = document.querySelector('#source');
+    const layout = document.querySelector('#layout');
+    const renderer = new TranslationRenderer({document, sessionId: 'clipped-grid-session'});
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'clipped-grid-source',
+      translatedText: '라이브'
+    });
+
+    expect(translation.parentElement).toBe(layout);
+    expect(translation.parentElement).not.toBe(source);
+    expect(translation.style.getPropertyValue('position')).toBe('');
+    expect(source.querySelector('translight-translation')).toBeNull();
+
+    renderer.removeAll();
+    expect(layout.children).toHaveLength(2);
+    expect(source.textContent).toBe('LIVE');
+  });
+
+  it('flushes shared grid reservations once and skips unchanged margin writes', () => {
+    document.body.innerHTML = `
+      <div id="layout" style="display:grid;grid-template-columns:repeat(3,1fr)">
+        <div id="source-one" style="display:flex">One</div>
+        <div id="source-two" style="display:flex">Two</div>
+        <div id="source-three" style="display:flex">Three</div>
+      </div>
+    `;
+    const layout = document.querySelector('#layout');
+    const renderer = new TranslationRenderer({document, sessionId: 'shared-grid-reservation-session'});
+    const translations = ['source-one', 'source-two', 'source-three'].map((id, index) => {
+      const source = document.querySelector(`#${id}`);
+      const translation = renderer.insert({
+        element: source,
+        sourceId: `shared-grid-source-${index}`,
+        translatedText: `번역 ${index + 1}`
+      });
+      vi.spyOn(translation, 'getBoundingClientRect').mockReturnValue({height: 20});
+      return translation;
+    });
+    const marginWriteSpy = vi.spyOn(layout.style, 'setProperty');
+
+    renderer.syncLayouts();
+
+    expect(translations).toHaveLength(3);
+    expect(marginWriteSpy.mock.calls.filter(([property]) => property === 'margin-bottom'))
+      .toHaveLength(1);
+    marginWriteSpy.mockClear();
+    renderer.syncLayouts();
+    expect(marginWriteSpy.mock.calls.filter(([property]) => property === 'margin-bottom'))
+      .toHaveLength(0);
+
+    renderer.removeAll();
+  });
+
   it('leaves explicitly placed grid sources in their original outer layout', () => {
     document.body.innerHTML = `
       <div id="layout" style="display:grid;grid-template-columns:40px 60px 80px 1fr">

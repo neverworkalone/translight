@@ -269,6 +269,23 @@ source rectangles, horizontal non-overlapping translations,
 between the anchored label and the following article content,
 `restoredAfterStop: true`, and `testPassed: true`.
 
+## Generic grid layout safety
+
+Fixture: `grid-layout-safety-repro.html` and `grid-layout-safety-repro.js`
+
+Open this URL in Chrome while the Vite development server is running:
+
+```text
+http://127.0.0.1:5173/tests/fixtures/grid-layout-safety-repro.html
+```
+
+This fixture covers the generic cases that must not use the AP single-row
+anchored placement: a two-row grid and a flex source with `overflow:hidden`.
+It also covers the translation-only fallback for a safe single-row grid source.
+The repaired case must report sibling placement without overlap/clipping for
+the unsafe cases, visible anchored fallback text with the source hidden, and
+`restoredAfterStop: true` with `testPassed: true`.
+
 ## YouTube long description paragraph placement
 
 Fixture: `youtube-description-paragraphs-repro.html` and
