@@ -258,10 +258,25 @@ function splitPhrasingContainerAtDoubleBreaks(container, targetLanguage) {
     container.closest(SEGMENT_SELECTOR)
   ) return [];
   const childNodes = Array.from(container.childNodes ?? []);
-  if (!isPhrasingContent(childNodes)) return [];
+  const ranges = [];
+  let current = [];
+  let hasBlockBoundary = false;
+  const flush = () => {
+    if (current.length) ranges.push(...splitNodesAtDoubleBreaks(current));
+    current = [];
+  };
 
-  const ranges = splitNodesAtDoubleBreaks(childNodes);
-  if (ranges.length < 2) return [];
+  for (const node of childNodes) {
+    if (isNestedBlockNode(node)) {
+      flush();
+      hasBlockBoundary = true;
+      continue;
+    }
+    current.push(node);
+  }
+  flush();
+
+  if (!ranges.length || (!hasBlockBoundary && ranges.length < 2)) return [];
 
   const translatableRanges = ranges.filter(({nodes}) => {
     const text = normalizeSourceText(textFromNodes(nodes, container));
@@ -338,7 +353,7 @@ function splitNestedBreaksIntoSegments(element, targetLanguage) {
   const wrappers = [];
   const processedContainers = [];
   for (const container of containers) {
-    if (processedContainers.some((processed) => processed.contains(container))) continue;
+    if (container.closest(SEGMENT_SELECTOR)) continue;
     const containerWrappers = splitPhrasingContainerAtDoubleBreaks(container, targetLanguage);
     if (!containerWrappers.length) continue;
     processedContainers.push(container);
@@ -396,7 +411,6 @@ function splitDirectTextIntoSegments(element, targetLanguage, {hasNestedBlocks =
   if (!isElement(element) || element.matches(SEGMENT_SELECTOR)) return [];
 
   const ranges = directContentRanges(element);
-  if (ranges.length < 2 && hasNestedBlocks) return [];
   if (ranges.length < 2) return splitNestedNewlineTextIntoSegments(element, targetLanguage);
 
   const translatableRanges = ranges.filter(({nodes}) => {

@@ -298,6 +298,36 @@ describe('collectTranslationBlocks', () => {
     expect(formatted.querySelectorAll('[data-translight-segment="true"]')).toHaveLength(3);
   });
 
+  it('splits Goodreads paragraphs around nested blockquotes', () => {
+    document.body.innerHTML = `
+      <div id="review-text">
+        <span class="Formatted">
+          First review paragraph has enough English text to translate.<br><br>
+          Second review paragraph has enough English text to translate as well.<br><br>
+          <blockquote><em>First quoted paragraph has enough English text to translate.</em></blockquote><br><br>
+          Third review paragraph has enough English text to translate too.<br><br>
+          <blockquote><br><div><em>Second quoted paragraph has enough English text to translate.</em></div></blockquote><br><br>
+          Final review paragraph has enough English text to translate.
+        </span>
+      </div>
+    `;
+
+    const blocks = collectTranslationBlocks(document.querySelector('#review-text'));
+
+    expect(blocks.map((block) => block.text)).toEqual([
+      'First review paragraph has enough English text to translate.',
+      'Second review paragraph has enough English text to translate as well.',
+      'First quoted paragraph has enough English text to translate.',
+      'Third review paragraph has enough English text to translate too.',
+      'Second quoted paragraph has enough English text to translate.',
+      'Final review paragraph has enough English text to translate.'
+    ]);
+    expect(blocks.filter(({element}) => element.matches('[data-translight-segment="true"]')))
+      .toHaveLength(4);
+    expect(blocks.some(({text}) => text.includes('First review paragraph') && text.includes('Final review paragraph')))
+      .toBe(false);
+  });
+
   it.each([
     ['hidden', '<span hidden>Hidden first paragraph.<br><br>Hidden second paragraph.</span>'],
     ['excluded', '<code>Excluded first paragraph.<br><br>Excluded second paragraph.</code>'],

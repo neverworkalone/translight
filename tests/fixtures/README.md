@@ -136,13 +136,16 @@ http://127.0.0.1:5173/tests/fixtures/goodreads-review-order-repro.html
 
 This fixture models the supplied Goodreads book page at
 `https://www.goodreads.com/book/show/34066798-a-gentleman-in-moscow`. The Chai
-review contains a nested blockquote inside Goodreads's formatted inline wrapper,
-while the Bill Gates review uses only inline content. Both cards must keep the
-same configured source/translation order even though the collector takes a
-different mixed-content path for Chai.
+review contains ordinary paragraphs separated by `<br><br>`, a direct nested
+blockquote, and a blockquote containing a `div` inside Goodreads's formatted
+inline wrapper. The Bill Gates review uses only inline content. The collector
+must split Chai into ten independently translatable blocks instead of
+aggregating the ordinary paragraphs below the review, and both cards must keep
+the same configured source/translation order.
 
-The repaired case must report `ordered: true` for both cards in both modes,
-`restoredAfterStop: true`, and top-level `testPassed: true`.
+The repaired case must report `chai.reviewTranslationCount: 10`,
+`chai.hasAggregatedTranslation: false`, `ordered: true` for both cards in both
+modes, `restoredAfterStop: true`, and top-level `testPassed: true`.
 
 ## XDA article translation font size
 

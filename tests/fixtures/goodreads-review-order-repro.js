@@ -3,6 +3,9 @@ import {TRANSLATION_MODES} from '../../src/settings.js';
 
 const report = document.querySelector('#report');
 const scenario = document.querySelector('#scenario');
+const EXPECTED_CHAI_REVIEW_TRANSLATION_COUNT = 10;
+const CHAI_FIRST_PARAGRAPH = 'It’s always a shock to finish a particularly good book';
+const CHAI_LAST_PARAGRAPH = 'It comes as no surprise to me that this novel was a hugely popular hit';
 
 function renderReviews() {
   scenario.innerHTML = `
@@ -11,7 +14,7 @@ function renderReviews() {
       <div class="ReviewText__content">
         <div class="TruncatedContent">
           <div class="TruncatedContent__text" data-testid="contentContainer">
-            <span class="Formatted">It’s always a shock to finish a particularly good book and feel that something has shifted inside you. This is how I felt when I finished <i>A Gentleman in Moscow</i>.<br><br>The story begins when Count Alexander Ilyich Rostov is sentenced to life imprisonment in Moscow’s Metropol hotel.<br><br><blockquote><em>To what end, he wondered, had the Divine created the stars in heaven?</em></blockquote><br><br>I absolutely loved this book and the character work is extraordinary.</span>
+            <span class="Formatted">It’s always a shock to finish a particularly good book and feel that something has shifted inside you. This is how I felt when I finished <i>A Gentleman in Moscow</i>.<br><br>The story begins when Count Alexander Ilyich Rostov is sentenced to life imprisonment in Moscow’s Metropol hotel.<br><br>Alexander Ilyich Rostov, however, finds a fire and a ferocious brightness in this new existence.<br><br><blockquote><em>To what end, he wondered, had the Divine created the stars in heaven?</em></blockquote><br><br>To set up a story of imprisonment within an unchanging setting and make it feel mesmerizing for several hundred pages could not have been easy.<br><br>I absolutely loved this book and the character work is extraordinary.<br><br>But what appealed to me personally in this novel was the character-work and the deep thematic currents.<br><br>There is tragedy at the heart of this story, but there is also so much tenderness.<br><br><blockquote><br><div><em>These are the greatest of conveniences, Anushka—and at one time, I had them all.</em></div></blockquote><br><br>It comes as no surprise to me that this novel was a hugely popular hit, and I’m so glad I read it.</span>
           </div>
         </div>
       </div>
@@ -42,6 +45,9 @@ function getSourceForTranslation(card, translation) {
 
 function inspectCard(card, mode) {
   const translations = Array.from(card.querySelectorAll('translight-translation'));
+  const reviewTranslations = translations.filter((translation) =>
+    getSourceForTranslation(card, translation)?.closest('[data-testid="contentContainer"]')
+  );
   const ordered = translations.every((translation) => {
     const source = getSourceForTranslation(card, translation);
     const sourceBeforeTranslation = isBefore(source, translation);
@@ -52,10 +58,16 @@ function inspectCard(card, mode) {
     if (role === 'original') return sourceBeforeTranslation;
     return role === 'translation' && !sourceBeforeTranslation;
   });
+  const hasAggregatedTranslation = reviewTranslations.some((translation) => {
+    const text = translation.textContent || '';
+    return text.includes(CHAI_FIRST_PARAGRAPH) && text.includes(CHAI_LAST_PARAGRAPH);
+  });
   return {
     translationCount: translations.length,
+    reviewTranslationCount: reviewTranslations.length,
     roles: translations.map((translation) => translation.getAttribute('data-translight-role')),
-    ordered
+    ordered,
+    hasAggregatedTranslation
   };
 }
 
@@ -85,10 +97,11 @@ async function runScenario(mode) {
   session.stop({notify: false});
   result.restoredAfterStop = scenario.textContent === originalText &&
     scenario.querySelector('translight-translation') === null;
-  result.testPassed = result.chai.translationCount > 0 &&
+  result.testPassed = result.chai.reviewTranslationCount === EXPECTED_CHAI_REVIEW_TRANSLATION_COUNT &&
     result.billGates.translationCount > 0 &&
     result.chai.ordered &&
     result.billGates.ordered &&
+    !result.chai.hasAggregatedTranslation &&
     result.restoredAfterStop;
   return result;
 }
