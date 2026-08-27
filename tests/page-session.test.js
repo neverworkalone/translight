@@ -732,6 +732,54 @@ describe('PageSession', () => {
     session.stop();
   });
 
+  it('keeps an inline-list translation through a containing card rerender', async () => {
+    document.body.innerHTML = `
+      <ul id="awards">
+        <li id="card" style="display:flex;flex-wrap:wrap">
+          <div>
+            <ul id="inline-list" style="display:inline">
+              <li id="source"><span>1 win &amp; 3 nominations total</span></li>
+            </ul>
+          </div>
+        </li>
+      </ul>
+    `;
+    const calls = [];
+    const session = new PageSession({
+      generation: 4131,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    await session.start();
+    const source = document.querySelector('#source');
+    const translation = document.querySelector('translight-translation');
+    const card = document.querySelector('#card');
+    expect(translation?.parentElement).toBe(document.querySelector('#awards'));
+    expect(translation?.previousElementSibling).toBe(card);
+
+    const replacementList = document.createElement('ul');
+    replacementList.id = 'inline-list';
+    replacementList.style.display = 'inline';
+    replacementList.innerHTML = '<li id="replacement"><span>1 win &amp; 3 nominations total</span></li>';
+    source.parentElement.replaceWith(replacementList);
+    const replacement = replacementList.querySelector('#replacement');
+    await wait(220);
+
+    expect(session.renderer.hasRecord(replacement)).toBe(true);
+    expect(document.querySelectorAll('translight-translation')).toHaveLength(1);
+    expect(document.querySelector('translight-translation')).toBe(translation);
+    expect(translation.parentElement).toBe(document.querySelector('#awards'));
+    expect(calls).toEqual(['1 win & 3 nominations total']);
+    session.stop();
+  });
+
   it('stops recovering a translation after the host removes it twice', async () => {
     document.body.innerHTML = '<p id="source">A stable post body.</p>';
     const calls = [];

@@ -38,6 +38,28 @@ To verify the regression signal, use `scenario=legacy`; this removes the
 scroll-anchor guard and should report `jitterDetected: true` and
 `testPassed: true`.
 
+## IMDb left-column Awards jitter
+
+Fixture: `imdb-left-jitter-repro.html` and `imdb-left-jitter-repro.js`
+
+Open this URL in Chrome while the Vite development server is running:
+
+```text
+http://127.0.0.1:5173/tests/fixtures/imdb-left-jitter-repro.html?scenario=rerender&top=600
+```
+
+This fixture models the Awards card DOM from the supplied IMDb snapshot at
+`https://www.imdb.com/name/nm0005370/`. The supplied recording uses another
+IMDb profile, `https://www.imdb.com/name/nm1296883/?ref_=hm_mpc_rnk_2`, but both
+pages use the same inline-list Awards pattern. During the run, the host
+replaces the inner `#award-content` markup six times, matching the
+reconciliation that caused the left card to oscillate.
+
+The repaired case must report `cardHeight.distinctHeights: [49]`,
+`stablePlacement: true`, and `testPassed: true`. Before the fix, the same
+scenario reported alternating card heights `[49, 95]` and kept the generated
+translation inside the replaceable card.
+
 When adding another browser regression, use a descriptive `<bug-name>-repro`
 fixture name and document its reproducible URL and pass/fail signal in this
 file.

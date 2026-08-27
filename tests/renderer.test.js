@@ -112,6 +112,85 @@ describe('TranslationRenderer', () => {
     expect(document.body.innerHTML).toBe('<ul><li id="source">List item</li></ul>');
   });
 
+  it('places inline-list translations outside a replaceable containing list item', () => {
+    document.body.innerHTML = `
+      <ul id="awards">
+        <li id="card" style="display:flex;flex-wrap:wrap">
+          <a href="/awards">Awards</a>
+          <div>
+            <ul id="inline-list" style="display:inline">
+              <li id="source"><span>1 win &amp; 3 nominations total</span></li>
+            </ul>
+          </div>
+        </li>
+      </ul>
+    `;
+    const source = document.querySelector('#source');
+    const card = document.querySelector('#card');
+    const list = document.querySelector('#awards');
+    const renderer = new TranslationRenderer({document, sessionId: 'inline-list-session'});
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'inline-list-source',
+      sourceHash: hashSourceText(source.textContent),
+      translatedText: '총 1개의 우승 및 3개의 후보 지명'
+    });
+
+    expect(translation.parentElement).toBe(list);
+    expect(translation.previousElementSibling).toBe(card);
+    expect(source.querySelector('translight-translation')).toBeNull();
+    expect(card.querySelector('translight-translation')).toBeNull();
+
+    renderer.removeAll();
+    expect(document.querySelectorAll('translight-translation')).toHaveLength(0);
+    expect(source.textContent).toBe('1 win & 3 nominations total');
+  });
+
+  it('rebinds an inline-list translation after the host replaces its source item', () => {
+    document.body.innerHTML = `
+      <ul id="awards">
+        <li id="card" style="display:flex;flex-wrap:wrap">
+          <a href="/awards">Awards</a>
+          <div>
+            <ul id="inline-list" style="display:inline">
+              <li id="source"><span>1 win &amp; 3 nominations total</span></li>
+            </ul>
+          </div>
+        </li>
+      </ul>
+    `;
+    const source = document.querySelector('#source');
+    const card = document.querySelector('#card');
+    const list = document.querySelector('#awards');
+    const renderer = new TranslationRenderer({document, sessionId: 'inline-rebind-session'});
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'inline-rebind-source',
+      sourceHash: hashSourceText(source.textContent),
+      translatedText: '총 1개의 우승 및 3개의 후보 지명'
+    });
+
+    const replacementList = document.createElement('ul');
+    replacementList.id = 'inline-list';
+    replacementList.style.display = 'inline';
+    replacementList.innerHTML = '<li id="replacement"><span>1 win &amp; 3 nominations total</span></li>';
+    source.parentElement.replaceWith(replacementList);
+    const replacement = replacementList.querySelector('#replacement');
+
+    renderer.pruneDisconnected();
+
+    expect(renderer.hasRecord(replacement)).toBe(true);
+    expect(translation.isConnected).toBe(true);
+    expect(translation.parentElement).toBe(list);
+    expect(translation.previousElementSibling).toBe(card);
+    expect(replacement.getAttribute(SOURCE_ATTRIBUTE)).toBe('inline-rebind-source');
+    expect(replacement.getAttribute(TRANSLATED_ATTRIBUTE)).toBe('true');
+
+    renderer.removeAll();
+    expect(document.querySelectorAll('translight-translation')).toHaveLength(0);
+    expect(replacement.textContent).toBe('1 win & 3 nominations total');
+  });
+
   it('limits recovery to one attempt when a host repeatedly removes a translation', () => {
     document.body.innerHTML = '<ul><li id="source">List item</li></ul>';
     const source = document.querySelector('#source');

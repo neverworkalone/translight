@@ -42,6 +42,7 @@ const GENERATED_SELECTOR = 'translight-translation,[data-translight-generated="t
 const LAYOUT_DISPLAYS = new Set(['flex', 'inline-flex', 'grid', 'inline-grid']);
 const TABLE_CELL_TAGS = new Set(['td', 'th']);
 const MAX_RECOVERY_ATTEMPTS = 1;
+const STABLE_LIST_SIBLING_PLACEMENT = 'stable-list-sibling';
 const ATTRIBUTE_NAMES = [
   SOURCE_ATTRIBUTE,
   SOURCE_HASH_ATTRIBUTE,
@@ -74,6 +75,22 @@ function getDirectNestedList(element) {
   });
 }
 
+function getStableListItem(element) {
+  // Responsive cards such as IMDb's Awards block put the translated text in
+  // an inline list nested inside a replaceable card. A block translation in
+  // that inline list becomes an extra flex row and is removed on every host
+  // reconciliation. Keep it beside the containing card instead.
+  if (element?.tagName?.toLowerCase() !== 'li') return null;
+  const list = element.parentElement;
+  const listTagName = list?.tagName?.toLowerCase();
+  if (listTagName !== 'ul' && listTagName !== 'ol') return null;
+  const listDisplay = getDisplay(list);
+  if (!['inline', 'inline-block', 'inline-flex', 'flex'].includes(listDisplay)) return null;
+  const containingListItem = list.parentElement?.closest?.('li');
+  if (!containingListItem?.parentNode || containingListItem === element) return null;
+  return containingListItem;
+}
+
 function shouldInsertInside(element) {
   const tagName = element.tagName?.toLowerCase();
   if (tagName === 'li' || TABLE_CELL_TAGS.has(tagName)) return true;
@@ -81,6 +98,15 @@ function shouldInsertInside(element) {
 }
 
 function insertAtSafeLocation(element, translation, mixedContent = false) {
+  const stableListItem = getStableListItem(element);
+  if (stableListItem) {
+    stableListItem.parentNode.insertBefore(translation, stableListItem.nextSibling);
+    return {
+      kind: STABLE_LIST_SIBLING_PLACEMENT,
+      anchor: stableListItem
+    };
+  }
+
   if (mixedContent) {
     if (element.tagName?.toLowerCase() === 'li') {
       const nestedList = getDirectNestedList(element);
@@ -121,7 +147,13 @@ function hasNestedBlocks(element) {
 
 function restorePlacement(record) {
   const {element, translation, placement} = record;
-  if (!element?.parentNode || !translation) return;
+  if (!translation) return;
+  if (placement?.kind === STABLE_LIST_SIBLING_PLACEMENT) {
+    const anchor = placement.anchor;
+    if (anchor?.parentNode) anchor.parentNode.insertBefore(translation, anchor.nextSibling);
+    return;
+  }
+  if (!element?.parentNode) return;
   if (placement === 'sibling') {
     element.parentNode.insertBefore(translation, element.nextSibling);
     return;
@@ -804,7 +836,43 @@ export class TranslationRenderer {
     const descendant = Array.from(record?.element?.querySelectorAll?.(TRANSLATION_TAG) ?? [])
       .find(isMatchingTranslation);
     if (descendant) return descendant;
-    return Array.from(record?.element?.parentElement?.children ?? []).find(isMatchingTranslation) ?? null;
+    const sourceSibling = Array.from(record?.element?.parentElement?.children ?? []).find(isMatchingTranslation);
+    if (sourceSibling) return sourceSibling;
+    return Array.from(record?.placement?.anchor?.parentElement?.children ?? []).find(isMatchingTranslation) ?? null;
+  }
+
+  rebindDisconnectedRecord(record) {
+    if (record?.placement?.kind !== STABLE_LIST_SIBLING_PLACEMENT) return null;
+    const anchor = record.placement.anchor;
+    if (!anchor?.isConnected) return null;
+    const candidates = Array.from(anchor.querySelectorAll(`${BLOCK_SELECTOR},${SEGMENT_SELECTOR}`));
+    const replacement = candidates.find((candidate) => {
+      if (candidate === record.element || candidate.matches?.(GENERATED_SELECTOR) || !candidate.isConnected) {
+        return false;
+      }
+      if (isExcluded(candidate) || isHidden(candidate)) return false;
+      if (!this.isSourceHashCurrent({
+        element: candidate,
+        sourceHash: record.sourceHash,
+        mixedContent: record.mixedContent
+      })) return false;
+      return hasNestedBlocks(candidate) === Boolean(record.mixedContent);
+    });
+    if (!replacement) return null;
+
+    const originalAttributes = getOriginalAttributes(replacement);
+    this.recordsByElement.delete(record.element);
+    record.element = replacement;
+    record.originalAttributes = originalAttributes;
+    record.sourceTextNodes = collectSourceTextNodes(replacement, record.mixedContent);
+    record.originalTextNodeValues = snapshotTextNodes(record.sourceTextNodes);
+    replacement.setAttribute(SOURCE_ATTRIBUTE, record.sourceId);
+    replacement.setAttribute(TRANSLATED_ATTRIBUTE, GENERATED_VALUE);
+    replacement.setAttribute(SESSION_ATTRIBUTE, this.sessionId);
+    if (record.sourceHash) replacement.setAttribute(SOURCE_HASH_ATTRIBUTE, record.sourceHash);
+    replacement.removeAttribute(PENDING_SOURCE_HASH_ATTRIBUTE);
+    this.recordsByElement.set(replacement, record);
+    return replacement;
   }
 
   getRecoveryState(record, targetLanguage = 'ko') {
@@ -967,6 +1035,7 @@ export class TranslationRenderer {
   pruneDisconnected() {
     for (const [sourceId, record] of this.records) {
       if (record.element?.isConnected !== false) continue;
+      if (this.rebindDisconnectedRecord(record)) continue;
       record.translation?.parentNode?.removeChild(record.translation);
       if (record.element?.getAttribute(SESSION_ATTRIBUTE) === this.sessionId) {
         for (const name of ATTRIBUTE_NAMES) restoreAttribute(record.element, name, record.originalAttributes[name]);
