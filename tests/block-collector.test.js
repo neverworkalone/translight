@@ -37,6 +37,34 @@ describe('collectTranslationBlocks', () => {
     expect(new Set(blocks.map((block) => block.sourceId)).size).toBe(3);
   });
 
+  it('collects linked figure captions but ignores image-replacement logos', () => {
+    document.body.innerHTML = `
+      <header>
+        <h1 class="site-logo">
+          <a class="logo replace" href="/">Letterboxd — Your life in film</a>
+        </h1>
+      </header>
+      <figure class="article-media">
+        <img alt="Gromit from Wallace &amp; Gromit">
+        <figcaption class="figure-caption caption">
+          Gromit from&nbsp;<em><a href="#gromit">Wallace &amp; Gromit: The Curse of the Were-Rabbit</a></em>,
+          Shadow from&nbsp;<em><a href="#shadow">Homeward Bound: The Incredible Journey</a></em>,
+          Jack (Uggie) from&nbsp;<em><a href="#artist">The Artist</a></em>.
+        </figcaption>
+      </figure>
+      <p>Article content remains translatable.</p>
+    `;
+
+    const blocks = collectTranslationBlocks(document.body);
+
+    expect(blocks.map((block) => block.text)).toEqual([
+      'Gromit from Wallace & Gromit: The Curse of the Were-Rabbit, Shadow from Homeward Bound: The Incredible Journey, Jack (Uggie) from The Artist.',
+      'Article content remains translatable.'
+    ]);
+    expect(blocks.some((block) => block.text.includes('Letterboxd'))).toBe(false);
+    expect(document.querySelector('.site-logo')?.hasAttribute('data-translight-source-id')).toBe(false);
+  });
+
   it('does not include generated nodes or source nodes already marked by Translight', () => {
     document.body.innerHTML = `
       <p data-translight-source-id="source-1">Already translated</p>
