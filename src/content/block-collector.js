@@ -363,6 +363,7 @@ function splitNestedBreaksIntoSegments(element, targetLanguage) {
   const residualElements = [element];
   const seenResidualElements = new Set(residualElements);
   for (const container of processedContainers) {
+    if (container === element) continue;
     for (let ancestor = container.parentElement; ancestor && ancestor !== element; ancestor = ancestor.parentElement) {
       if (seenResidualElements.has(ancestor)) continue;
       seenResidualElements.add(ancestor);

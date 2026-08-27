@@ -328,6 +328,29 @@ describe('collectTranslationBlocks', () => {
       .toBe(false);
   });
 
+  it('keeps residual segmentation inside the supplied root', () => {
+    document.body.innerHTML = `
+      <p id="outside">Outside text should never be collected.</p>
+      <div id="root">
+        Opening review text has enough English words.<br>
+        <blockquote>Nested quote has enough English words.</blockquote>
+      </div>
+    `;
+
+    const root = document.querySelector('#root');
+    const outside = document.querySelector('#outside');
+    const outsideMarkup = outside.outerHTML;
+    const blocks = collectTranslationBlocks(root);
+
+    expect(blocks.map((block) => block.text)).toEqual([
+      'Opening review text has enough English words.',
+      'Nested quote has enough English words.'
+    ]);
+    expect(blocks.every(({element}) => root.contains(element))).toBe(true);
+    expect(outside.outerHTML).toBe(outsideMarkup);
+    expect(outside.querySelector('[data-translight-segment="true"]')).toBeNull();
+  });
+
   it.each([
     ['hidden', '<span hidden>Hidden first paragraph.<br><br>Hidden second paragraph.</span>'],
     ['excluded', '<code>Excluded first paragraph.<br><br>Excluded second paragraph.</code>'],
