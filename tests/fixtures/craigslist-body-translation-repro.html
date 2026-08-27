@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Craigslist body translation reproduction</title>
+    <style>
+      html { scroll-behavior: auto; }
+      body { margin: 0; color: #111; background: #fff; font: 16px/1.35 Georgia, serif; }
+      #report { position: fixed; z-index: 10; top: 0; right: 0; width: 420px; max-height: 90vh; overflow: auto; box-sizing: border-box; padding: 12px; background: #111827; color: white; font: 12px/1.4 monospace; white-space: pre-wrap; }
+      .breadcrumb { padding: 8px; border-bottom: 1px solid #ccc; font: 14px Arial, sans-serif; }
+      .page-container { width: min(960px, calc(100% - 32px)); margin: 110px auto 120px; }
+      .body { width: 100%; }
+      .postingtitle { margin: 0 0 18px; font-size: 25px; }
+      .userbody { width: 100%; }
+      #postingbody { margin-top: 28px; }
+      .print-information { display: none; }
+      #postingbody [data-translight-segment="true"] { display: inline; }
+    </style>
+  </head>
+  <body class="posting desktop">
+    <pre id="report">starting…</pre>
+    <nav class="breadcrumb">CL &gt; seoul &gt; community &gt; activity partners</nav>
+    <main class="page-container">
+      <section class="body">
+        <h1 class="postingtitle">Play organised Soccer / Fooball in Seoul (Seoul)</h1>
+        <section class="userbody">
+          <section id="postingbody">
+            <div class="print-information">
+              <p>QR Code Link to This Post</p>
+            </div>
+            <br>
+            Are you a player looking to join a long established team in Korea? Inspired by the world cup to start playing again? Come join Seohyeon Celtic as we rebuild.<br>
+            <br>
+            We have been running since 2011 and are looking for new players for our upcoming league season. Games are played on Saturdays around Seoul, and we will be having friendly / tryout games before the season starts in September. All positions, all ages, all nationalities welcome.<br>
+            <br>
+            Get in touch with your Kakao ID or phone number, or send us a message on Instagram (Search Seohyeon Celtic)
+          </section>
+        </section>
+      </section>
+    </main>
+    <script type="module" src="/tests/fixtures/craigslist-body-translation-repro.js"></script>
+  </body>
+</html>

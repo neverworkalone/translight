@@ -1,7 +1,7 @@
 import { hashSourceText } from './translation-queue.js';
 import { isTranslatableBlock } from './language.js';
 
-const BLOCK_SELECTOR = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,figcaption,div,td,th';
+const BLOCK_SELECTOR = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,figcaption,div,section,td,th';
 const EXCLUDED_CONTENT_SELECTOR = 'script,style,noscript,code,pre,input,textarea,select,button';
 const EXCLUDED_ANCESTOR_SELECTOR = `${EXCLUDED_CONTENT_SELECTOR},[contenteditable="true"],[contenteditable=""]`;
 const GENERATED_SELECTOR = 'translight-translation,[data-translight-generated="true"]';
