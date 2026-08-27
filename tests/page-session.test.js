@@ -193,6 +193,42 @@ describe('PageSession', () => {
     expect(document.querySelector('translight-translation')).toBeNull();
   });
 
+  it('does not send a standalone YouTube comment handle to the provider', async () => {
+    document.body.innerHTML = `
+      <div id="comment-main">
+        <div id="author">
+          <div id="handle">@dreyaleigh</div>
+          <span>11개월 전</span>
+        </div>
+        <div id="content">WOW. The intro preview shots are remarkable!</div>
+      </div>
+    `;
+    const handle = document.querySelector('#handle');
+    const comment = document.querySelector('#content');
+    const calls = [];
+    const session = new PageSession({
+      generation: 603,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    try {
+      await session.start();
+
+      expect(calls).toEqual([comment.textContent]);
+      expect(handle.textContent).toBe('@dreyaleigh');
+      expect(document.querySelectorAll('translight-translation')).toHaveLength(1);
+    } finally {
+      session.stop({notify: false});
+    }
+  });
+
   it('skips a document with no translatable blocks', async () => {
     document.documentElement.lang = 'ko-KR';
     document.body.innerHTML = '<p>한국어 문서는 이미 대상 언어로 작성되어 있습니다.</p>';
