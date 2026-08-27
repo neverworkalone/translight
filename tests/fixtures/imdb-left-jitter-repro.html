@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Translight IMDb left-column jitter reproduction</title>
+    <style>
+      html { scroll-behavior: auto; }
+      body { margin: 0; color: #111827; background: #f3f4f6; font: 16px/1.5 Arial, sans-serif; }
+      #report { position: fixed; z-index: 10; top: 0; right: 0; width: 390px; max-height: 90vh; overflow: auto; box-sizing: border-box; padding: 12px; background: #111827; color: white; font: 12px/1.4 monospace; white-space: pre-wrap; }
+      #page { display: grid; grid-template-columns: minmax(0, 846px) 407px; gap: 12px; width: 1265px; margin: 0 auto; padding: 720px 0 1200px; box-sizing: border-box; }
+      #left { min-width: 0; }
+      #right { position: sticky; top: 12px; align-self: start; height: 520px; border-radius: 8px; background: #fff; box-shadow: 0 1px 4px rgb(17 24 39 / 15%); }
+      #right::before { content: ''; display: block; height: 140px; margin: 16px; border-radius: 8px; background: linear-gradient(135deg, #facc15, #9ca3af); }
+      #right::after { content: ''; display: block; height: 12px; margin: 24px 16px; border-radius: 8px; background: #d1d5db; box-shadow: 0 28px #e5e7eb, 0 56px #e5e7eb; }
+      #awards { margin: 0 24px 28px; }
+      #award-list { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+      #award-card { display: flex; flex-direction: row; flex-wrap: wrap; min-height: 49px; border: 1px solid #e5c13a; border-radius: 4px; background: #fff; overflow: visible; }
+      #award-accent { flex: 0 0 48px; min-height: 49px; background: #f3c928; clip-path: polygon(0 0, 100% 0, 72% 100%, 0 100%); }
+      #award-content { flex: 1 1 auto; min-width: 0; padding: 10px 16px; box-sizing: border-box; }
+      #award-inline-list { display: inline; margin: 0; padding: 0; list-style: none; }
+      #award-source { display: inline; }
+      #award-source span { display: inline; }
+      #left-filler { height: 2200px; margin: 28px 24px 0; padding: 24px; box-sizing: border-box; border-radius: 8px; background: #fff; }
+    </style>
+  </head>
+  <body>
+    <pre id="report">starting…</pre>
+    <main id="page">
+      <section id="left">
+        <section id="awards" data-testid="awards">
+          <ul id="award-list">
+            <li id="award-card" data-testid="award_information">
+              <div id="award-accent" aria-hidden="true"></div>
+              <div id="award-content">
+                <ul id="award-inline-list">
+                  <li id="award-source"><span>1 win &amp; 3 nominations total</span></li>
+                </ul>
+              </div>
+            </li>
+          </ul>
+        </section>
+        <div id="left-filler" aria-hidden="true"></div>
+      </section>
+      <aside id="right" aria-hidden="true"></aside>
+    </main>
+    <script type="module" src="/tests/fixtures/imdb-left-jitter-repro.js"></script>
+  </body>
+</html>

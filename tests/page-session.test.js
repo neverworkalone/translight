@@ -658,11 +658,253 @@ describe('PageSession', () => {
     const generated = source.nextElementSibling;
     expect(generated?.tagName.toLowerCase()).toBe('translight-translation');
     generated.remove();
-    await wait();
+    await wait(20);
+    expect(source.nextElementSibling).toBeNull();
+    await wait(500);
 
     expect(source.nextElementSibling?.textContent).toBe('ko:A reusable post body.');
     expect(calls).toEqual(['A reusable post body.']);
     session.stop();
+  });
+
+  it('restores a translation when a host rerenders the children of a live source', async () => {
+    document.body.innerHTML = '<ul><li id="source">A reusable list item.</li></ul>';
+    const calls = [];
+    const session = new PageSession({
+      generation: 412,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    await session.start();
+    const source = document.querySelector('#source');
+    const generated = source.querySelector('translight-translation');
+    source.innerHTML = 'A reusable list item.';
+    await wait(20);
+    expect(source.querySelector('translight-translation')).toBeNull();
+    await wait(500);
+
+    expect(source.querySelector('translight-translation')).toBe(generated);
+    expect(source.querySelector('translight-translation')?.textContent)
+      .toBe('ko:A reusable list item.');
+    expect(calls).toEqual(['A reusable list item.']);
+    session.stop();
+  });
+
+  it('recollects a completely new source element and reuses the translation cache', async () => {
+    document.body.innerHTML = '<ul><li id="source">A reusable list item.</li></ul>';
+    const calls = [];
+    const session = new PageSession({
+      generation: 413,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    await session.start();
+    const source = document.querySelector('#source');
+    const generated = source.querySelector('translight-translation');
+    const replacement = document.createElement('li');
+    replacement.id = 'source';
+    replacement.textContent = 'A reusable list item.';
+    source.replaceWith(replacement);
+    await wait(220);
+
+    expect(replacement.querySelector('translight-translation')).not.toBe(generated);
+    expect(replacement.querySelector('translight-translation')?.textContent)
+      .toBe('ko:A reusable list item.');
+    expect(calls).toEqual(['A reusable list item.']);
+    expect(document.querySelectorAll('translight-translation')).toHaveLength(1);
+    expect(session.renderer.records.size).toBe(1);
+    expect(session.renderer.hasRecord(source)).toBe(false);
+    expect(session.renderer.hasRecord(replacement)).toBe(true);
+    session.stop();
+  });
+
+  it('keeps an inline-list translation through a containing card rerender', async () => {
+    document.body.innerHTML = `
+      <ul id="awards">
+        <li id="card" style="display:flex;flex-wrap:wrap">
+          <div>
+            <ul id="inline-list" style="display:inline">
+              <li id="source"><span>1 win &amp; 3 nominations total</span></li>
+            </ul>
+          </div>
+        </li>
+      </ul>
+    `;
+    const calls = [];
+    const session = new PageSession({
+      generation: 4131,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    await session.start();
+    const source = document.querySelector('#source');
+    const translation = document.querySelector('translight-translation');
+    const card = document.querySelector('#card');
+    expect(translation?.parentElement).toBe(document.querySelector('#awards'));
+    expect(translation?.previousElementSibling).toBe(card);
+
+    const replacementList = document.createElement('ul');
+    replacementList.id = 'inline-list';
+    replacementList.style.display = 'inline';
+    replacementList.innerHTML = '<li id="replacement"><span>1 win &amp; 3 nominations total</span></li>';
+    source.parentElement.replaceWith(replacementList);
+    const replacement = replacementList.querySelector('#replacement');
+    await wait(220);
+
+    expect(session.renderer.hasRecord(replacement)).toBe(true);
+    expect(document.querySelectorAll('translight-translation')).toHaveLength(1);
+    expect(document.querySelector('translight-translation')).toBe(translation);
+    expect(translation.parentElement).toBe(document.querySelector('#awards'));
+    expect(calls).toEqual(['1 win & 3 nominations total']);
+    session.stop();
+  });
+
+  it('stops recovering a translation after the host removes it twice', async () => {
+    document.body.innerHTML = '<p id="source">A stable post body.</p>';
+    const calls = [];
+    const session = new PageSession({
+      generation: 414,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    const source = document.querySelector('#source');
+    let hostRemovals = 0;
+    const hostObserver = new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.addedNodes ?? []) {
+          if (node.nodeType !== 1 || !node.matches('translight-translation') ||
+              node.previousElementSibling !== source) continue;
+          hostRemovals += 1;
+          node.remove();
+        }
+      }
+    });
+    hostObserver.observe(document.body, {childList: true, subtree: true});
+
+    try {
+      await session.start();
+      await wait(900);
+
+      expect(hostRemovals).toBe(2);
+      expect(session.recoveryTimer).toBeNull();
+      expect(session.pendingRecoveryElements.size).toBe(0);
+      expect(source.nextElementSibling).toBeNull();
+
+      const added = document.createElement('p');
+      added.textContent = 'A later post body.';
+      document.body.appendChild(added);
+      await wait(220);
+
+      expect(added.nextElementSibling?.textContent).toBe('ko:A later post body.');
+      expect(calls).toEqual(['A stable post body.', 'A later post body.']);
+      expect(session.running).toBe(true);
+    } finally {
+      hostObserver.disconnect();
+      session.stop();
+    }
+  });
+
+  it('waits for the final DOM in a burst of SPA renders', async () => {
+    document.body.innerHTML = '<div id="root"><p id="source">Initial post body.</p></div>';
+    const calls = [];
+    const session = new PageSession({
+      generation: 415,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    await session.start();
+    try {
+      let source = document.querySelector('#source');
+      for (const text of ['First interim body.', 'Second interim body.', 'Final post body.']) {
+        const root = document.querySelector('#root');
+        root.innerHTML = `<p id="source">${text}</p>`;
+        source = root.querySelector('#source');
+        await wait(20);
+      }
+      expect(calls).toEqual(['Initial post body.']);
+      await wait(220);
+
+      expect(source.nextElementSibling?.textContent).toBe('ko:Final post body.');
+      expect(calls).toEqual(['Initial post body.', 'Final post body.']);
+    } finally {
+      session.stop();
+    }
+  });
+
+  it('clears pending translation recovery when a session stops', async () => {
+    document.body.innerHTML = '<p id="source">A pending post body.</p>';
+    const session = new PageSession({
+      generation: 416,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider()
+    });
+
+    await session.start();
+    document.querySelector('#source').nextElementSibling.remove();
+    await wait(20);
+    expect(session.recoveryTimer).not.toBeNull();
+
+    session.stop({notify: false});
+    expect(session.recoveryTimer).toBeNull();
+    expect(session.pendingRecoveryElements.size).toBe(0);
+    await wait(500);
+    expect(document.querySelector('translight-translation')).toBeNull();
+  });
+
+  it('clears pending translation recovery when a route starts', async () => {
+    document.body.innerHTML = '<p id="source">A route-bound post body.</p>';
+    const session = new PageSession({
+      generation: 417,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider()
+    });
+
+    await session.start();
+    document.querySelector('#source').nextElementSibling.remove();
+    await wait(20);
+    expect(session.recoveryTimer).not.toBeNull();
+
+    expect(session.beginRouteChange({routeGeneration: 1})).toBe(true);
+    expect(session.recoveryTimer).toBeNull();
+    expect(session.pendingRecoveryElements.size).toBe(0);
+    session.applyRouteDecision({routeGeneration: 1, continueTranslation: false});
   });
 
   it('translates Korean-to-English changes and removes English-to-Korean translations', async () => {

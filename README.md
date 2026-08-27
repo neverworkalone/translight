@@ -73,5 +73,4 @@ npm run package
 npm run dev
 ```
 
-
 The Translator API and its language model run in Chrome's supported desktop environments. The first translation may require downloading the on-device model. Translight does not send page content to an external translation server.
