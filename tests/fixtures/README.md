@@ -5,6 +5,27 @@ README. Each fixture should keep its page and runner together, and each new bug
 should add a short section here with the URL, setup, scenarios, and expected
 result.
 
+## Guardian card translation placement
+
+Fixture: `guardian-translation-placement-repro.html` and
+`guardian-translation-placement-repro.js`
+
+Open this URL in Chrome while the Vite development server is running:
+
+```text
+http://127.0.0.1:5173/tests/fixtures/guardian-translation-placement-repro.html
+```
+
+This fixture models the supplied Guardian front page at
+`https://www.theguardian.com/international`. Guardian story cards can render a
+category as a block child before the headline text inside the same heading.
+The headline translation must stay after the original headline, while the
+category remains before the headline.
+
+The repaired case must report `translationAfterOriginal: true`,
+`categoryStillBeforeHeadline: true`, `translationCount: 2`,
+`testPassed: true`, and `restoredAfterStop: true`.
+
 ## IMDb native scroll-anchor observation
 
 Fixture: `imdb-jitter-repro.html` and `imdb-jitter-repro.js`

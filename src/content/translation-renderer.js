@@ -64,6 +64,7 @@ const ATTRIBUTE_NAMES = [
   SEGMENT_ATTRIBUTE,
   SEGMENT_ID_ATTRIBUTE
 ];
+const MIXED_CONTENT_AFTER_DIRECT_TEXT_PLACEMENT = 'inside-after-direct-text';
 
 function escapeAttribute(value) {
   return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
@@ -136,6 +137,50 @@ function getDirectNestedList(element) {
     const tagName = child.tagName?.toLowerCase();
     return tagName === 'ul' || tagName === 'ol';
   });
+}
+
+function isNestedBlockNode(node) {
+  return node?.nodeType === 1 && (
+    node.matches?.(BLOCK_SELECTOR) ||
+    Boolean(node.querySelector?.(BLOCK_SELECTOR))
+  );
+}
+
+function getMixedContentDirectChildren(element, sourceTextNodes) {
+  const directChildren = new Set();
+  const nodes = sourceTextNodes ?? collectSourceTextNodes(element, true);
+  for (const node of nodes) {
+    if (!(node.nodeValue ?? '').trim()) continue;
+    let child = node;
+    while (child.parentNode && child.parentNode !== element) child = child.parentNode;
+    if (child.parentNode === element) directChildren.add(child);
+  }
+  return directChildren;
+}
+
+function placeMixedContentTranslation(element, translation, sourceTextNodes) {
+  const childNodes = Array.from(element.childNodes ?? []);
+  const firstNestedBlockIndex = childNodes.findIndex(isNestedBlockNode);
+  const directChildren = getMixedContentDirectChildren(element, sourceTextNodes);
+  const directChildIndexes = childNodes
+    .map((child, index) => directChildren.has(child) ? index : -1)
+    .filter((index) => index >= 0);
+
+  if (firstNestedBlockIndex >= 0 && directChildIndexes.length &&
+      Math.max(...directChildIndexes) > firstNestedBlockIndex) {
+    const nextSibling = childNodes[Math.max(...directChildIndexes) + 1] ?? null;
+    element.insertBefore(translation, nextSibling);
+    return MIXED_CONTENT_AFTER_DIRECT_TEXT_PLACEMENT;
+  }
+
+  const firstNestedBlock = childNodes[firstNestedBlockIndex];
+  if (firstNestedBlock) {
+    element.insertBefore(translation, firstNestedBlock);
+    return 'inside-before-first-block';
+  }
+
+  element.appendChild(translation);
+  return 'inside';
 }
 
 function getStableListItem(element) {
@@ -220,7 +265,7 @@ function placeCollapsedReviewTranslationBeforeCard(card, element, translation) {
   insertionReference.parentNode?.insertBefore(translation, insertionReference);
 }
 
-function insertAtSafeLocation(element, translation, mixedContent = false) {
+function insertAtSafeLocation(element, translation, mixedContent = false, sourceTextNodes) {
   const stableListItem = getStableListItem(element);
   if (stableListItem) {
     stableListItem.parentNode.insertBefore(translation, stableListItem.nextSibling);
@@ -242,20 +287,7 @@ function insertAtSafeLocation(element, translation, mixedContent = false) {
   }
 
   if (mixedContent) {
-    if (element.tagName?.toLowerCase() === 'li') {
-      const nestedList = getDirectNestedList(element);
-      if (nestedList) {
-        element.insertBefore(translation, nestedList);
-        return 'inside-before-first-block';
-      }
-    }
-    const firstNestedBlock = Array.from(element.children ?? []).find((child) =>
-      child.matches?.(BLOCK_SELECTOR) || child.querySelector?.(BLOCK_SELECTOR)
-    );
-    if (firstNestedBlock) {
-      element.insertBefore(translation, firstNestedBlock);
-      return 'inside-before-first-block';
-    }
+    return placeMixedContentTranslation(element, translation, sourceTextNodes);
   }
 
   if (!shouldInsertInside(element)) {
@@ -315,6 +347,10 @@ function restorePlacement(record) {
       element.insertBefore(translation, firstNestedBlock);
       return;
     }
+  }
+  if (placement === MIXED_CONTENT_AFTER_DIRECT_TEXT_PLACEMENT) {
+    placeMixedContentTranslation(element, translation, record.sourceTextNodes);
+    return;
   }
   element.appendChild(translation);
 }
@@ -821,6 +857,13 @@ export class TranslationRenderer {
       element.parentNode.insertBefore(translation, element);
       return;
     }
+    if (record.placement === MIXED_CONTENT_AFTER_DIRECT_TEXT_PLACEMENT) {
+      const directChild = [...getMixedContentDirectChildren(element, record.sourceTextNodes)][0];
+      if (directChild) {
+        element.insertBefore(translation, directChild);
+        return;
+      }
+    }
     if (record.placement?.kind === COLLAPSED_REVIEW_CARD_PLACEMENT) {
       const anchor = record.placement.anchor;
       if (anchor?.parentNode) {
@@ -1041,6 +1084,7 @@ export class TranslationRenderer {
       return 'changed';
     }
     if (hasNestedBlocks(record.element) !== Boolean(record.mixedContent)) return 'changed';
+    record.sourceTextNodes = sourceTextNodes;
     if ((record.recoveryAttempts ?? 0) >= MAX_RECOVERY_ATTEMPTS) return 'exhausted';
     return 'ready';
   }
@@ -1151,7 +1195,7 @@ export class TranslationRenderer {
       replacementWrappers: [],
       recoveryAttempts: 0
     };
-    record.placement = insertAtSafeLocation(element, translation, mixedContent);
+    record.placement = insertAtSafeLocation(element, translation, mixedContent, sourceTextNodes);
 
     element.setAttribute(SOURCE_ATTRIBUTE, sourceId);
     if (sourceHash) element.setAttribute(SOURCE_HASH_ATTRIBUTE, sourceHash);

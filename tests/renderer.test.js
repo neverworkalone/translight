@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   GENERATED_ATTRIBUTE,
   HIDDEN_ATTRIBUTE,
@@ -718,6 +718,92 @@ describe('TranslationRenderer', () => {
 
     renderer.removeAll();
     expect(document.body.innerHTML).toBe('<div id="mixed">Direct text.<p id="nested">Nested text.</p></div>');
+  });
+
+  it('places mixed card translations after direct text that follows nested metadata', () => {
+    document.body.innerHTML = `
+      <article id="card">
+        <h3 id="headline"><div class="category">Meta</div><span class="headline-text">Facebook and Instagram face changes in US as Meta settles teen addiction lawsuit for $18bn</span></h3>
+      </article>
+    `;
+    const headline = document.querySelector('#headline');
+    const blocks = collectTranslationBlocks(document.body);
+    const titleBlock = blocks.find((block) => block.element === headline);
+    const renderer = new TranslationRenderer({document, sessionId: 'guardian-placement-session'});
+
+    for (const block of blocks) {
+      renderer.insert({...block, translatedText: `ko:${block.text}`});
+    }
+
+    const titleTranslation = document.querySelector(
+      `translight-translation[data-translight-source-id="${titleBlock.sourceId}"]`
+    );
+    const originalHeadline = headline.querySelector('.headline-text');
+
+    expect(titleBlock.mixedContent).toBe(true);
+    expect(titleTranslation?.parentElement).toBe(headline);
+    expect(titleTranslation?.previousElementSibling).toBe(originalHeadline);
+    expect(originalHeadline?.nextElementSibling).toBe(titleTranslation);
+
+    renderer.removeAll();
+    expect(document.body.innerHTML).toContain(
+      '<span class="headline-text">Facebook and Instagram face changes in US as Meta settles teen addiction lawsuit for $18bn</span>'
+    );
+    expect(document.querySelector('translight-translation')).toBeNull();
+  });
+
+  it('reuses mixed source text nodes during placement', () => {
+    const textRunCount = 100;
+    const textRuns = Array.from({length: textRunCount}, (_, index) =>
+      `<span>Headline text run ${index + 1}</span>`
+    ).join('');
+    document.body.innerHTML = `<h3 id="source"><div>Meta</div>${textRuns}</h3>`;
+    const source = document.querySelector('#source');
+    const renderer = new TranslationRenderer({document, sessionId: 'guardian-style-query-session'});
+    const getComputedStyleSpy = vi.spyOn(window, 'getComputedStyle');
+
+    try {
+      renderer.insert({
+        element: source,
+        sourceId: 'guardian-style-query-source',
+        mixedContent: true,
+        translatedText: '번역된 제목'
+      });
+
+      expect(getComputedStyleSpy).toHaveBeenCalledTimes(textRunCount + 3);
+    } finally {
+      getComputedStyleSpy.mockRestore();
+      renderer.removeAll();
+    }
+  });
+
+  it('keeps mixed placement after same-text host node replacement during recovery', () => {
+    document.body.innerHTML = '<h3 id="source"><div id="category">Meta</div><span id="headline">Guardian headline</span></h3>';
+    const source = document.querySelector('#source');
+    const headline = document.querySelector('#headline');
+    const renderer = new TranslationRenderer({document, sessionId: 'guardian-recovery-session'});
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'guardian-recovery-source',
+      sourceHash: hashSourceText('Guardian headline'),
+      mixedContent: true,
+      translatedText: '가디언 제목'
+    });
+
+    headline.firstChild.replaceWith(document.createTextNode('Guardian headline'));
+    translation.remove();
+
+    expect(renderer.restoreMissingTranslations({elements: [source]})).toEqual({
+      restored: [source],
+      invalid: []
+    });
+    expect([...source.children]).toEqual([
+      document.querySelector('#category'),
+      headline,
+      translation
+    ]);
+
+    renderer.removeAll();
   });
 
   it('keeps translations inside table cells in original-translation mode', () => {
