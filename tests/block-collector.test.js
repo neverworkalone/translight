@@ -47,6 +47,17 @@ describe('collectTranslationBlocks', () => {
     expect(collectTranslationBlocks(document.body).map((block) => block.text)).toEqual(['Fresh paragraph']);
   });
 
+  it('does not collect standalone handles as translatable blocks', () => {
+    document.body.innerHTML = `
+      <div id="handle">@dreyaleigh</div>
+      <p>WOW. The intro preview shots are remarkable!</p>
+    `;
+
+    expect(collectTranslationBlocks(document.body).map((block) => block.text)).toEqual([
+      'WOW. The intro preview shots are remarkable!'
+    ]);
+  });
+
   it('treats a marked node as fresh when its renderer record is gone', () => {
     document.body.innerHTML = `
       <p

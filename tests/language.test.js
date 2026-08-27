@@ -6,6 +6,7 @@ import {
   LANGUAGE_MIN_LETTERS,
   classifyTextLanguage,
   isDocumentInLanguage,
+  isStandaloneHandle,
   isTranslatableBlock,
   isTranslatableText,
   isTranslatableTitle,
@@ -73,6 +74,15 @@ describe('content language detection', () => {
 
   it('translates English text containing a small amount of Korean', () => {
     expect(isTranslatableText('This English post contains 한글 in a quoted name.', 'ko')).toBe(true);
+  });
+
+  it('skips standalone handles while translating inline mentions', () => {
+    expect(isStandaloneHandle('@dreyaleigh')).toBe(true);
+    expect(isStandaloneHandle(' @PeetyMcFly8871 ')).toBe(true);
+    expect(isStandaloneHandle('@dreyaleigh,')).toBe(false);
+    expect(isStandaloneHandle('Thanks @dreyaleigh for sharing this.')).toBe(false);
+    expect(isTranslatableText('@dreyaleigh', 'ko')).toBe(false);
+    expect(isTranslatableText('Thanks @dreyaleigh for sharing this.', 'ko')).toBe(true);
   });
 
   it('rejects symbols and short text at the language boundary', () => {

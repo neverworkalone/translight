@@ -2,6 +2,7 @@ const LANGUAGE_CODE_PATTERN = /^[a-z]{2,3}(?:[-_][a-z0-9]{2,8})?/i;
 const HANGUL_CHARACTER = /[\uac00-\ud7af\u3130-\u318f]/u;
 const LETTER_CHARACTER = /^\p{L}$/u;
 const LATIN_CHARACTER = /^\p{Script=Latin}$/u;
+const STANDALONE_HANDLE_PATTERN = /^@[\p{L}\p{N}._-]+$/u;
 
 export const LANGUAGE_MIN_LETTERS = 3;
 export const LANGUAGE_MIN_LATIN_LETTERS = 2;
@@ -59,6 +60,14 @@ export function isTextInLanguage(value, targetLanguage) {
 }
 
 /**
+ * User handles are identifiers, not translatable content. Keep this exact so
+ * mentions that appear inside a sentence remain eligible for translation.
+ */
+export function isStandaloneHandle(value) {
+  return STANDALONE_HANDLE_PATTERN.test(String(value ?? '').trim());
+}
+
+/**
  * Return the nearest language declaration that applies to a content element.
  * html and body are intentionally skipped because localized sites commonly
  * use those elements for UI language rather than the language of each post.
@@ -88,6 +97,7 @@ export function nearestContentLanguage(element) {
  */
 export function isTranslatableBlock(element, text, targetLanguage = 'ko') {
   const target = normalizeLanguageCode(targetLanguage);
+  if (isStandaloneHandle(text)) return false;
   const stats = analyzeText(text);
   if (!target || !hasDetectableText(stats)) return false;
 
