@@ -37,7 +37,6 @@ const ROLE_TRANSLATION = 'translation';
 const ROLE_ORIGINAL = 'original';
 const TRANSLATION_TEXT_ATTRIBUTE = 'data-translight-text';
 const BLOCK_SELECTOR = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,figcaption,div,section,td,th';
-const EXCLUDED_CONTENT_SELECTOR = 'script,style,noscript,code,pre,input,textarea,select,button';
 const GENERATED_SELECTOR = 'translight-translation,[data-translight-generated="true"]';
 const LAYOUT_DISPLAYS = new Set(['flex', 'inline-flex', 'grid', 'inline-grid']);
 const TABLE_CELL_TAGS = new Set(['td', 'th']);
@@ -496,7 +495,7 @@ function collectSourceTextNodes(element, mixedContent = false, {includeReplaceme
       }
       if (child.nodeType !== 1) continue;
       if (isHidden(child, {includeAncestors: false})) continue;
-      if (child.matches(EXCLUDED_CONTENT_SELECTOR)) continue;
+      if (isExcluded(child)) continue;
       if (child.matches(GENERATED_SELECTOR)) {
         if (includeReplacementText && child.matches(`[${REPLACEMENT_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"]`)) {
           visit(child);

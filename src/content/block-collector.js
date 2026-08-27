@@ -3,7 +3,8 @@ import { isTranslatableBlock } from './language.js';
 
 const BLOCK_SELECTOR = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,figcaption,div,section,td,th';
 const EXCLUDED_CONTENT_SELECTOR = 'script,style,noscript,code,pre,input,textarea,select,button';
-const EXCLUDED_ANCESTOR_SELECTOR = `${EXCLUDED_CONTENT_SELECTOR},[contenteditable="true"],[contenteditable=""]`;
+const BRANDING_SELECTOR = '.site-logo,a.logo.replace';
+const EXCLUDED_ANCESTOR_SELECTOR = `${EXCLUDED_CONTENT_SELECTOR},[contenteditable="true"],[contenteditable=""],${BRANDING_SELECTOR}`;
 const GENERATED_SELECTOR = 'translight-translation,[data-translight-generated="true"]';
 const NAVIGATION_SELECTOR = 'nav,[role="navigation"],[role="menu"],[aria-haspopup="menu"]';
 const LINK_RATIO_LIMIT = 0.65;
@@ -81,7 +82,7 @@ function textFromNode(node, root) {
   if (node.nodeType === 3) return node.nodeValue ?? '';
   if (!isElement(node)) return '';
   if (isHidden(node)) return '';
-  if (node !== root && node.matches(EXCLUDED_CONTENT_SELECTOR)) return '';
+  if (node !== root && isExcluded(node)) return '';
   if (node !== root && node.matches(GENERATED_SELECTOR)) return '';
   if (node !== root && node.matches(SEGMENT_SELECTOR)) return '';
   return Array.from(node.childNodes, (child) => textFromNode(child, root)).join('');
@@ -91,7 +92,7 @@ function directTextFromNode(node, root) {
   if (node.nodeType === 3) return node.nodeValue ?? '';
   if (!isElement(node)) return '';
   if (isHidden(node)) return '';
-  if (node !== root && node.matches(EXCLUDED_CONTENT_SELECTOR)) return '';
+  if (node !== root && isExcluded(node)) return '';
   if (node !== root && node.matches(GENERATED_SELECTOR)) return '';
   if (node !== root && node.matches(SEGMENT_SELECTOR)) return '';
   if (node !== root && node.matches(BLOCK_SELECTOR)) return '';
@@ -115,6 +116,9 @@ function hasLettersOrNumbers(text) {
 
 function isNavigationLike(element, text) {
   if (element.closest(NAVIGATION_SELECTOR)) return true;
+  // Figure captions commonly link to the referenced films, but the links are
+  // part of the caption content rather than a navigation list.
+  if (element.matches('figcaption')) return false;
   const links = Array.from(element.querySelectorAll('a'));
   if (links.length < 2 || text.length === 0) return false;
   const linkText = links
@@ -201,7 +205,7 @@ function getTextNodes(node, root, nodes = []) {
   }
   if (!isElement(node)) return nodes;
   if (node !== root && (
-    node.matches(EXCLUDED_CONTENT_SELECTOR) ||
+    isExcluded(node) ||
     node.matches(GENERATED_SELECTOR) ||
     node.matches(SEGMENT_SELECTOR) ||
     isHidden(node)

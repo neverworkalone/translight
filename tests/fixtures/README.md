@@ -206,6 +206,27 @@ The repaired cleanup case must report equal `sourceLayout` and
 aligned entry in `resizeSamples` and keep `testPassed: true` while the session
 is active.
 
+## Letterboxd article caption and logo
+
+Fixture: `letterboxd-article-caption-repro.html` and
+`letterboxd-article-caption-repro.js`
+
+Open this URL in Chrome while the Vite development server is running:
+
+```text
+http://127.0.0.1:5173/tests/fixtures/letterboxd-article-caption-repro.html
+```
+
+This fixture models the supplied Letterboxd journal page. The hero image
+caption contains links to the featured films and must still be collected as
+article prose, while the `site-logo` image-replacement text must remain
+untouched so its fixed header box does not expand.
+
+The repaired case must report `captionTranslationCount: 1`,
+`logoTranslationCount: 0`, `translationCount: 2`, matching logo and caption
+layouts before and after translation, `restoredAfterStop: true`, and
+`testPassed: true`.
+
 ## YouTube long description paragraph placement
 
 Fixture: `youtube-description-paragraphs-repro.html` and

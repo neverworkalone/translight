@@ -46,6 +46,52 @@ describe('PageSession', () => {
     session.stop();
   });
 
+  it.each([
+    ['translation-only', TRANSLATION_MODES.TRANSLATION_ONLY],
+    ['translation-original', TRANSLATION_MODES.TRANSLATION_ORIGINAL]
+  ])('keeps excluded inline content untouched in %s mode', async (_label, translationMode) => {
+    document.body.innerHTML = `
+      <p id="source">
+        Read this article.
+        <a class="logo replace" href="#brand">Unchanged label</a>
+        <span contenteditable="true">Editable label</span>
+      </p>
+    `;
+    const source = document.querySelector('#source');
+    const calls = [];
+    const session = new PageSession({
+      generation: 3,
+      document,
+      settings: {translatePageTitle: false, translationMode},
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    await session.start();
+
+    expect(calls).toEqual(['Read this article.']);
+    expect(source.querySelector('a')?.textContent).toBe('Unchanged label');
+    expect(source.querySelector('[contenteditable="true"]')?.textContent).toBe('Editable label');
+    expect(source.textContent.replace(/[\t\r\n ]+/g, ' ').trim())
+      .toContain('ko:Read this article.');
+    if (translationMode === TRANSLATION_MODES.TRANSLATION_ONLY) {
+      expect(document.querySelector('translight-translation')).toBeNull();
+    } else {
+      expect(document.querySelector('translight-translation')?.textContent).toBe('Read this article.');
+    }
+
+    session.stop({notify: false});
+    expect(source.textContent.replace(/[\t\r\n ]+/g, ' ').trim())
+      .toBe('Read this article. Unchanged label Editable label');
+    expect(source.querySelector('a')?.textContent).toBe('Unchanged label');
+    expect(source.querySelector('[contenteditable="true"]')?.textContent).toBe('Editable label');
+    expect(document.querySelector('translight-translation')).toBeNull();
+  });
+
   it('refreshes sibling layouts when the active viewport is resized', async () => {
     document.body.innerHTML = '<p>Article paragraph.</p>';
     const session = new PageSession({

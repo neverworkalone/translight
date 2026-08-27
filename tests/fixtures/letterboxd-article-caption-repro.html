@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Translight Letterboxd article caption reproduction</title>
+    <style>
+      html { scroll-behavior: auto; }
+      body {
+        margin: 0;
+        color: #405568;
+        background: #fff;
+        font: 16px/1.5 Arial, sans-serif;
+      }
+      #report {
+        position: fixed;
+        z-index: 10;
+        top: 0;
+        right: 0;
+        width: 420px;
+        max-height: 90vh;
+        overflow: auto;
+        box-sizing: border-box;
+        padding: 12px;
+        background: #111827;
+        color: white;
+        font: 12px/1.4 monospace;
+        white-space: pre-wrap;
+      }
+      .site-header {
+        height: 48px;
+        padding: 11px 24px 12px;
+        box-sizing: border-box;
+        background: #141f29;
+      }
+      .site-header section {
+        width: min(900px, 100%);
+        height: 25px;
+        margin: 0 auto;
+      }
+      .site-logo {
+        width: 273px;
+        height: 25px;
+        margin: 0;
+        font-size: 24px;
+        line-height: 24px;
+      }
+      .logo.replace {
+        display: block;
+        width: 273px;
+        height: 25px;
+        overflow: hidden;
+        color: transparent;
+        white-space: nowrap;
+        text-indent: 110%;
+        background: #f5f7f8;
+      }
+      .article {
+        width: min(640px, calc(100% - 32px));
+        margin: 72px auto 120px;
+      }
+      .article-media {
+        width: 100%;
+        margin: 0;
+      }
+      .article-media img {
+        display: block;
+        width: 100%;
+        height: 220px;
+        object-fit: cover;
+        background: #dbe3e8;
+      }
+      .figure-caption {
+        display: block;
+        margin-top: 8px;
+        color: #7f8d97;
+        font-size: 12px;
+        line-height: 16px;
+      }
+      .article p {
+        margin: 40px 0 0;
+        font-size: 18px;
+        line-height: 28px;
+      }
+    </style>
+  </head>
+  <body>
+    <pre id="report">starting…</pre>
+    <header class="site-header">
+      <section>
+        <h1 class="site-logo">
+          <a class="logo replace" href="/">Letterboxd — Your life in film</a>
+        </h1>
+      </section>
+    </header>
+    <main class="article">
+      <figure class="article-media">
+        <img alt="Gromit from Wallace &amp; Gromit">
+        <figcaption class="figure-caption caption">
+          Gromit from&nbsp;<em><a href="#gromit">Wallace &amp; Gromit: The Curse of the Were-Rabbit</a></em>,
+          Shadow from&nbsp;<em><a href="#shadow">Homeward Bound: The Incredible Journey</a></em>,
+          Jack (Uggie) from&nbsp;<em><a href="#artist">The Artist</a></em>.
+        </figcaption>
+      </figure>
+      <p>In celebration of International Dog Day, we are counting off beloved movie dogs.</p>
+    </main>
+    <script type="module" src="/tests/fixtures/letterboxd-article-caption-repro.js"></script>
+  </body>
+</html>
