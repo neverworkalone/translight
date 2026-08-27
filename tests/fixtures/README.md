@@ -147,6 +147,28 @@ The repaired case must report `translationCount: 1`,
 `translationAfterOriginal: true`, `testPassed: true`, and
 `restoredAfterStop: true`.
 
+## Amazon collapsed review translation visibility
+
+Fixture: `amazon-review-visibility-repro.html` and
+`amazon-review-visibility-repro.js`
+
+Open this URL in Chrome while the Vite development server is running:
+
+```text
+http://127.0.0.1:5173/tests/fixtures/amazon-review-visibility-repro.html
+```
+
+The fixture models the supplied Amazon page at
+`https://www.amazon.com/clp/B0CWGSG7X2`. Amazon renders a review body inside a
+collapsed `data-a-card-type="basic"` card with `overflow: hidden`; the saved
+page shows that the translation node is created after the review paragraph,
+but it is clipped inside this card. The generated translation must be placed
+after the collapsed card so it remains visible below the original review.
+
+The repaired case must report `translationCount: 1`,
+`translationOutsideCollapsedCard: true`, `translationBelowCard: true`,
+`testPassed: true`, and `restoredAfterStop: true`.
+
 ## YouTube collector mutation performance
 
 Fixture: `youtube-collector-mutation-repro.html` and

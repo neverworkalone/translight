@@ -43,6 +43,12 @@ const LAYOUT_DISPLAYS = new Set(['flex', 'inline-flex', 'grid', 'inline-grid']);
 const TABLE_CELL_TAGS = new Set(['td', 'th']);
 const MAX_RECOVERY_ATTEMPTS = 1;
 const STABLE_LIST_SIBLING_PLACEMENT = 'stable-list-sibling';
+const COLLAPSED_REVIEW_CARD_PLACEMENT = 'collapsed-review-card-sibling';
+const COLLAPSED_REVIEW_TRANSLATION_AFTER_CARD = 'after-card';
+const COLLAPSED_REVIEW_TRANSLATION_BEFORE_CARD = 'before-card';
+const AMAZON_REVIEW_CONTENT_SELECTOR = '[data-hook="reviewRichContentContainer"]';
+const AMAZON_REVIEW_CARD_SELECTOR = '[data-a-card-type="basic"]';
+const DOCUMENT_POSITION_FOLLOWING = 4;
 const ATTRIBUTE_NAMES = [
   SOURCE_ATTRIBUTE,
   SOURCE_HASH_ATTRIBUTE,
@@ -116,6 +122,66 @@ function shouldInsertInside(element) {
   return LAYOUT_DISPLAYS.has(getDisplay(element.parentElement));
 }
 
+function hasHiddenOverflow(element) {
+  const view = element?.ownerDocument?.defaultView;
+  const style = view?.getComputedStyle?.(element);
+  if (!style) return false;
+  return [style.overflow, style.overflowX, style.overflowY]
+    .some((value) => value === 'hidden' || value === 'clip');
+}
+
+const collapsedReviewTranslationSources = new WeakMap();
+const collapsedReviewTranslationRegions = new WeakMap();
+
+function getCollapsedReviewCard(element) {
+  const reviewContent = element.closest?.(AMAZON_REVIEW_CONTENT_SELECTOR);
+  if (!reviewContent) return null;
+  const card = reviewContent.closest?.(AMAZON_REVIEW_CARD_SELECTOR);
+  if (!card?.parentNode || !hasHiddenOverflow(card)) return null;
+  return card;
+}
+
+function getCollapsedReviewTranslations(card, currentTranslation, region) {
+  return Array.from(card?.parentElement?.children ?? [])
+    .filter((sibling) => {
+      if (sibling === currentTranslation || !sibling.matches?.(TRANSLATION_TAG)) return false;
+      const source = collapsedReviewTranslationSources.get(sibling);
+      return source?.closest?.(AMAZON_REVIEW_CARD_SELECTOR) === card &&
+        collapsedReviewTranslationRegions.get(sibling) === region;
+    });
+}
+
+function placeCollapsedReviewTranslation(card, element, translation) {
+  const translations = getCollapsedReviewTranslations(
+    card,
+    translation,
+    COLLAPSED_REVIEW_TRANSLATION_AFTER_CARD
+  );
+  const nextTranslation = translations.find((candidate) => {
+    const source = collapsedReviewTranslationSources.get(candidate);
+    return Boolean(source && (element.compareDocumentPosition(source) & DOCUMENT_POSITION_FOLLOWING));
+  });
+  const insertionReference = nextTranslation ?? translations.at(-1) ?? card;
+  insertionReference.parentNode?.insertBefore(
+    translation,
+    nextTranslation ?? insertionReference.nextSibling
+  );
+}
+
+function placeCollapsedReviewTranslationBeforeCard(card, element, translation) {
+  const translations = getCollapsedReviewTranslations(
+    card,
+    translation,
+    COLLAPSED_REVIEW_TRANSLATION_BEFORE_CARD
+  );
+  const nextTranslation = translations.find((candidate) => {
+    const source = collapsedReviewTranslationSources.get(candidate);
+    return Boolean(source && (element.compareDocumentPosition(source) & DOCUMENT_POSITION_FOLLOWING));
+  });
+  const insertionReference = nextTranslation ?? card;
+  insertionReference.parentNode?.insertBefore(translation, insertionReference);
+}
+
 function insertAtSafeLocation(element, translation, mixedContent = false) {
   const stableListItem = getStableListItem(element);
   if (stableListItem) {
@@ -123,6 +189,17 @@ function insertAtSafeLocation(element, translation, mixedContent = false) {
     return {
       kind: STABLE_LIST_SIBLING_PLACEMENT,
       anchor: stableListItem
+    };
+  }
+
+  const collapsedReviewCard = getCollapsedReviewCard(element);
+  if (collapsedReviewCard) {
+    collapsedReviewTranslationSources.set(translation, element);
+    collapsedReviewTranslationRegions.set(translation, COLLAPSED_REVIEW_TRANSLATION_AFTER_CARD);
+    placeCollapsedReviewTranslation(collapsedReviewCard, element, translation);
+    return {
+      kind: COLLAPSED_REVIEW_CARD_PLACEMENT,
+      anchor: collapsedReviewCard
     };
   }
 
@@ -170,6 +247,14 @@ function restorePlacement(record) {
   if (placement?.kind === STABLE_LIST_SIBLING_PLACEMENT) {
     const anchor = placement.anchor;
     if (anchor?.parentNode) anchor.parentNode.insertBefore(translation, anchor.nextSibling);
+    return;
+  }
+  if (placement?.kind === COLLAPSED_REVIEW_CARD_PLACEMENT) {
+    const anchor = placement.anchor;
+    if (anchor?.parentNode) {
+      collapsedReviewTranslationRegions.set(translation, COLLAPSED_REVIEW_TRANSLATION_AFTER_CARD);
+      placeCollapsedReviewTranslation(anchor, element, translation);
+    }
     return;
   }
   if (!element?.parentNode) return;
@@ -698,6 +783,14 @@ export class TranslationRenderer {
       element.parentNode.insertBefore(translation, element);
       return;
     }
+    if (record.placement?.kind === COLLAPSED_REVIEW_CARD_PLACEMENT) {
+      const anchor = record.placement.anchor;
+      if (anchor?.parentNode) {
+        collapsedReviewTranslationRegions.set(translation, COLLAPSED_REVIEW_TRANSLATION_BEFORE_CARD);
+        placeCollapsedReviewTranslationBeforeCard(anchor, element, translation);
+      }
+      return;
+    }
     element.insertBefore(translation, element.firstChild);
   }
 
@@ -707,7 +800,9 @@ export class TranslationRenderer {
     if (mode === TRANSLATION_MODES.TRANSLATION_ONLY) {
       restorePlacement(record);
       element.setAttribute(HIDDEN_ATTRIBUTE, GENERATED_VALUE);
-      if (record.placement !== 'sibling') {
+      const hasExternalPlacement = record.placement === 'sibling' ||
+        record.placement?.kind === COLLAPSED_REVIEW_CARD_PLACEMENT;
+      if (!hasExternalPlacement) {
         element.setAttribute(
           HIDDEN_PLACEMENT_ATTRIBUTE,
           record.mixedContent ? 'mixed' : 'inside'
