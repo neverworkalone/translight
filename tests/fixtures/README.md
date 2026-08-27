@@ -258,11 +258,13 @@ Open this URL in Chrome while the Vite development server is running:
 http://127.0.0.1:5173/tests/fixtures/apnews-live-layout-repro.html
 ```
 
-This fixture models the supplied AP News live page's trending links and live
-controls. Their source elements are flex or grid containers with constrained
-widths; translations must sit beside those containers so the original labels
-do not shrink into vertical columns. The repaired case must report stable
-source rectangles, sibling translations, `notVertical: true` for every source,
+This fixture models the supplied AP News live page's trending links, live
+controls, article lead, and side rail using the saved page's nested
+`PageListTrending`/`bsp-custom-headline` and `LiveBlogPage` DOM/CSS. The upper
+panel keeps the legacy child-placement state from the attached snapshot so the
+vertical failure remains visible; the lower panel runs the current renderer on
+the same layout. The repaired case must report a vertical legacy probe, stable
+source rectangles, horizontal translations, `translationCount: 11`,
 `restoredAfterStop: true`, and `testPassed: true`.
 
 ## YouTube long description paragraph placement

@@ -4,19 +4,29 @@
     <meta charset="utf-8">
     <title>Translight AP News live layout reproduction</title>
     <style>
+      :root {
+        --ap-red: #ff1918;
+        --ap-gray: #ddd;
+        --ap-border: #e0e0e0;
+      }
+
+      * { box-sizing: border-box; }
+
       html { scroll-behavior: auto; }
+
       body {
         margin: 0;
         color: #111;
         background: #fff;
         font: 16px/1.5 Arial, sans-serif;
       }
+
       #report {
         position: fixed;
         z-index: 10;
         top: 0;
         right: 0;
-        width: 460px;
+        width: 500px;
         max-height: 90vh;
         overflow: auto;
         box-sizing: border-box;
@@ -26,25 +36,136 @@
         font: 12px/1.4 monospace;
         white-space: pre-wrap;
       }
-      .Page-trending {
-        width: 760px;
-        margin: 24px auto;
-        padding: 8px;
-        color: white;
+
+      .fixture-note {
+        max-width: 1148px;
+        margin: 18px auto 8px;
+        padding: 0 8px;
+        font-size: 14px;
+      }
+
+      .fixture-note strong { color: var(--ap-red); }
+
+      .reproduction-panel {
+        max-width: 1148px;
+        margin: 0 auto 34px;
+        border: 1px solid #c8c8c8;
+        background: #fff;
+      }
+
+      .panel-label {
+        padding: 8px 12px;
+        color: #fff;
+        background: #333;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .legacy-panel { contenteditable: true; }
+
+      .Page-header-bar {
+        display: flex;
+        align-items: center;
+        min-height: 56px;
+        padding: 0 16px;
+        color: #fff;
         background: #000;
       }
-      .PageListTrending-contents {
+
+      .Page-header-bar-logo {
         display: grid;
-        grid-auto-flow: column;
-        grid-auto-columns: max-content;
-        width: max-content;
-        gap: 16px;
+        width: 34px;
+        height: 40px;
+        margin-right: 22px;
+        place-items: center;
+        color: #000;
+        background: #fff;
+        border-bottom: 3px solid var(--ap-red);
+        font-weight: 700;
+      }
+
+      .MainNavigation,
+      .MainNavigation-items,
+      .MainNavigationItem,
+      .MainNavigationItem-text {
+        display: flex;
+        align-items: center;
+      }
+
+      .MainNavigation-items {
+        gap: 18px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .MainNavigationItem-text a {
+        color: #fff;
+        font-size: 13px;
+        font-weight: 700;
+        text-decoration: none;
         white-space: nowrap;
       }
-      .PageList-items {
-        display: flex;
-        gap: 16px;
+
+      .Page-trendingZephr-wrapper {
+        width: 100%;
+        min-height: 36px;
+        color: #fff;
+        background: #000;
       }
+
+      .Page-trendingZephr { min-height: 36px; }
+      .Page-trendingZephr-trendingBar { padding-right: 25px; }
+
+      .Page-trending {
+        width: 100%;
+        max-width: 1148px;
+        margin: 0 auto;
+      }
+
+      .PageListTrending[data-module] {
+        margin: 0;
+        padding: 0;
+      }
+
+      .PageListTrending-contents {
+        align-items: center;
+        display: grid;
+        flex-wrap: nowrap;
+        justify-content: start;
+        overflow-x: scroll;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        white-space: nowrap;
+      }
+
+      [data-scroll-shade-parent] {
+        width: max-content;
+        overflow: hidden;
+      }
+
+      .PageList-items {
+        align-items: center;
+        display: flex;
+        width: max-content;
+        column-gap: 16px;
+        margin-left: -15px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding-bottom: 10px;
+        scrollbar-width: none;
+      }
+
+      /* The saved AP page keeps the four promo slots at these measured
+         desktop widths. Holding them here makes the old child placement
+         reproduce the zero-width/vertical translation seen in the capture. */
+      .legacy-panel .PagePromo-title { width: 122px; }
+      .legacy-panel .PageList-items-item:nth-child(3) .PagePromo-title { width: 67px; }
+      .legacy-panel .PageList-items-item:nth-child(4) .PagePromo-title { width: 97px; }
+      .legacy-panel .PageList-items-item:nth-child(5) .PagePromo-title { width: 151px; }
+
+      .PageList-header,
+      .PageList-header-title,
       .PageList-items-item,
       .PagePromoTrending,
       bsp-custom-headline,
@@ -53,138 +174,322 @@
         align-items: center;
         white-space: nowrap;
       }
-      .PagePromo-title {
-        width: 122px;
-        min-width: 0;
+
+      .PageList-header {
+        align-self: start;
+        flex: 0 1 auto;
+        padding-left: 7px;
       }
-      .PagePromo-title a {
-        color: white;
+
+      .PageList-header-title { font-weight: 700; }
+      .PageList-header-title a { color: #fff; text-decoration: none; }
+
+      .PageList-items-item,
+      .PagePromoTrending,
+      bsp-custom-headline,
+      .PagePromo-title {
+        flex: 0 1 auto;
+      }
+
+      .PagePromoTrending { position: relative; width: unset; }
+
+      .PagePromo-title {
+        min-width: auto;
+        padding: 0;
         font-size: 14px;
-        line-height: 17px;
+        font-weight: 550;
+        line-height: 18px;
+        text-align: center;
+      }
+
+      .PagePromo-title a,
+      .PagePromoContentIcons-text {
+        display: block;
+        color: #fff;
         white-space: nowrap;
       }
-      .LiveBlogPage-headline-sticky {
-        width: 760px;
-        margin: 24px auto;
+
+      .Page-content {
+        min-width: 0;
+        background: #fff;
       }
-      .sticky-content {
-        display: flex;
-        align-items: center;
-        width: 100%;
-        height: 36px;
+
+      .LiveBlogPage-layoutWrapper {
+        display: grid;
+        grid-template-columns: 324px minmax(0, 1fr);
+        gap: 24px;
+        max-width: 1148px;
+        margin: 0 auto;
       }
-      .LiveBlogPage-liveButton {
-        display: flex;
-        align-items: center;
-        gap: 5px;
-        flex: 0 0 50px;
-        width: 50px;
-        height: 36px;
-        color: #e11;
-        white-space: normal;
+
+      .LiveBlogPage-sideRail {
+        min-height: 350px;
+        padding: 18px 12px;
+        background: #fafafa;
       }
-      .live-dot {
+
+      .LiveBlogFeed-post {
         display: block;
-        flex: 0 0 5px;
+        margin: 0 0 16px;
+        padding-left: 10px;
+        border-left: 3px solid var(--ap-red);
+      }
+
+      .LiveBlogFeed-post-time {
+        color: var(--ap-red);
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+
+      .LiveBlogFeed-post-headline {
+        color: #111;
+        font-size: 14px;
+        font-weight: 700;
+        text-decoration: none;
+      }
+
+      .LiveBlogPage-headline-sticky {
+        display: block;
+        width: 103%;
+        overflow: auto;
+        padding-top: 16px;
+        border-bottom: 1px solid var(--ap-border);
+        background: #fff;
+      }
+
+      .sticky-content[data-live] {
+        display: grid;
+        grid-template-columns: 60px auto;
+        min-width: 0;
+      }
+
+      .LiveBlogPage-tabs {
+        align-items: center;
+        display: flex;
+        min-width: 0;
+        overflow-x: auto;
+        padding-bottom: 8px;
+        scrollbar-width: none;
+        white-space: nowrap;
+      }
+
+      .LiveBlogPage-liveButton {
+        align-items: center;
+        display: flex;
+        margin-right: 10px;
+        padding-bottom: 8px;
+      }
+
+      .LiveBlogPage-liveButton .live-dot {
         width: 5px;
         height: 5px;
-        border-radius: 50%;
-        background: #e11;
+        margin-right: 5px;
+        border-radius: 10px;
+        background: var(--ap-red);
       }
-      .live-text {
-        display: block;
-        font-size: 20px;
-        line-height: 24px;
+
+      .LiveBlogPage-liveButton .live-text {
+        color: var(--ap-red);
+        font-size: 19.8px;
+        font-weight: 700;
       }
-      .LiveBlogPage-tabs {
-        display: flex;
-        align-items: center;
-        flex: 1 1 auto;
-        gap: 10px;
-        min-width: 0;
-        overflow: auto;
-        white-space: nowrap;
-      }
+
       .LiveBlogPage-tab {
+        align-content: center;
         display: grid;
         flex: 0 1 auto;
-        min-width: 0;
-        padding: 5px 8px;
-        color: #111;
-        background: #eee;
+        height: 28px;
+        margin-right: 10px;
+        padding: 8px 10px;
+        border-radius: 3px;
+        color: #000;
+        background: var(--ap-gray);
+        font-size: 14px;
+        font-stretch: semi-condensed;
+        font-weight: 700;
+        text-transform: uppercase;
         white-space: nowrap;
       }
-      .article {
-        width: min(720px, calc(100% - 48px));
-        margin: 48px auto;
+
+      .LiveBlogPage-tab.active { color: #fff; background: var(--ap-red); }
+
+      .LiveBlogPage-lede,
+      .Page-oneColumn {
+        padding: 26px 34px;
       }
-      .article h1 { margin: 0 0 24px; font-size: 42px; line-height: 1.05; }
-      .article p { margin: 0; font-size: 18px; line-height: 28px; }
+
+      .Page-headline {
+        margin: 0 0 20px;
+        font-size: 42px;
+        line-height: 1.05;
+      }
+
+      .Page-subHeadline {
+        margin: 0 0 20px;
+        font-size: 20px;
+        line-height: 1.4;
+      }
+
+      .Page-lead { margin: 0 0 28px; }
+
+      .Page-lead img {
+        display: block;
+        width: 100%;
+        height: 220px;
+        object-fit: cover;
+        background: #aaa;
+      }
+
+      .Page-lead figcaption {
+        margin-top: 8px;
+        font-size: 13px;
+        line-height: 18px;
+      }
+
+      .Page-oneColumn p {
+        margin: 0 0 26px;
+        font-size: 18px;
+        line-height: 28px;
+      }
+
+      /* The old renderer put this block inside the host flex item. These
+         rules mirror its generated node style from the attached AP snapshot. */
+      .legacy-panel translight-translation {
+        box-sizing: border-box;
+        display: block;
+        position: static;
+        width: auto;
+        min-width: 0;
+        max-width: none;
+        margin: .45em 0 1em;
+        padding: 0;
+        color: #111;
+        font: inherit;
+        line-height: inherit;
+        white-space: pre-wrap;
+        word-break: normal;
+        overflow-wrap: anywhere;
+        overflow: visible;
+      }
+
+      .legacy-panel translight-translation > span {
+        display: inline;
+        padding: 0 .12em;
+        border-radius: .12em;
+        background: #fff3b0;
+        white-space: inherit;
+      }
+
+      .legacy-panel .LiveBlogPage-liveButton translight-translation,
+      .legacy-panel .LiveBlogPage-tab translight-translation,
+      .legacy-panel .PagePromo-title translight-translation {
+        font-size: .95em;
+      }
+
+      @media (max-width: 800px) {
+        .LiveBlogPage-layoutWrapper { grid-template-columns: 1fr; }
+        .LiveBlogPage-sideRail { display: none; }
+        .Page-lede, .Page-oneColumn { padding: 22px 18px; }
+        .Page-headline { font-size: 32px; }
+      }
     </style>
   </head>
   <body>
     <pre id="report">starting…</pre>
 
-    <div class="Page-trending">
-      <div class="PageListTrending-contents">
-        <div class="PageList-items">
-          <div class="PageList-items-item">
-            <div class="PagePromoTrending">
-              <bsp-custom-headline custom-headline="div">
-                <div id="trend-mass" class="PagePromo-title">
-                  <a href="/mass-visa-revocation">Mass visa revocation</a>
-                </div>
-              </bsp-custom-headline>
+    <div class="fixture-note" contenteditable="true">
+      <strong>Attached snapshot reproduction:</strong> the lower panel is driven by the current renderer; the upper panel is the legacy child-placement state.
+    </div>
+
+    <section class="reproduction-panel legacy-panel" aria-label="Legacy AP layout" contenteditable="true">
+      <div class="panel-label">Legacy placement from the attached AP snapshot (translation is inside each flex source)</div>
+      <div class="Page-header-bar">
+        <div class="Page-header-bar-logo">AP</div>
+        <bsp-nav class="MainNavigation">
+          <ul class="MainNavigation-items">
+            <li><div class="MainNavigationItem" data-mainnav-item><div class="MainNavigationItem-text"><a href="/world-news">WORLD</a></div></div></li>
+            <li><div class="MainNavigationItem" data-mainnav-item><div class="MainNavigationItem-text"><a href="/us-news">U.S.</a></div></div></li>
+            <li><div class="MainNavigationItem" data-mainnav-item><div class="MainNavigationItem-text"><a href="/politics">POLITICS</a></div></div></li>
+            <li><div class="MainNavigationItem" data-mainnav-item><div class="MainNavigationItem-text"><a href="/sports">SPORTS</a></div></div></li>
+            <li><div class="MainNavigationItem" data-mainnav-item><div class="MainNavigationItem-text"><a href="/science">SCIENCE</a></div></div></li>
+            <li><div class="MainNavigationItem" data-mainnav-item><div class="MainNavigationItem-text"><a href="/more">MORE</a></div></div></li>
+          </ul>
+        </bsp-nav>
+      </div>
+      <div class="Page-trendingZephr-wrapper desktop-header">
+        <div class="Page-trendingZephr"><div class="Page-trendingZephr-trendingBar"><div class="Page-trending">
+          <bsp-list-trending>
+            <div class="PageListTrending storyline" data-module>
+              <div class="PageListTrending-contents"><div data-scroll-shade-parent><bsp-scroll-shade class="PageList-items">
+                <div class="PageList-header"><bsp-custom-headline custom-headline="div"><div class="PageList-header-title"><a href="/hub/donald-trump">Trump Administration</a></div></bsp-custom-headline></div>
+                <div class="PageList-items-item"><div class="PagePromoTrending"><bsp-custom-headline custom-headline="div"><div class="PagePromo-title"><a href="/mass-visa-revocation">Mass visa revocation</a><translight-translation data-translight-generated="true" data-fixture-legacy><span>대량 비자 취소</span></translight-translation></div></bsp-custom-headline></div></div>
+                <div class="PageList-items-item"><div class="PagePromoTrending"><bsp-custom-headline custom-headline="div"><div class="PagePromo-title"><a href="/mail-voting">Mail voting</a><translight-translation data-translight-generated="true" data-fixture-legacy><span>메일 투표</span></translight-translation></div></bsp-custom-headline></div></div>
+                <div class="PageList-items-item"><div class="PagePromoTrending"><bsp-custom-headline custom-headline="div"><div class="PagePromo-title"><a href="/approval-ratings">Approval ratings</a><translight-translation data-translight-generated="true" data-fixture-legacy><span>승인 등급</span></translight-translation></div></bsp-custom-headline></div></div>
+                <div class="PageList-items-item"><div class="PagePromoTrending"><bsp-custom-headline custom-headline="div"><div class="PagePromo-title"><a href="/white-house-rose-garden">White House Rose Garden</a><translight-translation data-translight-generated="true" data-fixture-legacy><span>백악관 장미 정원</span></translight-translation></div></bsp-custom-headline></div></div>
+              </bsp-scroll-shade></div></div>
             </div>
-          </div>
-          <div class="PageList-items-item">
-            <div class="PagePromoTrending">
-              <bsp-custom-headline custom-headline="div">
-                <div id="trend-mail" class="PagePromo-title">
-                  <a href="/mail-voting">Mail voting</a>
-                </div>
-              </bsp-custom-headline>
+          </bsp-list-trending>
+        </div></div></div>
+      </div>
+      <div class="LiveBlogPage-layoutWrapper">
+        <aside class="LiveBlogPage-sideRail"></aside>
+        <div class="Page-content">
+          <div class="LiveBlogPage-headline-sticky"><div class="sticky-content" data-live>
+            <div class="LiveBlogPage-liveButton"><span class="live-dot"></span><span class="live-text">LIVE</span><translight-translation data-translight-generated="true" data-fixture-legacy><span>살고있다</span></translight-translation></div>
+            <div class="LiveBlogPage-tabs"><div class="LiveBlogPage-tab active">ALL<translight-translation data-translight-generated="true" data-fixture-legacy><span>모든</span></translight-translation></div><div class="LiveBlogPage-tab">BREAKING NEWS UPDATES<translight-translation data-translight-generated="true" data-fixture-legacy><span>속보 업데이트</span></translight-translation></div></div>
+          </div></div>
+          <div class="LiveBlogPage-lede"><div class="LiveBlogPage-lede-content"><h1 class="Page-headline">Live updates: Regional powers seek off-ramp as Iran war drags on months longer than Trump promised</h1><h2 class="Page-subHeadline">Follow the latest news on President Donald Trump and his administration | Aug. 27, 2026</h2></div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="reproduction-panel current-panel" aria-label="Current AP layout">
+      <div class="panel-label" contenteditable="true">Current renderer against the same attached AP DOM/CSS</div>
+      <div class="Page-header-bar">
+        <div class="Page-header-bar-logo" contenteditable="true">AP</div>
+        <bsp-nav class="MainNavigation">
+          <ul class="MainNavigation-items">
+            <li><div class="MainNavigationItem" data-mainnav-item><div class="MainNavigationItem-text"><a href="/world-news">WORLD</a></div></div></li>
+            <li><div class="MainNavigationItem" data-mainnav-item><div class="MainNavigationItem-text"><a href="/us-news">U.S.</a></div></div></li>
+            <li><div class="MainNavigationItem" data-mainnav-item><div class="MainNavigationItem-text"><a href="/politics">POLITICS</a></div></div></li>
+            <li><div class="MainNavigationItem" data-mainnav-item><div class="MainNavigationItem-text"><a href="/sports">SPORTS</a></div></div></li>
+            <li><div class="MainNavigationItem" data-mainnav-item><div class="MainNavigationItem-text"><a href="/science">SCIENCE</a></div></div></li>
+            <li><div class="MainNavigationItem" data-mainnav-item><div class="MainNavigationItem-text"><a href="/more">MORE</a></div></div></li>
+          </ul>
+        </bsp-nav>
+      </div>
+      <div class="Page-trendingZephr-wrapper desktop-header">
+        <div class="Page-trendingZephr"><div class="Page-trendingZephr-trendingBar"><div class="Page-trending">
+          <bsp-list-trending>
+            <div class="PageListTrending storyline" data-module>
+              <div class="PageListTrending-contents"><div data-scroll-shade-parent><bsp-scroll-shade class="PageList-items">
+                <div class="PageList-header" contenteditable="true"><bsp-custom-headline custom-headline="div"><div class="PageList-header-title"><a href="/hub/donald-trump">Trump Administration</a></div></bsp-custom-headline></div>
+                <div class="PageList-items-item"><div class="PagePromoTrending"><bsp-custom-headline custom-headline="div"><div id="trend-mass" class="PagePromo-title"><a href="/mass-visa-revocation"><span class="PagePromoContentIcons-text">Mass visa revocation</span></a></div></bsp-custom-headline></div></div>
+                <div class="PageList-items-item"><div class="PagePromoTrending"><bsp-custom-headline custom-headline="div"><div id="trend-mail" class="PagePromo-title"><a href="/mail-voting"><span class="PagePromoContentIcons-text">Mail voting</span></a></div></bsp-custom-headline></div></div>
+                <div class="PageList-items-item"><div class="PagePromoTrending"><bsp-custom-headline custom-headline="div"><div id="trend-approval" class="PagePromo-title"><a href="/approval-ratings"><span class="PagePromoContentIcons-text">Approval ratings</span></a></div></bsp-custom-headline></div></div>
+                <div class="PageList-items-item"><div class="PagePromoTrending"><bsp-custom-headline custom-headline="div"><div id="trend-garden" class="PagePromo-title"><a href="/white-house-rose-garden"><span class="PagePromoContentIcons-text">White House Rose Garden</span></a></div></bsp-custom-headline></div></div>
+              </bsp-scroll-shade></div></div>
             </div>
-          </div>
-          <div class="PageList-items-item">
-            <div class="PagePromoTrending">
-              <bsp-custom-headline custom-headline="div">
-                <div id="trend-approval" class="PagePromo-title">
-                  <a href="/approval-ratings">Approval ratings</a>
-                </div>
-              </bsp-custom-headline>
-            </div>
-          </div>
-          <div class="PageList-items-item">
-            <div class="PagePromoTrending">
-              <bsp-custom-headline custom-headline="div">
-                <div id="trend-garden" class="PagePromo-title">
-                  <a href="/white-house-rose-garden">White House Rose Garden</a>
-                </div>
-              </bsp-custom-headline>
-            </div>
+          </bsp-list-trending>
+        </div></div></div>
+      </div>
+      <div class="LiveBlogPage-layoutWrapper">
+        <aside class="LiveBlogPage-sideRail" contenteditable="true"><div class="LiveBlogFeed-post"><div class="LiveBlogFeed-post-time">12 MIN AGO</div><a class="LiveBlogFeed-post-headline" href="/live">White House says some Americans have been rescued from flooding in Nepal</a></div></aside>
+        <div class="Page-content">
+          <div class="LiveBlogPage-headline-sticky"><div class="sticky-content" data-live>
+            <div id="live-source" class="LiveBlogPage-liveButton"><span class="live-dot"></span><span class="live-text">LIVE</span></div>
+            <div class="LiveBlogPage-tabs"><div id="all-source" class="LiveBlogPage-tab active">ALL</div><div id="breaking-source" class="LiveBlogPage-tab">BREAKING NEWS UPDATES</div></div>
+          </div></div>
+          <div class="LiveBlogPage-lede"><div class="LiveBlogPage-lede-content"><h1 id="article-title" class="Page-headline">Live updates: Regional powers seek off-ramp as Iran war drags on months longer than Trump promised</h1><h2 id="article-subtitle" class="Page-subHeadline">Follow the latest news on President Donald Trump and his administration | Aug. 27, 2026</h2></div></div>
+          <div class="Page-oneColumn">
+            <figure class="Page-lead"><img alt="Nepalese policemen at a flood site" src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs="><figcaption id="article-caption">Nepalese policemen watch as earthmovers clear the debris of flash flooding in Nepal's Nuwakot district, Thursday, Aug. 27, 2026. (AP Photo/Niranjan Shrestha)</figcaption></figure>
+            <p id="article-body">The U.S. has rescued a handful of Americans in the wake of devastating flooding in Nepal, officials said Thursday morning.</p>
           </div>
         </div>
       </div>
-    </div>
+    </section>
 
-    <div class="LiveBlogPage-headline-sticky">
-      <div class="sticky-content">
-        <div id="live-source" class="LiveBlogPage-liveButton">
-          <span class="live-dot"></span>
-          <span class="live-text">LIVE</span>
-        </div>
-        <div class="LiveBlogPage-tabs">
-          <div id="all-source" class="LiveBlogPage-tab">ALL</div>
-          <div id="breaking-source" class="LiveBlogPage-tab">BREAKING NEWS UPDATES</div>
-        </div>
-      </div>
-    </div>
-
-    <main class="article">
-      <h1 id="article-title">FACT FOCUS: Canada and the US power grid</h1>
-      <p id="article-body">Experts explain why a change in electricity exports would not cause massive blackouts.</p>
-    </main>
     <script type="module" src="/tests/fixtures/apnews-live-layout-repro.js"></script>
   </body>
 </html>

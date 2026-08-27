@@ -42,6 +42,7 @@ const LAYOUT_DISPLAYS = new Set(['flex', 'inline-flex', 'grid', 'inline-grid']);
 const TABLE_CELL_TAGS = new Set(['td', 'th']);
 const MAX_RECOVERY_ATTEMPTS = 1;
 const STABLE_LIST_SIBLING_PLACEMENT = 'stable-list-sibling';
+const GRID_LAYOUT_WRAPPER_PLACEMENT = 'grid-layout-wrapper';
 const COLLAPSED_REVIEW_CARD_PLACEMENT = 'collapsed-review-card-sibling';
 const COLLAPSED_REVIEW_TRANSLATION_AFTER_CARD = 'after-card';
 const COLLAPSED_REVIEW_TRANSLATION_BEFORE_CARD = 'before-card';
@@ -183,6 +184,15 @@ function getSourceLayoutWidth(element, computedStyle) {
 function syncSourceLayout(record) {
   const {element, translation, placement} = record ?? {};
   if (!element || !translation?.style) return;
+  let isGridOwnedLayout = placement?.kind === GRID_LAYOUT_WRAPPER_PLACEMENT;
+  if (!isGridOwnedLayout && placement === 'inside' &&
+      ['grid', 'inline-grid'].includes(getDisplay(element.parentElement))) {
+    isGridOwnedLayout = LAYOUT_DISPLAYS.has(getDisplay(element));
+  }
+  // A layout control that owns a grid cell must not inherit paragraph
+  // spacing from the generated-node stylesheet; that spacing would enlarge
+  // the grid row even though the source control itself is unchanged.
+  setStyleValue(translation.style, 'margin', isGridOwnedLayout ? '0' : '');
   // A sibling translation does not receive the source block's width and
   // centering rules because host styles usually target the source class. A
   // source that is itself a flex/grid container is kept content-sized so its
@@ -190,7 +200,12 @@ function syncSourceLayout(record) {
   // The other placements already share the source's containing block, so
   // copying a pixel width there would make nested/grid/table layouts less
   // flexible.
-  if (placement !== 'sibling' || LAYOUT_DISPLAYS.has(getDisplay(element))) {
+  if (placement !== 'sibling') {
+    clearSourceLayout(translation);
+    return;
+  }
+
+  if (LAYOUT_DISPLAYS.has(getDisplay(element))) {
     clearSourceLayout(translation);
     return;
   }
@@ -297,6 +312,33 @@ function getStableListItem(element) {
   return containingListItem;
 }
 
+function shouldWrapGridLayoutSource(element) {
+  if (!LAYOUT_DISPLAYS.has(getDisplay(element))) return false;
+  return ['grid', 'inline-grid'].includes(getDisplay(element.parentElement));
+}
+
+function placeGridLayoutTranslation(element, translation) {
+  const wrapper = element.ownerDocument.createElement('span');
+  wrapper.setAttribute('data-translight-layout-wrapper', GENERATED_VALUE);
+  // Keep the source in the grid track it originally occupied and let the
+  // translation overflow into the next inline slot. A flex wrapper would
+  // size the source from its intrinsic text width, changing controls such as
+  // AP's LIVE button before the translation is even painted.
+  wrapper.style.setProperty('display', 'grid', 'important');
+  wrapper.style.setProperty('grid-template-columns', '100% max-content', 'important');
+  wrapper.style.setProperty('align-items', 'center', 'important');
+  wrapper.style.setProperty('width', '100%', 'important');
+  wrapper.style.setProperty('min-width', '0', 'important');
+  wrapper.style.setProperty('justify-self', 'start', 'important');
+  element.parentNode.insertBefore(wrapper, element);
+  wrapper.appendChild(element);
+  wrapper.appendChild(translation);
+  return {
+    kind: GRID_LAYOUT_WRAPPER_PLACEMENT,
+    anchor: wrapper
+  };
+}
+
 function shouldInsertInside(element) {
   const tagName = element.tagName?.toLowerCase();
   if (tagName === 'li' || TABLE_CELL_TAGS.has(tagName)) return true;
@@ -389,6 +431,10 @@ function insertAtSafeLocation(element, translation, mixedContent = false, source
     return placeMixedContentTranslation(element, translation, sourceTextNodes);
   }
 
+  if (shouldWrapGridLayoutSource(element)) {
+    return placeGridLayoutTranslation(element, translation);
+  }
+
   if (!shouldInsertInside(element)) {
     element.parentNode.insertBefore(translation, element.nextSibling);
     return 'sibling';
@@ -426,6 +472,11 @@ function restorePlacement(record) {
     }
     return;
   }
+  if (placement?.kind === GRID_LAYOUT_WRAPPER_PLACEMENT) {
+    const wrapper = placement.anchor;
+    if (wrapper?.parentNode && element?.parentNode === wrapper) wrapper.appendChild(translation);
+    return;
+  }
   if (!element?.parentNode) return;
   if (placement === 'sibling') {
     element.parentNode.insertBefore(translation, element.nextSibling);
@@ -461,6 +512,15 @@ function placeTranslationAfterSource(record) {
     return;
   }
   restorePlacement(record);
+}
+
+function unwrapGridLayoutPlacement(record) {
+  if (record?.placement?.kind !== GRID_LAYOUT_WRAPPER_PLACEMENT) return;
+  const {element} = record;
+  const wrapper = record.placement.anchor;
+  if (!wrapper?.parentNode || element?.parentNode !== wrapper) return;
+  wrapper.parentNode.insertBefore(element, wrapper);
+  wrapper.parentNode.removeChild(wrapper);
 }
 
 function getOriginalAttributes(element) {
@@ -652,6 +712,7 @@ function styleText(sessionId, presentation) {
       font-weight: var(--translight-font-weight) !important;
       font-style: var(--translight-font-style) !important;
       font-synthesis: style !important;
+      flex: 0 0 auto !important;
       line-height: inherit !important;
       letter-spacing: normal !important;
       text-align: inherit !important;
@@ -1065,6 +1126,10 @@ export class TranslationRenderer {
   placeTranslationBeforeSource(record) {
     const {element, translation} = record;
     if (!element?.parentNode || !translation) return;
+    if (record.placement?.kind === GRID_LAYOUT_WRAPPER_PLACEMENT) {
+      element.parentNode.insertBefore(translation, element);
+      return;
+    }
     if (record.placement === 'sibling') {
       element.parentNode.insertBefore(translation, element);
       return;
@@ -1094,7 +1159,8 @@ export class TranslationRenderer {
       restorePlacement(record);
       element.setAttribute(HIDDEN_ATTRIBUTE, GENERATED_VALUE);
       const hasExternalPlacement = record.placement === 'sibling' ||
-        record.placement?.kind === COLLAPSED_REVIEW_CARD_PLACEMENT;
+        record.placement?.kind === COLLAPSED_REVIEW_CARD_PLACEMENT ||
+        record.placement?.kind === GRID_LAYOUT_WRAPPER_PLACEMENT;
       if (!hasExternalPlacement) {
         element.setAttribute(
           HIDDEN_PLACEMENT_ATTRIBUTE,
@@ -1437,6 +1503,7 @@ export class TranslationRenderer {
       this.restoreSourceText(record);
       for (const name of ATTRIBUTE_NAMES) restoreAttribute(element, name, record.originalAttributes[name]);
     }
+    unwrapGridLayoutPlacement(record);
     this.unwrapSegment(record);
     this.recordsByElement.delete(element);
     this.records.delete(record.sourceId);
@@ -1465,6 +1532,7 @@ export class TranslationRenderer {
       if (element?.getAttribute(SESSION_ATTRIBUTE) !== this.sessionId) continue;
       this.restoreSourceText(record);
       for (const name of ATTRIBUTE_NAMES) restoreAttribute(element, name, originalAttributes[name]);
+      unwrapGridLayoutPlacement(record);
       this.unwrapSegment(record);
       this.recordsByElement.delete(element);
     }

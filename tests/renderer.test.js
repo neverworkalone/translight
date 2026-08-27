@@ -451,6 +451,42 @@ describe('TranslationRenderer', () => {
     `);
   });
 
+  it('keeps a flex source inside its grid cell', () => {
+    document.body.innerHTML = `
+      <div id="layout" style="display:grid;grid-template-columns:60px 1fr">
+        <div id="source" style="display:flex;width:50px;white-space:nowrap">LIVE</div>
+        <div id="tabs">ALL</div>
+      </div>
+    `;
+    const source = document.querySelector('#source');
+    const layout = document.querySelector('#layout');
+    const renderer = new TranslationRenderer({document, sessionId: 'grid-source-session'});
+
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'grid-source-container',
+      translatedText: '라이브'
+    });
+
+    expect(translation.parentElement).not.toBe(source);
+    expect(translation.parentElement?.tagName.toLowerCase()).toBe('span');
+    expect(translation.parentElement?.getAttribute('data-translight-layout-wrapper')).toBe('true');
+    expect(translation.parentElement).toBe(source.parentElement);
+    expect(source.parentElement).not.toBe(layout);
+    expect(source.parentElement?.parentElement).toBe(layout);
+    expect(translation.previousElementSibling).toBe(source);
+    expect(translation.style.getPropertyValue('width')).toBe('');
+    expect(translation.style.getPropertyValue('margin')).toBe('0px');
+    expect(renderer.style.textContent).toContain('flex: 0 0 auto !important');
+    renderer.removeAll();
+    expect(document.body.innerHTML).toBe(`
+      <div id="layout" style="display:grid;grid-template-columns:60px 1fr">
+        <div id="source" style="display:flex;width:50px;white-space:nowrap">LIVE</div>
+        <div id="tabs">ALL</div>
+      </div>
+    `);
+  });
+
   it('matches the source block typography when its parent uses a smaller base size', () => {
     document.body.innerHTML = `
       <section id="article-body" style="font-size:10px;line-height:12.31px">
