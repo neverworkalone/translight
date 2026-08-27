@@ -479,6 +479,39 @@ describe('TranslationRenderer', () => {
     renderer.removeAll();
   });
 
+  it('uses the untransformed layout width for sibling translations', () => {
+    document.head.innerHTML = `
+      <style>
+        .scaled { transform: scale(0.8); }
+        .scaled .paragraph { box-sizing: border-box; width: 1000px; padding: 20px; }
+      </style>
+    `;
+    document.body.innerHTML = `
+      <div class="scaled">
+        <div id="source" class="paragraph">Article paragraph</div>
+      </div>
+    `;
+    const source = document.querySelector('#source');
+    Object.defineProperty(source, 'offsetWidth', {configurable: true, value: 1000});
+    const visualMeasurement = vi.spyOn(source, 'getBoundingClientRect').mockReturnValue({
+      width: 800,
+      left: 100,
+      right: 900
+    });
+    const renderer = new TranslationRenderer({document, sessionId: 'transformed-layout-session'});
+
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'transformed-layout-source',
+      translatedText: '번역된 문단'
+    });
+
+    expect(translation.style.getPropertyValue('width')).toBe('1000px');
+    expect(visualMeasurement).not.toHaveBeenCalled();
+
+    renderer.removeAll();
+  });
+
   it('matches the typography of a nested source text wrapper', () => {
     document.body.innerHTML = `
       <div id="source" style="font-size:14px;line-height:20px">

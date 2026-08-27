@@ -78,6 +78,7 @@ export class PageSession {
     this.pendingRecoveryElements = new Set();
     this.mutationOverflow = false;
     this.scrollHandler = null;
+    this.resizeHandler = null;
     this.priorityTimer = null;
     this.routeGeneration = Number.isInteger(initialRouteGeneration) ? initialRouteGeneration : 0;
     this.routeDecisionPending = false;
@@ -381,8 +382,12 @@ export class PageSession {
         this.queue?.reprioritize();
       }, 50);
     };
+    this.resizeHandler = () => {
+      this.renderer?.syncLayouts?.();
+      this.scrollHandler?.();
+    };
     view?.addEventListener?.('scroll', this.scrollHandler, {passive: true});
-    view?.addEventListener?.('resize', this.scrollHandler, {passive: true});
+    view?.addEventListener?.('resize', this.resizeHandler, {passive: true});
 
     this.installTitleObserver();
   }
@@ -429,9 +434,12 @@ export class PageSession {
     const view = getView(this.document);
     if (this.scrollHandler) {
       view?.removeEventListener?.('scroll', this.scrollHandler);
-      view?.removeEventListener?.('resize', this.scrollHandler);
+    }
+    if (this.resizeHandler) {
+      view?.removeEventListener?.('resize', this.resizeHandler);
     }
     this.scrollHandler = null;
+    this.resizeHandler = null;
   }
 
   scheduleTranslationRecovery() {

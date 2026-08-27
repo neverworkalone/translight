@@ -2,6 +2,7 @@ import {PageSession} from '../../src/content/page-session.js';
 
 const report = document.querySelector('#report');
 const source = document.querySelector('#source');
+const scenario = new URLSearchParams(location.search).get('scenario') ?? 'cleanup';
 const expectedTexts = [
   'In January, Meta CEO Mark Zuckerberg and his top lieutenants gathered for their annual leadership retreat at his Hawaii compound.',
   'They hatched a radical plan to reimagine work at the social-media giant in the age of artificial intelligence.'
@@ -14,6 +15,26 @@ function layout(node) {
     right: Math.round(rect.right),
     width: Math.round(rect.width)
   } : null;
+}
+
+function measure() {
+  const translation = source.nextElementSibling;
+  return {
+    sourceLayout: layout(source),
+    translationLayout: layout(translation),
+    translationCount: document.querySelectorAll('translight-translation').length
+  };
+}
+
+function callsAreValid(calls) {
+  return calls.length === expectedTexts.length &&
+    calls.every((text) => expectedTexts.includes(text));
+}
+
+function layoutsAreAligned({sourceLayout, translationLayout}) {
+  return translationLayout?.left === sourceLayout?.left &&
+    translationLayout?.right === sourceLayout?.right &&
+    translationLayout?.width === sourceLayout?.width;
 }
 
 async function run() {
@@ -36,23 +57,38 @@ async function run() {
 
   await session.start();
 
-  const translation = source.nextElementSibling;
-  const sourceLayout = layout(source);
-  const translationLayout = layout(translation);
+  const initial = measure();
   const result = {
     fixture: 'reuters-article-layout-repro',
+    scenario,
     sourceUrl: 'https://www.reuters.com/investigations/mark-zuckerberg-had-bold-plan-replace-meta-staff-with-ai-heres-how-it-imploded-2026-08-26/',
     providerCalls: calls,
-    sourceLayout,
-    translationLayout,
-    translationCount: document.querySelectorAll('translight-translation').length,
-    testPassed: calls.length === expectedTexts.length &&
-      calls.every((text) => expectedTexts.includes(text)) &&
-      translationLayout?.left === sourceLayout?.left &&
-      translationLayout?.right === sourceLayout?.right &&
-      translationLayout?.width === sourceLayout?.width
+    ...initial,
+    resizeSamples: [],
+    testPassed: callsAreValid(calls) && layoutsAreAligned(initial)
   };
   report.textContent = JSON.stringify(result, null, 2);
+
+  if (scenario === 'resize') {
+    const handleResize = () => {
+      const sample = measure();
+      result.providerCalls = [...calls];
+      result.resizeSamples.push(sample);
+      result.latest = sample;
+      result.testPassed = callsAreValid(calls) &&
+        result.translationCount === initial.translationCount &&
+        layoutsAreAligned(initial) &&
+        result.resizeSamples.every(layoutsAreAligned);
+      report.textContent = JSON.stringify(result, null, 2);
+    };
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('pagehide', () => {
+      window.removeEventListener('resize', handleResize);
+      session.stop({notify: false});
+    }, {once: true});
+    return;
+  }
+
   session.stop({notify: false});
   result.restoredAfterStop = document.querySelector('translight-translation') === null &&
     source.textContent.trim() === expectedTexts[0];

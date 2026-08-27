@@ -92,6 +92,10 @@ function getComputedStyleValue(element, property) {
   return computedStyle.getPropertyValue?.(property) || computedStyle[property] || '';
 }
 
+function getStyleValue(style, property) {
+  return style?.getPropertyValue?.(property) || style?.[property] || '';
+}
+
 function getSourceTypographyElement(record) {
   const {element, sourceTextNodes, originalTextNodeValues} = record;
   if (!element || !sourceTextNodes?.length) return element;
@@ -144,6 +148,26 @@ function clearSourceLayout(translation) {
   for (const property of SOURCE_LAYOUT_PROPERTIES) translation.style.removeProperty(property);
 }
 
+function getSourceLayoutWidth(element, computedStyle) {
+  const offsetWidth = Number(element.offsetWidth);
+  if (Number.isFinite(offsetWidth) && offsetWidth > 0) return `${offsetWidth}px`;
+
+  const width = Number.parseFloat(getStyleValue(computedStyle, 'width'));
+  if (!Number.isFinite(width)) return '';
+  if (getStyleValue(computedStyle, 'box-sizing') === 'border-box') return `${width}px`;
+
+  const horizontalExtras = [
+    'padding-left',
+    'padding-right',
+    'border-left-width',
+    'border-right-width'
+  ].reduce((sum, property) => {
+    const value = Number.parseFloat(getStyleValue(computedStyle, property));
+    return sum + (Number.isFinite(value) ? value : 0);
+  }, 0);
+  return `${width + horizontalExtras}px`;
+}
+
 function syncSourceLayout(record) {
   const {element, translation, placement} = record ?? {};
   if (!element || !translation?.style) return;
@@ -162,12 +186,10 @@ function syncSourceLayout(record) {
 
   const values = new Map(SOURCE_LAYOUT_PROPERTIES.map((property) => [
     property,
-    computedStyle.getPropertyValue?.(property) || computedStyle[property] || ''
+    getStyleValue(computedStyle, property)
   ]));
-  const renderedWidth = Number(element.getBoundingClientRect?.()?.width);
-  if (Number.isFinite(renderedWidth) && renderedWidth > 0) {
-    values.set('width', `${renderedWidth}px`);
-  }
+  const layoutWidth = getSourceLayoutWidth(element, computedStyle);
+  if (layoutWidth) values.set('width', layoutWidth);
 
   for (const [property, value] of values) {
     if (value) translation.style.setProperty(property, value, 'important');
@@ -766,12 +788,10 @@ export class TranslationRenderer {
     this.records = new Map();
     this.recordsByElement = new WeakMap();
     const ResizeObserverClass = document.defaultView?.ResizeObserver ?? globalThis.ResizeObserver;
+    this.layoutObservationTargets = new Map();
     this.layoutObserver = typeof ResizeObserverClass === 'function'
       ? new ResizeObserverClass((entries) => {
-        for (const entry of entries) {
-          const record = this.recordsByElement.get(entry.target);
-          if (record) syncSourceLayout(record);
-        }
+        if (entries.length) this.syncLayouts();
       })
       : null;
     this.presentation = normalizePresentation(settings);
@@ -793,12 +813,49 @@ export class TranslationRenderer {
     for (const record of this.records.values()) this.applyRecordPresentation(record);
   }
 
-  observeSourceLayout(element) {
-    this.layoutObserver?.observe?.(element);
+  observeLayoutTarget(element) {
+    if (!this.layoutObserver || !element) return;
+    const count = this.layoutObservationTargets.get(element) ?? 0;
+    if (!count) this.layoutObserver.observe(element);
+    this.layoutObservationTargets.set(element, count + 1);
   }
 
-  unobserveSourceLayout(element) {
-    this.layoutObserver?.unobserve?.(element);
+  unobserveLayoutTarget(element) {
+    if (!this.layoutObserver || !element) return;
+    const count = this.layoutObservationTargets.get(element) ?? 0;
+    if (count <= 1) {
+      this.layoutObserver.unobserve(element);
+      this.layoutObservationTargets.delete(element);
+      return;
+    }
+    this.layoutObservationTargets.set(element, count - 1);
+  }
+
+  observeSourceLayout(record) {
+    if (!this.layoutObserver || !record?.element) return;
+    const nextTargets = record.placement === 'sibling'
+      ? [record.element, record.element.parentElement].filter(Boolean)
+      : [];
+    const previousTargets = record.layoutTargets ?? [];
+    for (const target of previousTargets) {
+      if (!nextTargets.includes(target)) this.unobserveLayoutTarget(target);
+    }
+    for (const target of nextTargets) {
+      if (!previousTargets.includes(target)) this.observeLayoutTarget(target);
+    }
+    record.layoutTargets = nextTargets;
+  }
+
+  unobserveSourceLayout(record) {
+    for (const target of record?.layoutTargets ?? []) this.unobserveLayoutTarget(target);
+    if (record) record.layoutTargets = [];
+  }
+
+  syncLayouts() {
+    for (const record of this.records.values()) {
+      this.observeSourceLayout(record);
+      syncSourceLayout(record);
+    }
   }
 
   currentSourceTextNodes(record) {
@@ -1042,6 +1099,7 @@ export class TranslationRenderer {
     const {element, translation} = record;
     if (!element || !translation) return;
     const mode = this.presentation.translationMode;
+    this.observeSourceLayout(record);
     syncSourceLayout(record);
     syncSourceTypography(record);
     this.clearFallbackPresentation(record);
@@ -1123,7 +1181,7 @@ export class TranslationRenderer {
     if (!replacement) return null;
 
     const originalAttributes = getOriginalAttributes(replacement);
-    this.unobserveSourceLayout(record.element);
+    this.unobserveSourceLayout(record);
     this.recordsByElement.delete(record.element);
     record.element = replacement;
     record.originalAttributes = originalAttributes;
@@ -1135,7 +1193,7 @@ export class TranslationRenderer {
     if (record.sourceHash) replacement.setAttribute(SOURCE_HASH_ATTRIBUTE, record.sourceHash);
     replacement.removeAttribute(PENDING_SOURCE_HASH_ATTRIBUTE);
     this.recordsByElement.set(replacement, record);
-    this.observeSourceLayout(replacement);
+    this.observeSourceLayout(record);
     return replacement;
   }
 
@@ -1278,7 +1336,7 @@ export class TranslationRenderer {
     element.setAttribute(SESSION_ATTRIBUTE, this.sessionId);
     this.records.set(sourceId, record);
     this.recordsByElement.set(element, record);
-    this.observeSourceLayout(element);
+    this.observeSourceLayout(record);
     this.applyRecordPresentation(record);
     return translation;
   }
@@ -1287,7 +1345,7 @@ export class TranslationRenderer {
     const record = this.recordsByElement.get(element);
     if (!record) return false;
 
-    this.unobserveSourceLayout(element);
+    this.unobserveSourceLayout(record);
     record.translation?.parentNode?.removeChild(record.translation);
     if (element?.getAttribute(SESSION_ATTRIBUTE) === this.sessionId) {
       this.restoreSourceText(record);
@@ -1303,7 +1361,7 @@ export class TranslationRenderer {
     for (const [sourceId, record] of this.records) {
       if (record.element?.isConnected !== false) continue;
       if (this.rebindDisconnectedRecord(record)) continue;
-      this.unobserveSourceLayout(record.element);
+      this.unobserveSourceLayout(record);
       record.translation?.parentNode?.removeChild(record.translation);
       if (record.element?.getAttribute(SESSION_ATTRIBUTE) === this.sessionId) {
         for (const name of ATTRIBUTE_NAMES) restoreAttribute(record.element, name, record.originalAttributes[name]);
@@ -1316,7 +1374,7 @@ export class TranslationRenderer {
   removeAll() {
     for (const record of this.records.values()) {
       const {element, translation, originalAttributes} = record;
-      this.unobserveSourceLayout(element);
+      this.unobserveSourceLayout(record);
       translation?.parentNode?.removeChild(translation);
       if (element?.getAttribute(SESSION_ATTRIBUTE) !== this.sessionId) continue;
       this.restoreSourceText(record);
@@ -1327,6 +1385,7 @@ export class TranslationRenderer {
 
     this.layoutObserver?.disconnect?.();
     this.layoutObserver = null;
+    this.layoutObservationTargets.clear();
     const generatedNodes = this.document.querySelectorAll(`[${SESSION_ATTRIBUTE}]`);
     for (const node of generatedNodes) {
       if (node.getAttribute(SESSION_ATTRIBUTE) !== this.sessionId) continue;
