@@ -75,6 +75,7 @@ function getDisplay(element) {
 }
 
 const SOURCE_TYPOGRAPHY_PROPERTIES = ['font-size', 'line-height'];
+const MAIN_TEXT_RATIO = 0.5;
 
 function getComputedStyleValue(element, property) {
   const view = element?.ownerDocument?.defaultView;
@@ -83,9 +84,46 @@ function getComputedStyleValue(element, property) {
   return computedStyle.getPropertyValue?.(property) || computedStyle[property] || '';
 }
 
+function getSourceTypographyElement(record) {
+  const {element, sourceTextNodes, originalTextNodeValues} = record;
+  if (!element || !sourceTextNodes?.length) return element;
+
+  const textWeights = new Map();
+  let totalWeight = 0;
+  for (const [index, node] of sourceTextNodes.entries()) {
+    const value = originalTextNodeValues?.[index] ?? node.nodeValue ?? '';
+    const weight = Array.from(String(value).replace(/\s/gu, '')).length;
+    if (!weight) continue;
+    totalWeight += weight;
+    let depth = 1;
+    for (let parent = node.parentElement; parent && parent !== element; parent = parent.parentElement) {
+      const current = textWeights.get(parent) ?? {weight: 0, depth: Number.POSITIVE_INFINITY};
+      current.weight += weight;
+      current.depth = Math.min(current.depth, depth);
+      textWeights.set(parent, current);
+      depth += 1;
+    }
+  }
+  if (!totalWeight) return element;
+
+  let typographyElement = element;
+  const minimumWeight = totalWeight * MAIN_TEXT_RATIO;
+  let bestWeight = minimumWeight;
+  let bestDepth = Number.POSITIVE_INFINITY;
+  for (const [candidate, {weight, depth}] of textWeights) {
+    if (weight <= minimumWeight || weight < bestWeight ||
+        (weight === bestWeight && depth >= bestDepth)) continue;
+    typographyElement = candidate;
+    bestWeight = weight;
+    bestDepth = depth;
+  }
+  return typographyElement;
+}
+
 function syncSourceTypography(record) {
-  const {element, translation} = record;
-  if (!element || !translation?.style) return;
+  const {translation} = record;
+  if (!record?.element || !translation?.style) return;
+  const element = getSourceTypographyElement(record);
   for (const property of SOURCE_TYPOGRAPHY_PROPERTIES) {
     const value = getComputedStyleValue(element, property);
     if (value) translation.style.setProperty(property, value, 'important');

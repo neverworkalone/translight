@@ -449,6 +449,55 @@ describe('TranslationRenderer', () => {
     renderer.removeAll();
   });
 
+  it('matches the typography of a nested source text wrapper', () => {
+    document.body.innerHTML = `
+      <div id="source" style="font-size:14px;line-height:20px">
+        <yt-attributed-string>
+          <span id="comment-text" style="font-size:16px;line-height:24px">Comment text</span>
+        </yt-attributed-string>
+      </div>
+    `;
+    const source = document.querySelector('#source');
+    const commentText = document.querySelector('#comment-text');
+    const renderer = new TranslationRenderer({document, sessionId: 'nested-typography-session'});
+
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'nested-typography-source',
+      translatedText: '댓글 번역'
+    });
+
+    expect(translation.style.getPropertyValue('font-size'))
+      .toBe(window.getComputedStyle(commentText).fontSize);
+    expect(translation.style.getPropertyValue('line-height'))
+      .toBe(window.getComputedStyle(commentText).lineHeight);
+
+    renderer.removeAll();
+  });
+
+  it.each([
+    ['a leading drop cap', '<span class="drop-cap" style="font-size:48px;line-height:48px">A</span> long article paragraph.'],
+    ['a leading superscript marker', '<sup style="font-size:10px;line-height:12px">1</sup> Article paragraph with a note marker.']
+  ])('keeps the block typography when %s is a minority fragment', (_label, content) => {
+    document.body.innerHTML = `
+      <p id="source" style="font-size:16px;line-height:24px">${content}</p>
+    `;
+    const source = document.querySelector('#source');
+    const sourceStyle = window.getComputedStyle(source);
+    const renderer = new TranslationRenderer({document, sessionId: 'minority-typography-session'});
+
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'minority-typography-source',
+      translatedText: '번역된 문단'
+    });
+
+    expect(translation.style.getPropertyValue('font-size')).toBe(sourceStyle.fontSize);
+    expect(translation.style.getPropertyValue('line-height')).toBe(sourceStyle.lineHeight);
+
+    renderer.removeAll();
+  });
+
   it('replaces the source text for replacement modes and restores it on cleanup', () => {
     const source = document.querySelector('#source');
     const renderer = new TranslationRenderer({
