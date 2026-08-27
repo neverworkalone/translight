@@ -70,19 +70,25 @@ async function run() {
   report.textContent = JSON.stringify(result, null, 2);
 
   if (scenario === 'resize') {
+    let resizeMeasurementTimer = null;
     const handleResize = () => {
-      const sample = measure();
-      result.providerCalls = [...calls];
-      result.resizeSamples.push(sample);
-      result.latest = sample;
-      result.testPassed = callsAreValid(calls) &&
-        result.translationCount === initial.translationCount &&
-        layoutsAreAligned(initial) &&
-        result.resizeSamples.every(layoutsAreAligned);
-      report.textContent = JSON.stringify(result, null, 2);
+      if (resizeMeasurementTimer != null) clearTimeout(resizeMeasurementTimer);
+      resizeMeasurementTimer = setTimeout(() => {
+        resizeMeasurementTimer = null;
+        const sample = measure();
+        result.providerCalls = [...calls];
+        result.resizeSamples.push(sample);
+        result.latest = sample;
+        result.testPassed = callsAreValid(calls) &&
+          result.translationCount === initial.translationCount &&
+          layoutsAreAligned(initial) &&
+          result.resizeSamples.every(layoutsAreAligned);
+        report.textContent = JSON.stringify(result, null, 2);
+      }, 0);
     };
     window.addEventListener('resize', handleResize);
     window.addEventListener('pagehide', () => {
+      if (resizeMeasurementTimer != null) clearTimeout(resizeMeasurementTimer);
       window.removeEventListener('resize', handleResize);
       session.stop({notify: false});
     }, {once: true});

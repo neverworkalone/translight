@@ -56,15 +56,15 @@ describe('PageSession', () => {
     });
 
     await session.start();
-    const syncLayouts = vi.spyOn(session.renderer, 'syncLayouts');
+    const scheduleLayoutSync = vi.spyOn(session.renderer, 'scheduleLayoutSync');
 
     window.dispatchEvent(new Event('resize'));
 
-    expect(syncLayouts).toHaveBeenCalledTimes(1);
+    expect(scheduleLayoutSync).toHaveBeenCalledTimes(1);
     session.stop({notify: false});
-    syncLayouts.mockClear();
+    scheduleLayoutSync.mockClear();
     window.dispatchEvent(new Event('resize'));
-    expect(syncLayouts).not.toHaveBeenCalled();
+    expect(scheduleLayoutSync).not.toHaveBeenCalled();
   });
 
   it('translates direct text inside a semantic Craigslist posting body section', async () => {

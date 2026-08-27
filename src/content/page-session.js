@@ -383,7 +383,7 @@ export class PageSession {
       }, 50);
     };
     this.resizeHandler = () => {
-      this.renderer?.syncLayouts?.();
+      this.renderer?.scheduleLayoutSync?.();
       this.scrollHandler?.();
     };
     view?.addEventListener?.('scroll', this.scrollHandler, {passive: true});

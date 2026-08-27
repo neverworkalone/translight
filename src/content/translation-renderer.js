@@ -78,11 +78,10 @@ function getDisplay(element) {
 const SOURCE_TYPOGRAPHY_PROPERTIES = ['font-size', 'line-height'];
 const SOURCE_LAYOUT_PROPERTIES = [
   'width',
-  'min-width',
-  'max-width',
   'margin-left',
   'margin-right'
 ];
+const SOURCE_LAYOUT_CONSTRAINT_PROPERTIES = ['min-width', 'max-width'];
 const MAIN_TEXT_RATIO = 0.5;
 
 function getComputedStyleValue(element, property) {
@@ -94,6 +93,18 @@ function getComputedStyleValue(element, property) {
 
 function getStyleValue(style, property) {
   return style?.getPropertyValue?.(property) || style?.[property] || '';
+}
+
+function setStyleValue(style, property, value) {
+  const currentValue = style?.getPropertyValue?.(property) || '';
+  const currentPriority = style?.getPropertyPriority?.(property) || '';
+  if (value) {
+    if (currentValue !== value || currentPriority !== 'important') {
+      style.setProperty(property, value, 'important');
+    }
+    return;
+  }
+  if (currentValue) style.removeProperty(property);
 }
 
 function getSourceTypographyElement(record) {
@@ -145,7 +156,9 @@ function syncSourceTypography(record) {
 
 function clearSourceLayout(translation) {
   if (!translation?.style) return;
-  for (const property of SOURCE_LAYOUT_PROPERTIES) translation.style.removeProperty(property);
+  for (const property of [...SOURCE_LAYOUT_PROPERTIES, ...SOURCE_LAYOUT_CONSTRAINT_PROPERTIES]) {
+    setStyleValue(translation.style, property, '');
+  }
 }
 
 function getSourceLayoutWidth(element, computedStyle) {
@@ -192,9 +205,27 @@ function syncSourceLayout(record) {
   if (layoutWidth) values.set('width', layoutWidth);
 
   for (const [property, value] of values) {
-    if (value) translation.style.setProperty(property, value, 'important');
-    else translation.style.removeProperty(property);
+    setStyleValue(translation.style, property, value);
   }
+  // The generated node is always border-box. Its measured width already
+  // includes the source's padding and border, so copying content-box
+  // min/max constraints would clamp it in a different coordinate space.
+  for (const property of SOURCE_LAYOUT_CONSTRAINT_PROPERTIES) {
+    setStyleValue(translation.style, property, '');
+  }
+}
+
+function getResizeObserverInlineSize(entry) {
+  const boxSizes = [entry?.borderBoxSize, entry?.contentBoxSize];
+  for (const boxSize of boxSizes) {
+    const size = Array.isArray(boxSize) ? boxSize[0] : boxSize;
+    const inlineSize = Number(size?.inlineSize);
+    if (Number.isFinite(inlineSize)) return inlineSize;
+  }
+  const contentWidth = Number(entry?.contentRect?.width);
+  if (Number.isFinite(contentWidth)) return contentWidth;
+  const offsetWidth = Number(entry?.target?.offsetWidth);
+  return Number.isFinite(offsetWidth) ? offsetWidth : null;
 }
 
 function getDirectNestedList(element) {
@@ -788,11 +819,12 @@ export class TranslationRenderer {
     this.records = new Map();
     this.recordsByElement = new WeakMap();
     const ResizeObserverClass = document.defaultView?.ResizeObserver ?? globalThis.ResizeObserver;
-    this.layoutObservationTargets = new Map();
+    this.layoutRecordsByTarget = new Map();
+    this.layoutTargetWidths = new Map();
+    this.layoutSyncHandle = null;
+    this.layoutSyncUsesAnimationFrame = false;
     this.layoutObserver = typeof ResizeObserverClass === 'function'
-      ? new ResizeObserverClass((entries) => {
-        if (entries.length) this.syncLayouts();
-      })
+      ? new ResizeObserverClass((entries) => this.handleLayoutResize(entries))
       : null;
     this.presentation = normalizePresentation(settings);
     this.style = document.createElement('style');
@@ -813,22 +845,44 @@ export class TranslationRenderer {
     for (const record of this.records.values()) this.applyRecordPresentation(record);
   }
 
-  observeLayoutTarget(element) {
-    if (!this.layoutObserver || !element) return;
-    const count = this.layoutObservationTargets.get(element) ?? 0;
-    if (!count) this.layoutObserver.observe(element);
-    this.layoutObservationTargets.set(element, count + 1);
+  handleLayoutResize(entries) {
+    const affectedRecords = new Set();
+    for (const entry of entries ?? []) {
+      const records = this.layoutRecordsByTarget.get(entry?.target);
+      if (!records?.size) continue;
+      const currentWidth = getResizeObserverInlineSize(entry);
+      const previousWidth = this.layoutTargetWidths.get(entry.target);
+      this.layoutTargetWidths.set(entry.target, currentWidth);
+      if (currentWidth != null && previousWidth != null && currentWidth === previousWidth) continue;
+      for (const record of records) affectedRecords.add(record);
+    }
+    for (const record of affectedRecords) {
+      if (this.records.get(record.sourceId) !== record) continue;
+      syncSourceLayout(record);
+    }
   }
 
-  unobserveLayoutTarget(element) {
-    if (!this.layoutObserver || !element) return;
-    const count = this.layoutObservationTargets.get(element) ?? 0;
-    if (count <= 1) {
-      this.layoutObserver.unobserve(element);
-      this.layoutObservationTargets.delete(element);
-      return;
+  observeLayoutTarget(element, record) {
+    if (!this.layoutObserver || !element || !record) return;
+    let records = this.layoutRecordsByTarget.get(element);
+    if (!records) {
+      records = new Set();
+      this.layoutRecordsByTarget.set(element, records);
+      this.layoutObserver.observe(element);
     }
-    this.layoutObservationTargets.set(element, count - 1);
+    records.add(record);
+  }
+
+  unobserveLayoutTarget(element, record) {
+    if (!this.layoutObserver || !element || !record) return;
+    const records = this.layoutRecordsByTarget.get(element);
+    if (!records) return;
+    records.delete(record);
+    if (!records.size) {
+      this.layoutObserver.unobserve(element);
+      this.layoutRecordsByTarget.delete(element);
+      this.layoutTargetWidths.delete(element);
+    }
   }
 
   observeSourceLayout(record) {
@@ -838,16 +892,16 @@ export class TranslationRenderer {
       : [];
     const previousTargets = record.layoutTargets ?? [];
     for (const target of previousTargets) {
-      if (!nextTargets.includes(target)) this.unobserveLayoutTarget(target);
+      if (!nextTargets.includes(target)) this.unobserveLayoutTarget(target, record);
     }
     for (const target of nextTargets) {
-      if (!previousTargets.includes(target)) this.observeLayoutTarget(target);
+      if (!previousTargets.includes(target)) this.observeLayoutTarget(target, record);
     }
     record.layoutTargets = nextTargets;
   }
 
   unobserveSourceLayout(record) {
-    for (const target of record?.layoutTargets ?? []) this.unobserveLayoutTarget(target);
+    for (const target of record?.layoutTargets ?? []) this.unobserveLayoutTarget(target, record);
     if (record) record.layoutTargets = [];
   }
 
@@ -856,6 +910,34 @@ export class TranslationRenderer {
       this.observeSourceLayout(record);
       syncSourceLayout(record);
     }
+  }
+
+  scheduleLayoutSync() {
+    if (this.layoutSyncHandle != null) return;
+    const view = this.document.defaultView ?? globalThis.window;
+    const sync = () => {
+      this.layoutSyncHandle = null;
+      this.layoutSyncUsesAnimationFrame = false;
+      this.syncLayouts();
+    };
+    if (typeof view?.requestAnimationFrame === 'function') {
+      this.layoutSyncUsesAnimationFrame = true;
+      this.layoutSyncHandle = view.requestAnimationFrame(sync);
+      return;
+    }
+    this.layoutSyncHandle = setTimeout(sync, 0);
+  }
+
+  cancelScheduledLayoutSync() {
+    if (this.layoutSyncHandle == null) return;
+    const view = this.document.defaultView ?? globalThis.window;
+    if (this.layoutSyncUsesAnimationFrame && typeof view?.cancelAnimationFrame === 'function') {
+      view.cancelAnimationFrame(this.layoutSyncHandle);
+    } else {
+      clearTimeout(this.layoutSyncHandle);
+    }
+    this.layoutSyncHandle = null;
+    this.layoutSyncUsesAnimationFrame = false;
   }
 
   currentSourceTextNodes(record) {
@@ -1383,9 +1465,11 @@ export class TranslationRenderer {
       this.recordsByElement.delete(element);
     }
 
+    this.cancelScheduledLayoutSync();
     this.layoutObserver?.disconnect?.();
     this.layoutObserver = null;
-    this.layoutObservationTargets.clear();
+    this.layoutRecordsByTarget.clear();
+    this.layoutTargetWidths.clear();
     const generatedNodes = this.document.querySelectorAll(`[${SESSION_ATTRIBUTE}]`);
     for (const node of generatedNodes) {
       if (node.getAttribute(SESSION_ATTRIBUTE) !== this.sessionId) continue;
