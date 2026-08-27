@@ -355,6 +355,15 @@ function restorePlacement(record) {
   element.appendChild(translation);
 }
 
+function placeTranslationAfterSource(record) {
+  if (record?.placement === 'inside-before-first-block') {
+    const {element, translation} = record;
+    if (element?.parentNode && translation) element.appendChild(translation);
+    return;
+  }
+  restorePlacement(record);
+}
+
 function getOriginalAttributes(element) {
   return Object.fromEntries(ATTRIBUTE_NAMES.map((name) => [name, element.getAttribute(name)]));
 }
@@ -889,8 +898,10 @@ export class TranslationRenderer {
           record.mixedContent ? 'mixed' : 'inside'
         );
       }
-    } else {
+    } else if (mode === TRANSLATION_MODES.TRANSLATION_ORIGINAL) {
       this.placeTranslationBeforeSource(record);
+    } else {
+      placeTranslationAfterSource(record);
     }
     record.fallbackMode = mode;
   }
@@ -979,7 +990,7 @@ export class TranslationRenderer {
       translation.setAttribute(ROLE_ATTRIBUTE, ROLE_TRANSLATION);
       translation.setAttribute(STYLE_ATTRIBUTE, this.presentation.displayStyle);
       setTranslationText(translation, record.translatedText);
-      restorePlacement(record);
+      placeTranslationAfterSource(record);
       this.clearReplacementAttributes(record);
       return;
     }
@@ -998,7 +1009,7 @@ export class TranslationRenderer {
       translation.setAttribute(ROLE_ATTRIBUTE, ROLE_ORIGINAL);
       translation.removeAttribute(STYLE_ATTRIBUTE);
       setTranslationText(translation, record.originalText);
-      restorePlacement(record);
+      placeTranslationAfterSource(record);
     } else {
       translation.setAttribute(ROLE_ATTRIBUTE, ROLE_TRANSLATION);
       translation.removeAttribute(STYLE_ATTRIBUTE);

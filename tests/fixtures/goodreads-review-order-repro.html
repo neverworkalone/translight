@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Translight Goodreads review order reproduction</title>
+    <style>
+      html { scroll-behavior: auto; }
+      body {
+        margin: 0;
+        color: #382110;
+        background: #fff;
+        font: 16px/1.5 Georgia, serif;
+      }
+      #report {
+        position: fixed;
+        z-index: 10;
+        top: 0;
+        right: 0;
+        width: 440px;
+        max-height: 90vh;
+        overflow: auto;
+        box-sizing: border-box;
+        padding: 12px;
+        background: #111827;
+        color: white;
+        font: 12px/1.4 monospace;
+        white-space: pre-wrap;
+      }
+      #scenario {
+        width: min(900px, calc(100% - 48px));
+        margin: 96px auto 120px;
+      }
+      .ReviewCard {
+        margin: 24px 0;
+        padding: 24px;
+        border: 1px solid #d6d0c4;
+        border-radius: 8px;
+        background: #fbfaf8;
+      }
+      .ReviewText__content,
+      .TruncatedContent,
+      .TruncatedContent__text {
+        display: block;
+      }
+      .TruncatedContent__text {
+        overflow: hidden;
+        max-height: 230px;
+      }
+      .Formatted {
+        display: inline;
+        white-space: normal;
+      }
+      blockquote {
+        margin: 12px 0;
+        padding-left: 16px;
+        border-left: 3px solid #d6d0c4;
+      }
+    </style>
+  </head>
+  <body>
+    <pre id="report">starting…</pre>
+    <main id="scenario"></main>
+    <script type="module" src="/tests/fixtures/goodreads-review-order-repro.js"></script>
+  </body>
+</html>

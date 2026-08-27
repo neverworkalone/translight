@@ -123,6 +123,27 @@ The repaired case must report `sourceSegmentCount: 3`,
 `bodyTranslationCount: 3`, `rootOverflowAnchor: "auto"`, and
 `testPassed: true`.
 
+## Goodreads review order consistency
+
+Fixture: `goodreads-review-order-repro.html` and
+`goodreads-review-order-repro.js`
+
+Open this URL in Chrome while the Vite development server is running:
+
+```text
+http://127.0.0.1:5173/tests/fixtures/goodreads-review-order-repro.html
+```
+
+This fixture models the supplied Goodreads book page at
+`https://www.goodreads.com/book/show/34066798-a-gentleman-in-moscow`. The Chai
+review contains a nested blockquote inside Goodreads's formatted inline wrapper,
+while the Bill Gates review uses only inline content. Both cards must keep the
+same configured source/translation order even though the collector takes a
+different mixed-content path for Chai.
+
+The repaired case must report `ordered: true` for both cards in both modes,
+`restoredAfterStop: true`, and top-level `testPassed: true`.
+
 ## XDA article translation font size
 
 Fixture: `xda-translation-font-size-repro.html` and
