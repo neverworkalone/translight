@@ -314,7 +314,7 @@ export function hasVisibleBlockDescendant(element, candidateSet, predicate = () 
   if (!descendants) return false;
   for (const descendant of descendants) {
     if ((!candidateSet || candidateSet.has(descendant)) &&
-        !isHidden(descendant) && predicate(descendant)) {
+        predicate(descendant) && !isHidden(descendant)) {
       return true;
     }
   }

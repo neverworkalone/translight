@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   collectTranslationBlocks,
   hasVisibleBlockDescendant,
@@ -114,6 +114,26 @@ describe('collectTranslationBlocks', () => {
 
     expect(hasVisibleBlockDescendant(root)).toBe(true);
     expect(visited).toBe(1);
+  });
+
+  it('does not check visibility for excluded segment descendants', () => {
+    const root = document.createElement('div');
+    root.innerHTML = Array.from({length: 100}, (_, index) =>
+      `<span data-translight-segment="true">Segment ${index}</span>`
+    ).join('');
+    document.body.appendChild(root);
+    const getComputedStyleSpy = vi.spyOn(window, 'getComputedStyle');
+
+    try {
+      expect(hasVisibleBlockDescendant(
+        root,
+        undefined,
+        (descendant) => !descendant.matches('[data-translight-segment="true"]')
+      )).toBe(false);
+      expect(getComputedStyleSpy).not.toHaveBeenCalled();
+    } finally {
+      getComputedStyleSpy.mockRestore();
+    }
   });
 
   it('does not re-collect text that the renderer has replaced for presentation', () => {
