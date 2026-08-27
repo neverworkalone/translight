@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   GENERATED_ATTRIBUTE,
   HIDDEN_ATTRIBUTE,
@@ -750,6 +750,31 @@ describe('TranslationRenderer', () => {
       '<span class="headline-text">Facebook and Instagram face changes in US as Meta settles teen addiction lawsuit for $18bn</span>'
     );
     expect(document.querySelector('translight-translation')).toBeNull();
+  });
+
+  it('reuses mixed source text nodes during placement', () => {
+    const textRunCount = 100;
+    const textRuns = Array.from({length: textRunCount}, (_, index) =>
+      `<span>Headline text run ${index + 1}</span>`
+    ).join('');
+    document.body.innerHTML = `<h3 id="source"><div>Meta</div>${textRuns}</h3>`;
+    const source = document.querySelector('#source');
+    const renderer = new TranslationRenderer({document, sessionId: 'guardian-style-query-session'});
+    const getComputedStyleSpy = vi.spyOn(window, 'getComputedStyle');
+
+    try {
+      renderer.insert({
+        element: source,
+        sourceId: 'guardian-style-query-source',
+        mixedContent: true,
+        translatedText: '번역된 제목'
+      });
+
+      expect(getComputedStyleSpy).toHaveBeenCalledTimes(textRunCount + 3);
+    } finally {
+      getComputedStyleSpy.mockRestore();
+      renderer.removeAll();
+    }
   });
 
   it('keeps translations inside table cells in original-translation mode', () => {

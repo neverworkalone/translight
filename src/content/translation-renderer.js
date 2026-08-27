@@ -146,9 +146,10 @@ function isNestedBlockNode(node) {
   );
 }
 
-function getMixedContentDirectChildren(element) {
+function getMixedContentDirectChildren(element, sourceTextNodes) {
   const directChildren = new Set();
-  for (const node of collectSourceTextNodes(element, true)) {
+  const nodes = sourceTextNodes ?? collectSourceTextNodes(element, true);
+  for (const node of nodes) {
     if (!(node.nodeValue ?? '').trim()) continue;
     let child = node;
     while (child.parentNode && child.parentNode !== element) child = child.parentNode;
@@ -157,10 +158,10 @@ function getMixedContentDirectChildren(element) {
   return directChildren;
 }
 
-function placeMixedContentTranslation(element, translation) {
+function placeMixedContentTranslation(element, translation, sourceTextNodes) {
   const childNodes = Array.from(element.childNodes ?? []);
   const firstNestedBlockIndex = childNodes.findIndex(isNestedBlockNode);
-  const directChildren = getMixedContentDirectChildren(element);
+  const directChildren = getMixedContentDirectChildren(element, sourceTextNodes);
   const directChildIndexes = childNodes
     .map((child, index) => directChildren.has(child) ? index : -1)
     .filter((index) => index >= 0);
@@ -264,7 +265,7 @@ function placeCollapsedReviewTranslationBeforeCard(card, element, translation) {
   insertionReference.parentNode?.insertBefore(translation, insertionReference);
 }
 
-function insertAtSafeLocation(element, translation, mixedContent = false) {
+function insertAtSafeLocation(element, translation, mixedContent = false, sourceTextNodes) {
   const stableListItem = getStableListItem(element);
   if (stableListItem) {
     stableListItem.parentNode.insertBefore(translation, stableListItem.nextSibling);
@@ -286,7 +287,7 @@ function insertAtSafeLocation(element, translation, mixedContent = false) {
   }
 
   if (mixedContent) {
-    return placeMixedContentTranslation(element, translation);
+    return placeMixedContentTranslation(element, translation, sourceTextNodes);
   }
 
   if (!shouldInsertInside(element)) {
@@ -348,7 +349,7 @@ function restorePlacement(record) {
     }
   }
   if (placement === MIXED_CONTENT_AFTER_DIRECT_TEXT_PLACEMENT) {
-    placeMixedContentTranslation(element, translation);
+    placeMixedContentTranslation(element, translation, record.sourceTextNodes);
     return;
   }
   element.appendChild(translation);
@@ -857,7 +858,7 @@ export class TranslationRenderer {
       return;
     }
     if (record.placement === MIXED_CONTENT_AFTER_DIRECT_TEXT_PLACEMENT) {
-      const directChild = [...getMixedContentDirectChildren(element)][0];
+      const directChild = [...getMixedContentDirectChildren(element, record.sourceTextNodes)][0];
       if (directChild) {
         element.insertBefore(translation, directChild);
         return;
@@ -1193,7 +1194,7 @@ export class TranslationRenderer {
       replacementWrappers: [],
       recoveryAttempts: 0
     };
-    record.placement = insertAtSafeLocation(element, translation, mixedContent);
+    record.placement = insertAtSafeLocation(element, translation, mixedContent, sourceTextNodes);
 
     element.setAttribute(SOURCE_ATTRIBUTE, sourceId);
     if (sourceHash) element.setAttribute(SOURCE_HASH_ATTRIBUTE, sourceHash);
