@@ -320,18 +320,18 @@ function shouldWrapGridLayoutSource(element) {
 function placeGridLayoutTranslation(element, translation) {
   const wrapper = element.ownerDocument.createElement('span');
   wrapper.setAttribute('data-translight-layout-wrapper', GENERATED_VALUE);
-  // Keep the source in the grid track it originally occupied and let the
-  // translation overflow into the next inline slot. A flex wrapper would
-  // size the source from its intrinsic text width, changing controls such as
-  // AP's LIVE button before the translation is even painted.
+  // Keep the source as the host's direct grid item. The generated label gets
+  // an explicit, separate grid item on the next available row so it cannot
+  // paint over a neighboring control in a fixed grid track. Reparenting the
+  // source would also break host selectors and explicit grid placement.
   wrapper.style.setProperty('display', 'grid', 'important');
-  wrapper.style.setProperty('grid-template-columns', '100% max-content', 'important');
   wrapper.style.setProperty('align-items', 'center', 'important');
-  wrapper.style.setProperty('width', '100%', 'important');
+  wrapper.style.setProperty('grid-column', '1 / -1', 'important');
+  wrapper.style.setProperty('grid-row', 'auto', 'important');
+  wrapper.style.setProperty('width', 'max-content', 'important');
   wrapper.style.setProperty('min-width', '0', 'important');
   wrapper.style.setProperty('justify-self', 'start', 'important');
-  element.parentNode.insertBefore(wrapper, element);
-  wrapper.appendChild(element);
+  element.parentNode.insertBefore(wrapper, element.nextSibling);
   wrapper.appendChild(translation);
   return {
     kind: GRID_LAYOUT_WRAPPER_PLACEMENT,
@@ -474,7 +474,10 @@ function restorePlacement(record) {
   }
   if (placement?.kind === GRID_LAYOUT_WRAPPER_PLACEMENT) {
     const wrapper = placement.anchor;
-    if (wrapper?.parentNode && element?.parentNode === wrapper) wrapper.appendChild(translation);
+    if (element?.parentNode && wrapper?.parentNode !== element.parentNode) {
+      element.parentNode.insertBefore(wrapper, element.nextSibling);
+    }
+    if (wrapper?.parentNode && translation.parentNode !== wrapper) wrapper.appendChild(translation);
     return;
   }
   if (!element?.parentNode) return;
@@ -516,11 +519,13 @@ function placeTranslationAfterSource(record) {
 
 function unwrapGridLayoutPlacement(record) {
   if (record?.placement?.kind !== GRID_LAYOUT_WRAPPER_PLACEMENT) return;
-  const {element} = record;
+  const {translation} = record;
   const wrapper = record.placement.anchor;
-  if (!wrapper?.parentNode || element?.parentNode !== wrapper) return;
-  wrapper.parentNode.insertBefore(element, wrapper);
-  wrapper.parentNode.removeChild(wrapper);
+  if (!wrapper?.parentNode) return;
+  if (translation?.parentNode === wrapper) wrapper.removeChild(translation);
+  // The wrapper is renderer-owned, but do not remove host content if a page
+  // reconciliation inserted anything into it before cleanup.
+  if (!wrapper.firstChild) wrapper.parentNode.removeChild(wrapper);
 }
 
 function getOriginalAttributes(element) {
@@ -1127,7 +1132,10 @@ export class TranslationRenderer {
     const {element, translation} = record;
     if (!element?.parentNode || !translation) return;
     if (record.placement?.kind === GRID_LAYOUT_WRAPPER_PLACEMENT) {
-      element.parentNode.insertBefore(translation, element);
+      const wrapper = record.placement.anchor;
+      if (!wrapper) return;
+      element.parentNode.insertBefore(wrapper, element);
+      if (translation.parentNode !== wrapper) wrapper.appendChild(translation);
       return;
     }
     if (record.placement === 'sibling') {
@@ -1309,6 +1317,8 @@ export class TranslationRenderer {
     if (descendant) return descendant;
     const sourceSibling = Array.from(record?.element?.parentElement?.children ?? []).find(isMatchingTranslation);
     if (sourceSibling) return sourceSibling;
+    const placedTranslation = record?.placement?.anchor?.querySelector?.(TRANSLATION_TAG);
+    if (placedTranslation && isMatchingTranslation(placedTranslation)) return placedTranslation;
     return Array.from(record?.placement?.anchor?.parentElement?.children ?? []).find(isMatchingTranslation) ?? null;
   }
 
@@ -1519,6 +1529,7 @@ export class TranslationRenderer {
       if (record.element?.getAttribute(SESSION_ATTRIBUTE) === this.sessionId) {
         for (const name of ATTRIBUTE_NAMES) restoreAttribute(record.element, name, record.originalAttributes[name]);
       }
+      unwrapGridLayoutPlacement(record);
       this.recordsByElement.delete(record.element);
       this.records.delete(sourceId);
     }

@@ -47,6 +47,26 @@ function isVertical(value) {
   return Boolean(value && value.height > value.width * 1.2);
 }
 
+function overlaps(first, second) {
+  if (!first || !second) return false;
+  return first.x < second.x + second.width &&
+    first.x + first.width > second.x &&
+    first.y < second.y + second.height &&
+    first.y + first.height > second.y;
+}
+
+function translationDoesNotOverlapNextControl(id, translationRect) {
+  const neighborIds = {
+    'live-source': ['all-source', 'breaking-source'],
+    'all-source': ['breaking-source'],
+    'breaking-source': ['all-source']
+  }[id] ?? [];
+  return neighborIds.every((neighborId) => !overlaps(
+    translationRect,
+    rect(sourceById.get(neighborId)?.element)
+  ));
+}
+
 function legacyProbe() {
   const selectors = [
     ['trending', '.legacy-panel .PagePromo-title'],
@@ -112,17 +132,23 @@ async function run() {
     const currentSourceText = id === 'live-source'
       ? element.querySelector('.live-text')?.textContent.trim()
       : element.textContent.trim();
+    const isGridWrapper = record?.placement?.kind === 'grid-layout-wrapper';
+    const wrapper = isGridWrapper ? translation?.parentElement : null;
     return [id, {
       originalTextUnchanged: currentSourceText === original,
       translationParentIsSibling: translation?.parentElement === element.parentElement,
       placement: record?.placement?.kind ?? record?.placement ?? null,
       mixedContent: record?.mixedContent ?? null,
-      placementIsSafe: translation?.parentElement === element.parentElement,
+      placementIsSafe: isGridWrapper
+        ? wrapper?.parentElement === element.parentElement &&
+          wrapper?.previousElementSibling === element
+        : translation?.parentElement === element.parentElement,
       beforeRect: before[id],
       sourceRect: rect(element),
       sourceRectStable: sameSize(rect(element), before[id]),
       translationRect,
       notVertical: Boolean(translationRect && !isVertical(translationRect)),
+      translationDoesNotOverlapNextControl: translationDoesNotOverlapNextControl(id, translationRect),
       translationWidthStyle: translation?.style.getPropertyValue('width') ?? '',
       layoutStyles: id === 'live-source' ? {
         sourceLineHeight: getComputedStyle(element).lineHeight,
@@ -137,6 +163,7 @@ async function run() {
     Object.entries(sourceReports).every(([id, source]) =>
       source.originalTextUnchanged && source.placementIsSafe &&
       source.sourceRectStable && source.notVertical &&
+      source.translationDoesNotOverlapNextControl &&
       (!compactLayoutIds.has(id) || !source.translationWidthStyle)
     );
 
@@ -157,11 +184,13 @@ async function run() {
   };
 
   session.stop({notify: false});
+  result.ownedWrapperCountAfterStop = document.querySelectorAll('[data-translight-layout-wrapper]').length;
   result.restoredAfterStop = generated.every((translation) => !translation.isConnected) &&
     Array.from(sourceById.values()).every(({element, original}) =>
       element.textContent.trim() === original
     );
-  result.testPassed = result.testPassed && result.restoredAfterStop;
+  result.testPassed = result.testPassed && result.restoredAfterStop &&
+    result.ownedWrapperCountAfterStop === 0;
   report.textContent = JSON.stringify(result, null, 2);
 }
 

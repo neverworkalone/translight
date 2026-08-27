@@ -471,10 +471,9 @@ describe('TranslationRenderer', () => {
     expect(translation.parentElement).not.toBe(source);
     expect(translation.parentElement?.tagName.toLowerCase()).toBe('span');
     expect(translation.parentElement?.getAttribute('data-translight-layout-wrapper')).toBe('true');
-    expect(translation.parentElement).toBe(source.parentElement);
-    expect(source.parentElement).not.toBe(layout);
-    expect(source.parentElement?.parentElement).toBe(layout);
-    expect(translation.previousElementSibling).toBe(source);
+    expect(translation.parentElement?.parentElement).toBe(layout);
+    expect(translation.parentElement?.previousElementSibling).toBe(source);
+    expect(source.parentElement).toBe(layout);
     expect(translation.style.getPropertyValue('width')).toBe('');
     expect(translation.style.getPropertyValue('margin')).toBe('0px');
     expect(renderer.style.textContent).toContain('flex: 0 0 auto !important');
@@ -485,6 +484,80 @@ describe('TranslationRenderer', () => {
         <div id="tabs">ALL</div>
       </div>
     `);
+  });
+
+  it('leaves explicitly placed grid sources in their original outer layout', () => {
+    document.body.innerHTML = `
+      <div id="layout" style="display:grid;grid-template-columns:40px 60px 80px 1fr">
+        <div id="source" style="display:flex;grid-column:2 / span 2;grid-row:3;order:7">LIVE</div>
+        <div id="other">Other content</div>
+      </div>
+    `;
+    const source = document.querySelector('#source');
+    const layout = document.querySelector('#layout');
+    const originalStyle = source.getAttribute('style');
+    const renderer = new TranslationRenderer({document, sessionId: 'explicit-grid-source-session'});
+
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'explicit-grid-source',
+      translatedText: '라이브'
+    });
+
+    expect(source.parentElement).toBe(layout);
+    expect(source.getAttribute('style')).toBe(originalStyle);
+    expect(translation.parentElement?.parentElement).toBe(layout);
+    expect(translation.parentElement?.previousElementSibling).toBe(source);
+    expect(translation.parentElement?.style.getPropertyValue('grid-column')).toBe('1 / -1');
+    expect(translation.parentElement?.style.getPropertyValue('grid-row')).toBe('auto');
+
+    renderer.removeAll();
+    expect(document.body.innerHTML).toBe(`
+      <div id="layout" style="display:grid;grid-template-columns:40px 60px 80px 1fr">
+        <div id="source" style="display:flex;grid-column:2 / span 2;grid-row:3;order:7">LIVE</div>
+        <div id="other">Other content</div>
+      </div>
+    `);
+  });
+
+  it('removes an owned grid wrapper when the host detaches its source', () => {
+    document.body.innerHTML = `
+      <div id="layout" style="display:grid;grid-template-columns:60px 1fr">
+        <div id="source" style="display:flex">LIVE</div>
+      </div>
+    `;
+    const source = document.querySelector('#source');
+    const renderer = new TranslationRenderer({document, sessionId: 'detached-grid-source-session'});
+    renderer.insert({element: source, sourceId: 'detached-grid-source', translatedText: '라이브'});
+    const wrapper = document.querySelector('[data-translight-layout-wrapper]');
+
+    source.remove();
+    renderer.pruneDisconnected();
+
+    expect(renderer.hasRecord(source)).toBe(false);
+    expect(wrapper?.isConnected).toBe(false);
+    expect(document.querySelector('[data-translight-layout-wrapper]')).toBeNull();
+    renderer.removeAll();
+  });
+
+  it('removes an owned grid wrapper when the host reparents its source', () => {
+    document.body.innerHTML = `
+      <div id="layout" style="display:grid;grid-template-columns:60px 1fr">
+        <div id="source" style="display:flex">LIVE</div>
+      </div>
+      <div id="destination"></div>
+    `;
+    const source = document.querySelector('#source');
+    const destination = document.querySelector('#destination');
+    const renderer = new TranslationRenderer({document, sessionId: 'reparented-grid-source-session'});
+    renderer.insert({element: source, sourceId: 'reparented-grid-source', translatedText: '라이브'});
+
+    destination.appendChild(source);
+    renderer.removeAll();
+
+    expect(destination.firstElementChild).toBe(source);
+    expect(document.querySelector('[data-translight-layout-wrapper]')).toBeNull();
+    expect(source.textContent).toBe('LIVE');
   });
 
   it('matches the source block typography when its parent uses a smaller base size', () => {

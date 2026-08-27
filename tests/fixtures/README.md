@@ -264,8 +264,9 @@ controls, article lead, and side rail using the saved page's nested
 panel keeps the legacy child-placement state from the attached snapshot so the
 vertical failure remains visible; the lower panel runs the current renderer on
 the same layout. The repaired case must report a vertical legacy probe, stable
-source rectangles, horizontal translations, `translationCount: 11`,
-`restoredAfterStop: true`, and `testPassed: true`.
+source rectangles, horizontal non-overlapping translations,
+`translationCount: 11`, `ownedWrapperCountAfterStop: 0`, `restoredAfterStop: true`,
+and `testPassed: true`.
 
 ## YouTube long description paragraph placement
 
