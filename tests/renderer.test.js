@@ -777,6 +777,35 @@ describe('TranslationRenderer', () => {
     }
   });
 
+  it('keeps mixed placement after same-text host node replacement during recovery', () => {
+    document.body.innerHTML = '<h3 id="source"><div id="category">Meta</div><span id="headline">Guardian headline</span></h3>';
+    const source = document.querySelector('#source');
+    const headline = document.querySelector('#headline');
+    const renderer = new TranslationRenderer({document, sessionId: 'guardian-recovery-session'});
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'guardian-recovery-source',
+      sourceHash: hashSourceText('Guardian headline'),
+      mixedContent: true,
+      translatedText: '가디언 제목'
+    });
+
+    headline.firstChild.replaceWith(document.createTextNode('Guardian headline'));
+    translation.remove();
+
+    expect(renderer.restoreMissingTranslations({elements: [source]})).toEqual({
+      restored: [source],
+      invalid: []
+    });
+    expect([...source.children]).toEqual([
+      document.querySelector('#category'),
+      headline,
+      translation
+    ]);
+
+    renderer.removeAll();
+  });
+
   it('keeps translations inside table cells in original-translation mode', () => {
     document.body.innerHTML = '<table><tbody><tr><td id="cell">Original cell</td></tr></tbody></table>';
     const cell = document.querySelector('#cell');

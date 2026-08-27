@@ -1084,6 +1084,7 @@ export class TranslationRenderer {
       return 'changed';
     }
     if (hasNestedBlocks(record.element) !== Boolean(record.mixedContent)) return 'changed';
+    record.sourceTextNodes = sourceTextNodes;
     if ((record.recoveryAttempts ?? 0) >= MAX_RECOVERY_ATTEMPTS) return 'exhausted';
     return 'ready';
   }
