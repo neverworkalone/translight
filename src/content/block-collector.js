@@ -344,9 +344,24 @@ function splitNestedBreaksIntoSegments(element, targetLanguage) {
     processedContainers.push(container);
     wrappers.push(...containerWrappers);
   }
-  return wrappers.concat(
-    splitUnsegmentedDirectChildrenIntoSegments(element, processedContainers, targetLanguage)
-  );
+
+  const residualElements = [element];
+  const seenResidualElements = new Set(residualElements);
+  for (const container of processedContainers) {
+    for (let ancestor = container.parentElement; ancestor && ancestor !== element; ancestor = ancestor.parentElement) {
+      if (seenResidualElements.has(ancestor)) continue;
+      seenResidualElements.add(ancestor);
+      residualElements.push(ancestor);
+    }
+  }
+  for (const residualElement of residualElements) {
+    wrappers.push(...splitUnsegmentedDirectChildrenIntoSegments(
+      residualElement,
+      processedContainers,
+      targetLanguage
+    ));
+  }
+  return wrappers;
 }
 
 function splitNestedNewlineTextIntoSegments(element, targetLanguage) {

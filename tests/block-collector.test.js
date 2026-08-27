@@ -345,6 +345,26 @@ describe('collectTranslationBlocks', () => {
     expect(secondPass.map((block) => block.text)).toEqual(blocks.map((block) => block.text));
   });
 
+  it('keeps source coverage through nested inline wrappers around formatted paragraphs', () => {
+    document.body.innerHTML = '<div id="review-text"><span class="outer-one">Introductory outer text has enough English words.<span class="outer-two">Introductory inner text has enough English words.<span class="Formatted">First review paragraph has enough English text.<br><br>Second review paragraph has enough English text.</span>Concluding inner text has enough English words.</span>Concluding outer text has enough English words.</span></div>';
+
+    const reviewText = document.querySelector('#review-text');
+    const blocks = collectTranslationBlocks(reviewText);
+    const secondPass = collectTranslationBlocks(reviewText);
+
+    expect(blocks.map((block) => block.text)).toEqual([
+      'Introductory outer text has enough English words.',
+      'Introductory inner text has enough English words.',
+      'First review paragraph has enough English text.',
+      'Second review paragraph has enough English text.',
+      'Concluding inner text has enough English words.',
+      'Concluding outer text has enough English words.'
+    ]);
+    expect(blocks.every(({element}) => element.matches('[data-translight-segment="true"]')))
+      .toBe(true);
+    expect(secondPass.map((block) => block.text)).toEqual(blocks.map((block) => block.text));
+  });
+
   it('collects plain table cells without collecting the table row', () => {
     document.body.innerHTML = `
       <table>

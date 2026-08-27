@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { PageSession } from '../src/content/page-session.js';
+import { SEGMENT_SELECTOR } from '../src/content/block-collector.js';
 import { MODEL_STATE } from '../src/translation/model-state.js';
 import { TRANSLATION_MODES } from '../src/settings.js';
 
@@ -273,6 +274,52 @@ describe('PageSession', () => {
     expect(expanded.textContent).toBe(originalDescription);
     expect(expanded.querySelector('translight-translation')).toBeNull();
     expect(expanded.querySelector('[data-translight-segment="true"]')).toBeNull();
+  });
+
+  it('keeps Goodreads translations after source paragraphs through nested inline wrappers', async () => {
+    document.body.innerHTML = '<div id="review-text"><span class="outer-one">Introductory outer text has enough English words.<span class="outer-two">Introductory inner text has enough English words.<span class="Formatted">First review paragraph has enough English text.<br><br>Second review paragraph has enough English text.</span>Concluding inner text has enough English words.</span>Concluding outer text has enough English words.</span></div>';
+    const reviewText = document.querySelector('#review-text');
+    const originalReview = reviewText.textContent;
+    const expectedTexts = [
+      'Introductory outer text has enough English words.',
+      'Introductory inner text has enough English words.',
+      'First review paragraph has enough English text.',
+      'Second review paragraph has enough English text.',
+      'Concluding inner text has enough English words.',
+      'Concluding outer text has enough English words.'
+    ];
+    const calls = [];
+    const session = new PageSession({
+      generation: 607,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    try {
+      await session.start();
+
+      const segments = Array.from(reviewText.querySelectorAll(SEGMENT_SELECTOR));
+      const translations = Array.from(reviewText.querySelectorAll('translight-translation'));
+      expect(calls.sort()).toEqual([...expectedTexts].sort());
+      expect(segments.map((segment) => segment.textContent.trim())).toEqual(expectedTexts);
+      expect(translations.map((translation) => translation.textContent.replace(/^ko:/, '').trim()))
+        .toEqual(expectedTexts);
+      expect(segments.every((segment) =>
+        segment.nextElementSibling?.matches('translight-translation')
+      )).toBe(true);
+    } finally {
+      session.stop({notify: false});
+    }
+
+    expect(reviewText.textContent).toBe(originalReview);
+    expect(reviewText.querySelector(SEGMENT_SELECTOR)).toBeNull();
+    expect(reviewText.querySelector('translight-translation')).toBeNull();
   });
 
   it('places a YouTube comment translation after the original comment', async () => {
