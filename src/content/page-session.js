@@ -11,7 +11,7 @@ const DEFAULT_CONCURRENCY = 3;
 const MUTATION_DEBOUNCE_MS = 100;
 const RECOVERY_STABILIZATION_MS = 350;
 const MAX_MUTATION_ROOTS = 64;
-const BLOCK_SELECTOR = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,figcaption,div,td,th';
+const BLOCK_SELECTOR = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,figcaption,div,section,td,th';
 const CANDIDATE_SELECTOR = `${BLOCK_SELECTOR},${SEGMENT_SELECTOR}`;
 const GENERATED_NODE_SELECTOR = '[data-translight-generated="true"]';
 const ROUTE_SETTLE_DELAYS = Object.freeze([100, 500]);

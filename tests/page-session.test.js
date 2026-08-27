@@ -45,6 +45,55 @@ describe('PageSession', () => {
     session.stop();
   });
 
+  it('translates direct text inside a semantic Craigslist posting body section', async () => {
+    document.body.innerHTML = `
+      <section class="page-container">
+        <section class="body">
+          <section class="userbody">
+            <section id="postingbody">
+              <div class="print-information" hidden>
+                <p>QR Code Link to This Post</p>
+              </div>
+              <br>
+              Are you a player looking to join a long established team in Korea?<br>
+              <br>
+              We have been running since 2011 and are looking for new players for our upcoming league season.<br>
+              <br>
+              Get in touch with your Kakao ID or phone number.
+            </section>
+          </section>
+        </section>
+      </section>
+    `;
+    const calls = [];
+    const session = new PageSession({
+      generation: 501,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    await session.start();
+
+    const postingBody = document.querySelector('#postingbody');
+    expect(calls).toEqual([
+      'Are you a player looking to join a long established team in Korea?',
+      'We have been running since 2011 and are looking for new players for our upcoming league season.',
+      'Get in touch with your Kakao ID or phone number.'
+    ]);
+    const translations = Array.from(postingBody.querySelectorAll('translight-translation'));
+    expect(translations).toHaveLength(3);
+    expect(translations.map((translation) => translation.textContent)).toEqual(calls.map((text) => `ko:${text}`));
+    expect(translations.every((translation) => !translation.textContent.includes('QR Code Link to This Post')))
+      .toBe(true);
+    session.stop({notify: false});
+  });
+
   it('skips a document with no translatable blocks', async () => {
     document.documentElement.lang = 'ko-KR';
     document.body.innerHTML = '<p>한국어 문서는 이미 대상 언어로 작성되어 있습니다.</p>';

@@ -35,7 +35,7 @@ const ROLE_ATTRIBUTE = 'data-translight-role';
 const ROLE_TRANSLATION = 'translation';
 const ROLE_ORIGINAL = 'original';
 const TRANSLATION_TEXT_ATTRIBUTE = 'data-translight-text';
-const BLOCK_SELECTOR = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,figcaption,div,td,th';
+const BLOCK_SELECTOR = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,figcaption,div,section,td,th';
 const EXCLUDED_CONTENT_SELECTOR = 'script,style,noscript,code,pre,input,textarea,select,button';
 const GENERATED_SELECTOR = 'translight-translation,[data-translight-generated="true"]';
 const LAYOUT_DISPLAYS = new Set(['flex', 'inline-flex', 'grid', 'inline-grid']);

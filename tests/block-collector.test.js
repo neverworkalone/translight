@@ -117,6 +117,32 @@ describe('collectTranslationBlocks', () => {
     ]);
   });
 
+  it('collects direct text from semantic sections such as a Craigslist posting body', () => {
+    document.body.innerHTML = `
+      <section id="postingbody">
+        <div class="print-information" hidden>
+          <p>QR Code Link to This Post</p>
+        </div>
+        <br>
+        Are you a player looking to join a long established team in Korea?<br>
+        <br>
+        We have been running since 2011 and are looking for new players for our upcoming league season.<br>
+        <br>
+        Get in touch with your Kakao ID or phone number.
+      </section>
+    `;
+
+    const body = document.querySelector('#postingbody');
+    const blocks = collectTranslationBlocks(document.body);
+
+    expect(blocks.map((block) => block.text)).toEqual([
+      'Are you a player looking to join a long established team in Korea?',
+      'We have been running since 2011 and are looking for new players for our upcoming league season.',
+      'Get in touch with your Kakao ID or phone number.'
+    ]);
+    expect(blocks.every(({element}) => element.parentElement === body)).toBe(true);
+  });
+
   it('anchors mixed direct-text segments around nested blocks in document order', () => {
     document.body.innerHTML = `
       <div id="mixed">
