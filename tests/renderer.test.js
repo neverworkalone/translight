@@ -449,6 +449,36 @@ describe('TranslationRenderer', () => {
     renderer.removeAll();
   });
 
+  it('matches the source block width and horizontal margins for sibling translations', () => {
+    document.head.innerHTML = `
+      <style>
+        .article-body { width: 100%; }
+        .article-body .paragraph { width: 644px; margin-left: auto; margin-right: auto; }
+      </style>
+    `;
+    document.body.innerHTML = `
+      <div class="article-body">
+        <div id="source" class="paragraph">Article paragraph</div>
+      </div>
+    `;
+    const source = document.querySelector('#source');
+    const sourceStyle = window.getComputedStyle(source);
+    const renderer = new TranslationRenderer({document, sessionId: 'source-layout-session'});
+
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'source-layout-source',
+      translatedText: '번역된 문단'
+    });
+
+    expect(translation.style.getPropertyValue('width')).toBe(sourceStyle.width);
+    expect(translation.style.getPropertyValue('margin-left')).toBe(sourceStyle.marginLeft);
+    expect(translation.style.getPropertyValue('margin-right')).toBe(sourceStyle.marginRight);
+    expect(window.getComputedStyle(translation).width).toBe(sourceStyle.width);
+
+    renderer.removeAll();
+  });
+
   it('matches the typography of a nested source text wrapper', () => {
     document.body.innerHTML = `
       <div id="source" style="font-size:14px;line-height:20px">

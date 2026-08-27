@@ -76,6 +76,13 @@ function getDisplay(element) {
 }
 
 const SOURCE_TYPOGRAPHY_PROPERTIES = ['font-size', 'line-height'];
+const SOURCE_LAYOUT_PROPERTIES = [
+  'width',
+  'min-width',
+  'max-width',
+  'margin-left',
+  'margin-right'
+];
 const MAIN_TEXT_RATIO = 0.5;
 
 function getComputedStyleValue(element, property) {
@@ -127,6 +134,42 @@ function syncSourceTypography(record) {
   const element = getSourceTypographyElement(record);
   for (const property of SOURCE_TYPOGRAPHY_PROPERTIES) {
     const value = getComputedStyleValue(element, property);
+    if (value) translation.style.setProperty(property, value, 'important');
+    else translation.style.removeProperty(property);
+  }
+}
+
+function clearSourceLayout(translation) {
+  if (!translation?.style) return;
+  for (const property of SOURCE_LAYOUT_PROPERTIES) translation.style.removeProperty(property);
+}
+
+function syncSourceLayout(record) {
+  const {element, translation, placement} = record ?? {};
+  if (!element || !translation?.style) return;
+  // A sibling translation does not receive the source block's width and
+  // centering rules because host styles usually target the source class. The
+  // other placements already share the source's containing block, so copying
+  // a pixel width there would make nested/grid/table layouts less flexible.
+  if (placement !== 'sibling') {
+    clearSourceLayout(translation);
+    return;
+  }
+
+  const view = element.ownerDocument?.defaultView;
+  const computedStyle = view?.getComputedStyle?.(element);
+  if (!computedStyle) return;
+
+  const values = new Map(SOURCE_LAYOUT_PROPERTIES.map((property) => [
+    property,
+    computedStyle.getPropertyValue?.(property) || computedStyle[property] || ''
+  ]));
+  const renderedWidth = Number(element.getBoundingClientRect?.()?.width);
+  if (Number.isFinite(renderedWidth) && renderedWidth > 0) {
+    values.set('width', `${renderedWidth}px`);
+  }
+
+  for (const [property, value] of values) {
     if (value) translation.style.setProperty(property, value, 'important');
     else translation.style.removeProperty(property);
   }
@@ -722,6 +765,15 @@ export class TranslationRenderer {
     this.sessionId = sessionId;
     this.records = new Map();
     this.recordsByElement = new WeakMap();
+    const ResizeObserverClass = document.defaultView?.ResizeObserver ?? globalThis.ResizeObserver;
+    this.layoutObserver = typeof ResizeObserverClass === 'function'
+      ? new ResizeObserverClass((entries) => {
+        for (const entry of entries) {
+          const record = this.recordsByElement.get(entry.target);
+          if (record) syncSourceLayout(record);
+        }
+      })
+      : null;
     this.presentation = normalizePresentation(settings);
     this.style = document.createElement('style');
     this.style.setAttribute(GENERATED_ATTRIBUTE, GENERATED_VALUE);
@@ -739,6 +791,14 @@ export class TranslationRenderer {
     this.presentation = normalizePresentation({...this.presentation, ...settings});
     this.updateStyleSheet();
     for (const record of this.records.values()) this.applyRecordPresentation(record);
+  }
+
+  observeSourceLayout(element) {
+    this.layoutObserver?.observe?.(element);
+  }
+
+  unobserveSourceLayout(element) {
+    this.layoutObserver?.unobserve?.(element);
   }
 
   currentSourceTextNodes(record) {
@@ -982,6 +1042,7 @@ export class TranslationRenderer {
     const {element, translation} = record;
     if (!element || !translation) return;
     const mode = this.presentation.translationMode;
+    syncSourceLayout(record);
     syncSourceTypography(record);
     this.clearFallbackPresentation(record);
     translation.setAttribute(MODE_ATTRIBUTE, mode);
@@ -1062,6 +1123,7 @@ export class TranslationRenderer {
     if (!replacement) return null;
 
     const originalAttributes = getOriginalAttributes(replacement);
+    this.unobserveSourceLayout(record.element);
     this.recordsByElement.delete(record.element);
     record.element = replacement;
     record.originalAttributes = originalAttributes;
@@ -1073,6 +1135,7 @@ export class TranslationRenderer {
     if (record.sourceHash) replacement.setAttribute(SOURCE_HASH_ATTRIBUTE, record.sourceHash);
     replacement.removeAttribute(PENDING_SOURCE_HASH_ATTRIBUTE);
     this.recordsByElement.set(replacement, record);
+    this.observeSourceLayout(replacement);
     return replacement;
   }
 
@@ -1215,6 +1278,7 @@ export class TranslationRenderer {
     element.setAttribute(SESSION_ATTRIBUTE, this.sessionId);
     this.records.set(sourceId, record);
     this.recordsByElement.set(element, record);
+    this.observeSourceLayout(element);
     this.applyRecordPresentation(record);
     return translation;
   }
@@ -1223,6 +1287,7 @@ export class TranslationRenderer {
     const record = this.recordsByElement.get(element);
     if (!record) return false;
 
+    this.unobserveSourceLayout(element);
     record.translation?.parentNode?.removeChild(record.translation);
     if (element?.getAttribute(SESSION_ATTRIBUTE) === this.sessionId) {
       this.restoreSourceText(record);
@@ -1238,6 +1303,7 @@ export class TranslationRenderer {
     for (const [sourceId, record] of this.records) {
       if (record.element?.isConnected !== false) continue;
       if (this.rebindDisconnectedRecord(record)) continue;
+      this.unobserveSourceLayout(record.element);
       record.translation?.parentNode?.removeChild(record.translation);
       if (record.element?.getAttribute(SESSION_ATTRIBUTE) === this.sessionId) {
         for (const name of ATTRIBUTE_NAMES) restoreAttribute(record.element, name, record.originalAttributes[name]);
@@ -1250,6 +1316,7 @@ export class TranslationRenderer {
   removeAll() {
     for (const record of this.records.values()) {
       const {element, translation, originalAttributes} = record;
+      this.unobserveSourceLayout(element);
       translation?.parentNode?.removeChild(translation);
       if (element?.getAttribute(SESSION_ATTRIBUTE) !== this.sessionId) continue;
       this.restoreSourceText(record);
@@ -1258,6 +1325,8 @@ export class TranslationRenderer {
       this.recordsByElement.delete(element);
     }
 
+    this.layoutObserver?.disconnect?.();
+    this.layoutObserver = null;
     const generatedNodes = this.document.querySelectorAll(`[${SESSION_ATTRIBUTE}]`);
     for (const node of generatedNodes) {
       if (node.getAttribute(SESSION_ATTRIBUTE) !== this.sessionId) continue;
