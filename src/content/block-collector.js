@@ -15,8 +15,7 @@ const NAVIGATION_SELECTOR = [
   '[data-mainnav-item]',
   '[data-nav-item]',
   '[data-nav-moretrigger]',
-  '[class*="Navigation"]',
-  '[class*="navigation"]'
+  '.MainNavigation'
 ].join(',');
 const LINK_RATIO_LIMIT = 0.65;
 const DOUBLE_LINE_BREAK_PATTERN = /\r?\n[ \t\f]*(?:\r?\n)+/;

@@ -184,10 +184,13 @@ function syncSourceLayout(record) {
   const {element, translation, placement} = record ?? {};
   if (!element || !translation?.style) return;
   // A sibling translation does not receive the source block's width and
-  // centering rules because host styles usually target the source class. The
-  // other placements already share the source's containing block, so copying
-  // a pixel width there would make nested/grid/table layouts less flexible.
-  if (placement !== 'sibling') {
+  // centering rules because host styles usually target the source class. A
+  // source that is itself a flex/grid container is kept content-sized so its
+  // constrained children do not force the translation into a narrow column.
+  // The other placements already share the source's containing block, so
+  // copying a pixel width there would make nested/grid/table layouts less
+  // flexible.
+  if (placement !== 'sibling' || LAYOUT_DISPLAYS.has(getDisplay(element))) {
     clearSourceLayout(translation);
     return;
   }
@@ -297,6 +300,7 @@ function getStableListItem(element) {
 function shouldInsertInside(element) {
   const tagName = element.tagName?.toLowerCase();
   if (tagName === 'li' || TABLE_CELL_TAGS.has(tagName)) return true;
+  if (LAYOUT_DISPLAYS.has(getDisplay(element))) return false;
   return LAYOUT_DISPLAYS.has(getDisplay(element.parentElement));
 }
 
@@ -886,7 +890,8 @@ export class TranslationRenderer {
 
   observeSourceLayout(record) {
     if (!this.layoutObserver || !record?.element) return;
-    const nextTargets = record.placement === 'sibling'
+    const nextTargets = record.placement === 'sibling' &&
+      !LAYOUT_DISPLAYS.has(getDisplay(record.element))
       ? [record.element, record.element.parentElement].filter(Boolean)
       : [];
     const previousTargets = record.layoutTargets ?? [];

@@ -423,6 +423,34 @@ describe('TranslationRenderer', () => {
     );
   });
 
+  it.each(['flex', 'grid'])('places a translation beside a %s source container', (display) => {
+    document.body.innerHTML = `
+      <div id="layout" style="display:flex">
+        <div id="source" style="display:${display};width:50px;white-space:nowrap">LIVE</div>
+      </div>
+    `;
+    const source = document.querySelector('#source');
+    const layout = document.querySelector('#layout');
+    const renderer = new TranslationRenderer({ document, sessionId: `${display}-source-session` });
+
+    const translation = renderer.insert({
+      element: source,
+      sourceId: `${display}-source-container`,
+      translatedText: '라이브'
+    });
+
+    expect(translation.parentElement).toBe(layout);
+    expect(translation.previousElementSibling).toBe(source);
+    expect(source.querySelector('translight-translation')).toBeNull();
+    expect(translation.style.getPropertyValue('width')).toBe('');
+    renderer.removeAll();
+    expect(document.body.innerHTML).toBe(`
+      <div id="layout" style="display:flex">
+        <div id="source" style="display:${display};width:50px;white-space:nowrap">LIVE</div>
+      </div>
+    `);
+  });
+
   it('matches the source block typography when its parent uses a smaller base size', () => {
     document.body.innerHTML = `
       <section id="article-body" style="font-size:10px;line-height:12.31px">

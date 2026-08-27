@@ -57,6 +57,7 @@ describe('collectTranslationBlocks', () => {
           </li>
         </ul>
       </bsp-nav>
+      <div class="MainNavigation"><div>Archive</div></div>
       <p>Article text remains translatable.</p>
     `;
 
@@ -64,6 +65,23 @@ describe('collectTranslationBlocks', () => {
       'Article text remains translatable.'
     ]);
   });
+
+  it.each(['has-navigation', 'layout-with-navigation', 'AppWithNavigation'])
+    ('does not treat ordinary layout class %s as a navigation container', (className) => {
+      document.body.innerHTML = `
+        <div class="${className}">
+          <main>
+            <h1>Article heading remains translatable.</h1>
+            <p>Article paragraph remains translatable.</p>
+          </main>
+        </div>
+      `;
+
+      expect(collectTranslationBlocks(document.body).map((block) => block.text)).toEqual([
+        'Article heading remains translatable.',
+        'Article paragraph remains translatable.'
+      ]);
+    });
 
   it('collects linked figure captions but ignores image-replacement logos', () => {
     document.body.innerHTML = `

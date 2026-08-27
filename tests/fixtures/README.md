@@ -247,6 +247,24 @@ The repaired case must report `translationCount: 2`,
 `navigationAfter.translationCount: 0`, `restoredAfterStop: true`, and
 `testPassed: true`.
 
+## AP News live-page compact layout
+
+Fixture: `apnews-live-layout-repro.html` and
+`apnews-live-layout-repro.js`
+
+Open this URL in Chrome while the Vite development server is running:
+
+```text
+http://127.0.0.1:5173/tests/fixtures/apnews-live-layout-repro.html
+```
+
+This fixture models the supplied AP News live page's trending links and live
+controls. Their source elements are flex or grid containers with constrained
+widths; translations must sit beside those containers so the original labels
+do not shrink into vertical columns. The repaired case must report stable
+source rectangles, sibling translations, `notVertical: true` for every source,
+`restoredAfterStop: true`, and `testPassed: true`.
+
 ## YouTube long description paragraph placement
 
 Fixture: `youtube-description-paragraphs-repro.html` and
