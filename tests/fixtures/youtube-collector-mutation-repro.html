@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Translight YouTube collector mutation reproduction</title>
+    <style>
+      html { scroll-behavior: auto; }
+      body {
+        margin: 0;
+        color: #0f0f0f;
+        background: #fff;
+        font: 16px/1.5 Arial, sans-serif;
+      }
+      #report {
+        position: fixed;
+        z-index: 10;
+        top: 0;
+        right: 0;
+        width: 430px;
+        max-height: 90vh;
+        overflow: auto;
+        box-sizing: border-box;
+        padding: 12px;
+        background: #111827;
+        color: white;
+        font: 12px/1.4 monospace;
+        white-space: pre-wrap;
+      }
+      #page {
+        width: min(900px, calc(100% - 48px));
+        margin: 96px auto 120px;
+      }
+      #description,
+      #comments {
+        margin: 24px 0;
+      }
+      ytd-comment-thread-renderer {
+        display: block;
+        margin: 24px 0;
+      }
+      .comment-shell {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .author {
+        color: #606060;
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <pre id="report">starting…</pre>
+    <main id="page">
+      <section id="description-shell">
+        <div id="description">
+          <p id="description-1">The first description paragraph is visible on initial page load.</p>
+        </div>
+      </section>
+      <section id="comments">
+        <ytd-comment-thread-renderer id="comment-1">
+          <div class="comment-shell">
+            <div class="author"><div class="handle">사용자</div><span>11개월 전</span></div>
+            <p id="comment-text-1">The first comment is visible on initial page load.</p>
+          </div>
+        </ytd-comment-thread-renderer>
+      </section>
+    </main>
+    <script type="module" src="/tests/fixtures/youtube-collector-mutation-repro.js"></script>
+  </body>
+</html>
