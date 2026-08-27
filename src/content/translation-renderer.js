@@ -77,9 +77,15 @@ function getComputedStyleValue(element, property) {
   return computedStyle.getPropertyValue?.(property) || computedStyle[property] || '';
 }
 
+function getSourceTypographyElement(record) {
+  const sourceTextNode = record.sourceTextNodes?.find((node) => (node.nodeValue ?? '').trim());
+  return sourceTextNode?.parentElement ?? record.element;
+}
+
 function syncSourceTypography(record) {
-  const {element, translation} = record;
-  if (!element || !translation?.style) return;
+  const {translation} = record;
+  if (!record?.element || !translation?.style) return;
+  const element = getSourceTypographyElement(record);
   for (const property of SOURCE_TYPOGRAPHY_PROPERTIES) {
     const value = getComputedStyleValue(element, property);
     if (value) translation.style.setProperty(property, value, 'important');

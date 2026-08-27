@@ -2,6 +2,7 @@ import {PageSession} from '../../src/content/page-session.js';
 
 const report = document.querySelector('#report');
 const comment = document.querySelector('#content-text');
+const commentText = comment.querySelector('span');
 const hiddenChip = document.querySelector('#paid-comment-chip');
 const expectedText = 'China is an incredibly beautiful country. And your videos are simply wonderful!';
 const originalComment = comment.textContent.trim();
@@ -29,6 +30,8 @@ async function run() {
 
   const translations = Array.from(document.querySelectorAll('translight-translation'));
   const translation = translations[0];
+  const sourceStyle = getComputedStyle(commentText);
+  const translationStyle = translation ? getComputedStyle(translation) : null;
   const translationAfterOriginal = Boolean(
     translation && (comment.compareDocumentPosition(translation) & Node.DOCUMENT_POSITION_FOLLOWING)
   );
@@ -40,11 +43,17 @@ async function run() {
     translationCount: translations.length,
     originalComment: originalComment,
     translatedComment: translation?.textContent ?? null,
+    sourceFontSize: sourceStyle.fontSize,
+    translationFontSize: translationStyle?.fontSize ?? null,
+    sourceLineHeight: sourceStyle.lineHeight,
+    translationLineHeight: translationStyle?.lineHeight ?? null,
     translationAfterOriginal,
     hiddenPaidChip: Boolean(hiddenChip?.hidden),
     testPassed: calls.length === 1 && calls[0] === expectedText &&
       originalComment === expectedText && translations.length === 1 &&
-      translationAfterOriginal && Boolean(hiddenChip?.hidden)
+      translationAfterOriginal && Boolean(hiddenChip?.hidden) &&
+      translationStyle?.fontSize === sourceStyle.fontSize &&
+      translationStyle?.lineHeight === sourceStyle.lineHeight
   };
 
   session.stop({notify: false});
