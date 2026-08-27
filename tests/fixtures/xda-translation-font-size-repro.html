@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Translight XDA translation font-size reproduction</title>
+    <style>
+      html { scroll-behavior: auto; }
+      body { margin: 0; color: #272727; background: #fff; font: 16px/1.4 Arial, sans-serif; }
+      #report {
+        position: fixed;
+        z-index: 10;
+        top: 0;
+        right: 0;
+        width: 420px;
+        max-height: 90vh;
+        overflow: auto;
+        box-sizing: border-box;
+        padding: 12px;
+        background: #111827;
+        color: white;
+        font: 12px/1.4 monospace;
+        white-space: pre-wrap;
+      }
+      #article-body {
+        width: min(850px, calc(100% - 32px));
+        margin: 64px auto 120px;
+        font-size: 10px;
+        line-height: 12.31px;
+      }
+      #article-body .content-block-regular {
+        font-size: 10px;
+        line-height: 12.31px;
+      }
+      #article-body .content-block-regular p {
+        margin: 0 0 24px;
+        font-family: "Titillium Web", Arial, sans-serif;
+        font-size: 18px;
+        line-height: 28.8px;
+      }
+    </style>
+  </head>
+  <body>
+    <pre id="report">starting…</pre>
+    <main>
+      <section id="article-body" class="article-body valnet-segment-Home">
+        <div class="content-block-regular">
+          <p id="source">An all-too-familiar scenario is when you are on a wired connection or even high-spec Wi-Fi with a 500Mbps+ speed.</p>
+          <p>Yet in fast-paced tactical shooters, you suffer from intermittent micro-rubber banding and hit registration delays.</p>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/tests/fixtures/xda-translation-font-size-repro.js"></script>
+  </body>
+</html>
