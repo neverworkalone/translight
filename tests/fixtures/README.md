@@ -125,6 +125,28 @@ paragraph instead of being inserted once after the entire description.
 The repaired case must report `translationCount: 3`, `interleaved: true`,
 `testPassed: true`, and `restoredAfterStop: true`.
 
+## YouTube comment translation placement
+
+Fixture: `youtube-comment-placement-repro.html` and
+`youtube-comment-placement-repro.js`
+
+Open this URL in Chrome while the Vite development server is running:
+
+```text
+http://127.0.0.1:5173/tests/fixtures/youtube-comment-placement-repro.html
+```
+
+The fixture models the supplied YouTube video at
+`https://www.youtube.com/watch?v=lzopkfaUcKs`. YouTube places a hidden
+`yt-pdg-comment-chip-renderer` inside the comment body before the visible
+`yt-attributed-string` comment text. The hidden chip must not make the comment
+look like a mixed block; the generated translation must follow the original
+comment instead of appearing above it.
+
+The repaired case must report `translationCount: 1`,
+`translationAfterOriginal: true`, `testPassed: true`, and
+`restoredAfterStop: true`.
+
 When adding another browser regression, use a descriptive `<bug-name>-repro`
 fixture name and document its reproducible URL and pass/fail signal in this
 file.

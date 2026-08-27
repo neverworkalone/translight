@@ -311,12 +311,13 @@ function getCandidates(root) {
 
 function hasBlockDescendant(element, candidateSet) {
   return Array.from(element.querySelectorAll(CANDIDATE_SELECTOR))
-    .some((descendant) => candidateSet.has(descendant));
+    .some((descendant) => candidateSet.has(descendant) && !isHidden(descendant));
 }
 
 function hasNonSegmentBlockDescendant(element, candidateSet) {
   return Array.from(element.querySelectorAll(CANDIDATE_SELECTOR))
-    .some((descendant) => candidateSet.has(descendant) && !descendant.matches(SEGMENT_SELECTOR));
+    .some((descendant) => candidateSet.has(descendant) &&
+      !descendant.matches(SEGMENT_SELECTOR) && !isHidden(descendant));
 }
 
 export function collectTranslationBlocks(

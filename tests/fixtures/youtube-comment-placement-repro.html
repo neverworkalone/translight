@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Translight YouTube comment placement reproduction</title>
+    <style>
+      html { scroll-behavior: auto; }
+      body {
+        margin: 0;
+        color: #0f0f0f;
+        background: #fff;
+        font: 14px/1.4 Arial, sans-serif;
+      }
+      #report {
+        position: fixed;
+        z-index: 10;
+        top: 0;
+        right: 0;
+        width: 430px;
+        max-height: 90vh;
+        overflow: auto;
+        box-sizing: border-box;
+        padding: 12px;
+        background: #111827;
+        color: white;
+        font: 12px/1.4 monospace;
+        white-space: pre-wrap;
+      }
+      #comments {
+        width: min(900px, calc(100% - 48px));
+        margin: 96px auto 120px;
+      }
+      ytd-comment-thread-renderer {
+        display: block;
+        margin: 24px 0;
+      }
+      #body {
+        display: flex;
+        gap: 16px;
+      }
+      #avatar {
+        flex: 0 0 40px;
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        background: #ff6434;
+        color: white;
+        line-height: 40px;
+        text-align: center;
+      }
+      #main {
+        display: flex;
+        flex: 1;
+        flex-direction: column;
+        min-width: 0;
+      }
+      #header {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 10px;
+        color: #606060;
+        font-size: 13px;
+      }
+      #content {
+        display: flow-root;
+        font-size: 16px;
+        line-height: 1.5;
+      }
+      yt-attributed-string,
+      .ytAttributedStringHost,
+      .ytAttributedStringWhiteSpacePreWrap {
+        display: inline;
+        white-space: pre-wrap;
+      }
+      #actions {
+        min-height: 28px;
+        margin-top: 12px;
+        color: #606060;
+      }
+      button {
+        margin-right: 12px;
+        border: 0;
+        background: transparent;
+        color: inherit;
+      }
+    </style>
+  </head>
+  <body>
+    <pre id="report">starting…</pre>
+    <main id="comments">
+      <ytd-comment-thread-renderer>
+        <ytd-comment-view-model id="comment">
+          <div id="body">
+            <div id="avatar">N</div>
+            <div id="main">
+              <div id="header"><span>@사용자</span><span>1년 전</span></div>
+              <ytd-expander id="expander">
+                <div id="content">
+                  <yt-pdg-comment-chip-renderer id="paid-comment-chip" hidden>
+                    <div id="comment-chip-container"></div>
+                  </yt-pdg-comment-chip-renderer>
+                  <yt-attributed-string id="content-text">
+                    <span class="ytAttributedStringHost ytAttributedStringWhiteSpacePreWrap">China is an incredibly beautiful country. And your videos are simply wonderful!</span>
+                  </yt-attributed-string>
+                </div>
+              </ytd-expander>
+              <div id="actions">
+                <button type="button">Like</button>
+                <button type="button">Reply</button>
+              </div>
+            </div>
+          </div>
+        </ytd-comment-view-model>
+      </ytd-comment-thread-renderer>
+    </main>
+    <script type="module" src="/tests/fixtures/youtube-comment-placement-repro.js"></script>
+  </body>
+</html>
