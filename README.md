@@ -63,7 +63,7 @@ npm run package
 ### For a readable debug package without JavaScript or CSS minification:
 
 ```bash
-./pack.sh --no-minify
+./pack.sh
 ```
 
 

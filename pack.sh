@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-translightNoMinify=false
-if [[ "${1:-}" == "--no-minify" ]]; then
-  translightNoMinify=true
+translightNoMinify=true
+if [[ "${1:-}" == "--minify" ]]; then
+  translightNoMinify=false
   shift
 fi
 if [[ $# -ne 0 ]]; then
-  echo "Usage: $0 [--no-minify]" >&2
+  echo "Usage: $0 [--minify]" >&2
   exit 2
 fi
 
