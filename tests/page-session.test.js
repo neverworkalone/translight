@@ -94,6 +94,55 @@ describe('PageSession', () => {
     session.stop({notify: false});
   });
 
+  it('interleaves translations for blank-line paragraphs in a YouTube description', async () => {
+    document.body.innerHTML = `
+      <div id="description-inline-expander">
+        <div id="expanded">
+          <yt-attributed-string>
+            <span class="ytAttributedStringHost ytAttributedStringWhiteSpacePreWrap">
+              <span class="ytAttributedStringLinkInheritColor">First description paragraph.\n\nSecond description paragraph.\n\nThird description paragraph.</span>
+            </span>
+          </yt-attributed-string>
+        </div>
+      </div>
+    `;
+    const expanded = document.querySelector('#expanded');
+    const originalDescription = expanded.textContent;
+    const expectedTexts = [
+      'First description paragraph.',
+      'Second description paragraph.',
+      'Third description paragraph.'
+    ];
+    const calls = [];
+    const session = new PageSession({
+      generation: 601,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    await session.start();
+
+    const segments = Array.from(expanded.querySelectorAll('[data-translight-segment="true"]'));
+    const translations = Array.from(expanded.querySelectorAll('translight-translation'));
+    expect(calls.sort()).toEqual(expectedTexts.sort());
+    expect(translations.map((translation) => translation.textContent)).toEqual(
+      expectedTexts.map((text) => `ko:${text}`)
+    );
+    expect(segments.every((segment) => segment.nextElementSibling?.matches('translight-translation')))
+      .toBe(true);
+
+    session.stop({notify: false});
+    expect(expanded.textContent).toBe(originalDescription);
+    expect(expanded.querySelector('translight-translation')).toBeNull();
+    expect(expanded.querySelector('[data-translight-segment="true"]')).toBeNull();
+  });
+
   it('skips a document with no translatable blocks', async () => {
     document.documentElement.lang = 'ko-KR';
     document.body.innerHTML = '<p>한국어 문서는 이미 대상 언어로 작성되어 있습니다.</p>';

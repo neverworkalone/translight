@@ -7,6 +7,7 @@ const EXCLUDED_ANCESTOR_SELECTOR = `${EXCLUDED_CONTENT_SELECTOR},[contenteditabl
 const GENERATED_SELECTOR = 'translight-translation,[data-translight-generated="true"]';
 const NAVIGATION_SELECTOR = 'nav,[role="navigation"],[role="menu"],[aria-haspopup="menu"]';
 const LINK_RATIO_LIMIT = 0.65;
+const DOUBLE_LINE_BREAK_PATTERN = /\r?\n[ \t\f]*(?:\r?\n)+/;
 const SOURCE_ID_ATTRIBUTE = 'data-translight-source-id';
 const SOURCE_HASH_ATTRIBUTE = 'data-translight-source-hash';
 const PENDING_SOURCE_HASH_ATTRIBUTE = 'data-translight-pending-source-hash';
@@ -186,6 +187,77 @@ function splitNodesAtDoubleBreaks(nodes) {
   return ranges.filter(({nodes}) => nodes.length && isPhrasingContent(nodes));
 }
 
+function createSegmentWrapper(element) {
+  const wrapper = element.ownerDocument.createElement('span');
+  wrapper.setAttribute(SEGMENT_ATTRIBUTE, 'true');
+  wrapper.setAttribute(SEGMENT_ID_ATTRIBUTE, `source-${++sourceSequence}`);
+  return wrapper;
+}
+
+function getTextNodes(node, root, nodes = []) {
+  if (node?.nodeType === 3) {
+    nodes.push(node);
+    return nodes;
+  }
+  if (!isElement(node)) return nodes;
+  if (node !== root && (
+    node.matches(EXCLUDED_CONTENT_SELECTOR) ||
+    node.matches(GENERATED_SELECTOR) ||
+    node.matches(SEGMENT_SELECTOR) ||
+    isHidden(node)
+  )) return nodes;
+  for (const child of Array.from(node.childNodes ?? [])) getTextNodes(child, root, nodes);
+  return nodes;
+}
+
+function splitTextNodeAtDoubleLineBreaks(textNode, targetLanguage) {
+  const parent = textNode.parentElement;
+  if (!parent) return [];
+
+  const value = textNode.nodeValue ?? '';
+  const separatorPattern = new RegExp(DOUBLE_LINE_BREAK_PATTERN.source, 'g');
+  const parts = [];
+  let cursor = 0;
+  let match;
+  while ((match = separatorPattern.exec(value))) {
+    parts.push({text: value.slice(cursor, match.index), separator: match[0]});
+    cursor = separatorPattern.lastIndex;
+  }
+  parts.push({text: value.slice(cursor), separator: ''});
+
+  const translatableParts = parts.filter(({text}) => {
+    const normalized = normalizeSourceText(text);
+    return normalized.length >= 2 && isTranslatableBlock(parent, normalized, targetLanguage);
+  });
+  if (translatableParts.length < 2) return [];
+
+  const fragment = textNode.ownerDocument.createDocumentFragment();
+  const wrappers = [];
+  for (const {text, separator} of parts) {
+    const normalized = normalizeSourceText(text);
+    if (normalized.length >= 2 && isTranslatableBlock(parent, normalized, targetLanguage)) {
+      const wrapper = createSegmentWrapper(parent);
+      wrapper.appendChild(textNode.ownerDocument.createTextNode(text));
+      fragment.appendChild(wrapper);
+      wrappers.push(wrapper);
+    } else if (text) {
+      fragment.appendChild(textNode.ownerDocument.createTextNode(text));
+    }
+    if (separator) fragment.appendChild(textNode.ownerDocument.createTextNode(separator));
+  }
+  textNode.parentNode.replaceChild(fragment, textNode);
+  return wrappers;
+}
+
+function splitNestedNewlineTextIntoSegments(element, targetLanguage) {
+  for (const textNode of getTextNodes(element, element)) {
+    if (!DOUBLE_LINE_BREAK_PATTERN.test(textNode.nodeValue ?? '')) continue;
+    const wrappers = splitTextNodeAtDoubleLineBreaks(textNode, targetLanguage);
+    if (wrappers.length) return wrappers;
+  }
+  return [];
+}
+
 function directContentRanges(element) {
   const ranges = [];
   let current = [];
@@ -209,21 +281,20 @@ function splitDirectTextIntoSegments(element, targetLanguage, {hasNestedBlocks =
   if (!isElement(element) || element.matches(SEGMENT_SELECTOR)) return [];
 
   const ranges = directContentRanges(element);
-  if (ranges.length < 2 && !hasNestedBlocks) return [];
+  if (ranges.length < 2 && hasNestedBlocks) return [];
+  if (ranges.length < 2) return splitNestedNewlineTextIntoSegments(element, targetLanguage);
 
   const translatableRanges = ranges.filter(({nodes}) => {
     const text = normalizeSourceText(textFromNodes(nodes, element));
     return text.length >= 2 && isTranslatableBlock(element, text, targetLanguage);
   });
-  if (!translatableRanges.length) return [];
+  if (!translatableRanges.length) return splitNestedNewlineTextIntoSegments(element, targetLanguage);
 
   const wrappers = [];
   for (const {nodes} of [...translatableRanges].reverse()) {
     const firstNode = nodes[0];
     if (!firstNode?.parentNode) continue;
-    const wrapper = element.ownerDocument.createElement('span');
-    wrapper.setAttribute(SEGMENT_ATTRIBUTE, 'true');
-    wrapper.setAttribute(SEGMENT_ID_ATTRIBUTE, `source-${++sourceSequence}`);
+    const wrapper = createSegmentWrapper(element);
     element.insertBefore(wrapper, firstNode);
     for (const node of nodes) wrapper.appendChild(node);
     wrappers.unshift(wrapper);
@@ -241,6 +312,11 @@ function getCandidates(root) {
 function hasBlockDescendant(element, candidateSet) {
   return Array.from(element.querySelectorAll(CANDIDATE_SELECTOR))
     .some((descendant) => candidateSet.has(descendant));
+}
+
+function hasNonSegmentBlockDescendant(element, candidateSet) {
+  return Array.from(element.querySelectorAll(CANDIDATE_SELECTOR))
+    .some((descendant) => candidateSet.has(descendant) && !descendant.matches(SEGMENT_SELECTOR));
 }
 
 export function collectTranslationBlocks(
@@ -264,6 +340,8 @@ export function collectTranslationBlocks(
       if (isExistingSource) onExcluded?.(element);
     };
     if (isHidden(element) && !isExistingSource) return;
+    const hasSegmentDescendant = Boolean(element.querySelector(SEGMENT_SELECTOR));
+    if (!isExistingSource && hasSegmentDescendant && !hasNonSegmentBlockDescendant(element, candidateSet)) return;
     const hasNestedBlocks = hasBlockDescendant(element, candidateSet);
     const directText = hasNestedBlocks ? normalizeSourceText(directTextFromNode(element, element)) : '';
     if (hasNestedBlocks && !directText) return;
