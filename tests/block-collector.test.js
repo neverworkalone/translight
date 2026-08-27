@@ -193,6 +193,36 @@ describe('collectTranslationBlocks', () => {
       .toEqual(blocks.map((block) => block.sourceId));
   });
 
+  it('splits blank-line paragraphs inside a nested YouTube attributed description', () => {
+    document.body.innerHTML = `
+      <div id="expanded">
+        <yt-attributed-string>
+          <span class="ytAttributedStringHost ytAttributedStringWhiteSpacePreWrap">
+            <span class="ytAttributedStringLinkInheritColor">First paragraph.\n\nSecond paragraph.\n\nThird paragraph.</span>
+            <span class="ytAttributedStringLinkInheritColor"><a href="#chapter">0:00</a> Intro</span>
+          </span>
+        </yt-attributed-string>
+      </div>
+    `;
+
+    const expanded = document.querySelector('#expanded');
+    const blocks = collectTranslationBlocks(expanded);
+
+    expect(blocks.map((block) => block.text)).toEqual([
+      'First paragraph.',
+      'Second paragraph.',
+      'Third paragraph.'
+    ]);
+    expect(blocks.every(({element}) => element.matches('[data-translight-segment="true"]')))
+      .toBe(true);
+
+    for (const block of blocks) {
+      block.element.setAttribute('data-translight-source-id', block.sourceId);
+      block.element.setAttribute('data-translight-source-hash', block.sourceHash);
+    }
+    expect(collectTranslationBlocks(expanded, {isActiveSource: () => true})).toEqual([]);
+  });
+
   it('collects plain table cells without collecting the table row', () => {
     document.body.innerHTML = `
       <table>

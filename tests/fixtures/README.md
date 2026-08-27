@@ -104,6 +104,27 @@ The repaired case must report equal `sourceFontSize` and `translationFontSize`,
 equal `sourceLineHeight` and `translationLineHeight`,
 `bodyTranslationCount: 2`, and `testPassed: true`.
 
+## YouTube long description paragraph placement
+
+Fixture: `youtube-description-paragraphs-repro.html` and
+`youtube-description-paragraphs-repro.js`
+
+Open this URL in Chrome while the Vite development server is running:
+
+```text
+http://127.0.0.1:5173/tests/fixtures/youtube-description-paragraphs-repro.html
+```
+
+This fixture models the supplied YouTube video at
+`https://www.youtube.com/watch?v=h9QaF2X74H0`. YouTube renders the expanded
+description inside `#expanded > yt-attributed-string` as nested inline spans;
+paragraphs are separated by blank lines in a text node rather than by `<p>` or
+`<br>` elements. Each generated translation must follow its own source
+paragraph instead of being inserted once after the entire description.
+
+The repaired case must report `translationCount: 3`, `interleaved: true`,
+`testPassed: true`, and `restoredAfterStop: true`.
+
 When adding another browser regression, use a descriptive `<bug-name>-repro`
 fixture name and document its reproducible URL and pass/fail signal in this
 file.

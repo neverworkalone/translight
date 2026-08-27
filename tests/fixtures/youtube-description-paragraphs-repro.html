@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Translight YouTube description paragraphs reproduction</title>
+    <style>
+      html { scroll-behavior: auto; }
+      body { margin: 0; color: #0f0f0f; background: #fff; font: 14px/1.4 Arial, sans-serif; }
+      #report {
+        position: fixed;
+        z-index: 10;
+        top: 0;
+        right: 0;
+        width: 430px;
+        max-height: 90vh;
+        overflow: auto;
+        box-sizing: border-box;
+        padding: 12px;
+        background: #111827;
+        color: white;
+        font: 12px/1.4 monospace;
+        white-space: pre-wrap;
+      }
+      #description-inline-expander {
+        width: min(900px, calc(100% - 48px));
+        margin: 72px auto 120px;
+        padding: 16px;
+        border-radius: 12px;
+        background: #f2f2f2;
+      }
+      #expanded {
+        display: block;
+        font-size: 14px;
+        line-height: 19.6px;
+      }
+      yt-attributed-string,
+      .ytAttributedStringHost,
+      .ytAttributedStringLinkInheritColor {
+        display: inline;
+        white-space: pre-wrap;
+      }
+      .chapter-link { color: #065fd4; }
+    </style>
+  </head>
+  <body>
+    <pre id="report">starting…</pre>
+    <main>
+      <div id="description-inline-expander">
+        <div id="expanded">
+          <yt-attributed-string>
+            <span class="ytAttributedStringHost ytAttributedStringWhiteSpacePreWrap">
+              <span class="ytAttributedStringLinkInheritColor">First description paragraph with enough text to represent the expanded YouTube description.
+
+Second description paragraph stays separate from the first paragraph.
+
+Third description paragraph should receive its translation at its own boundary.
+</span><span class="ytAttributedStringLinkInheritColor chapter-link"><a href="#chapter">0:00</a> Intro</span>
+            </span>
+          </yt-attributed-string>
+        </div>
+      </div>
+    </main>
+    <script type="module" src="/tests/fixtures/youtube-description-paragraphs-repro.js"></script>
+  </body>
+</html>
