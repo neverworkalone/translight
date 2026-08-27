@@ -227,6 +227,26 @@ The repaired case must report `captionTranslationCount: 1`,
 layouts before and after translation, `restoredAfterStop: true`, and
 `testPassed: true`.
 
+## AP News navigation
+
+Fixture: `apnews-navigation-repro.html` and
+`apnews-navigation-repro.js`
+
+Open this URL in Chrome while the Vite development server is running:
+
+```text
+http://127.0.0.1:5173/tests/fixtures/apnews-navigation-repro.html
+```
+
+This fixture models the supplied AP News header, whose top navigation is a
+custom `bsp-nav` element rather than a native `nav`. `SCIENCE` and `MORE` must
+remain original menu labels with no generated translation nodes, while the
+article title and paragraph continue to translate.
+
+The repaired case must report `translationCount: 2`,
+`navigationAfter.translationCount: 0`, `restoredAfterStop: true`, and
+`testPassed: true`.
+
 ## YouTube long description paragraph placement
 
 Fixture: `youtube-description-paragraphs-repro.html` and

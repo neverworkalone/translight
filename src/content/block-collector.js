@@ -6,7 +6,18 @@ const EXCLUDED_CONTENT_SELECTOR = 'script,style,noscript,code,pre,input,textarea
 const BRANDING_SELECTOR = '.site-logo,a.logo.replace';
 const EXCLUDED_ANCESTOR_SELECTOR = `${EXCLUDED_CONTENT_SELECTOR},[contenteditable="true"],[contenteditable=""],${BRANDING_SELECTOR}`;
 const GENERATED_SELECTOR = 'translight-translation,[data-translight-generated="true"]';
-const NAVIGATION_SELECTOR = 'nav,[role="navigation"],[role="menu"],[aria-haspopup="menu"]';
+const NAVIGATION_SELECTOR = [
+  'nav',
+  'bsp-nav',
+  '[role="navigation"]',
+  '[role="menu"]',
+  '[aria-haspopup="menu"]',
+  '[data-mainnav-item]',
+  '[data-nav-item]',
+  '[data-nav-moretrigger]',
+  '[class*="Navigation"]',
+  '[class*="navigation"]'
+].join(',');
 const LINK_RATIO_LIMIT = 0.65;
 const DOUBLE_LINE_BREAK_PATTERN = /\r?\n[ \t\f]*(?:\r?\n)+/;
 const SOURCE_ID_ATTRIBUTE = 'data-translight-source-id';
