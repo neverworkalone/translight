@@ -169,6 +169,26 @@ The repaired case must report `translationCount: 1`,
 `translationOutsideCollapsedCard: true`, `translationBelowCard: true`,
 `testPassed: true`, and `restoredAfterStop: true`.
 
+## YouTube collector mutation performance
+
+Fixture: `youtube-collector-mutation-repro.html` and
+`youtube-collector-mutation-repro.js`
+
+Open this URL in Chrome while the Vite development server is running:
+
+```text
+http://127.0.0.1:5173/tests/fixtures/youtube-collector-mutation-repro.html
+```
+
+The fixture models the initial YouTube comment and description collection,
+then appends one description paragraph and one comment after the first
+translation pass. The collector must translate only the two initial blocks and
+the two newly added blocks, without repeatedly traversing the whole page.
+
+The repaired case must report `initialTranslationCount: 2`,
+`mutationTranslationCount: 4`, `testPassed: true`, and
+`restoredAfterStop: true`.
+
 When adding another browser regression, use a descriptive `<bug-name>-repro`
 fixture name and document its reproducible URL and pass/fail signal in this
 file.
