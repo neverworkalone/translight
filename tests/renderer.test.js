@@ -720,6 +720,38 @@ describe('TranslationRenderer', () => {
     expect(document.body.innerHTML).toBe('<div id="mixed">Direct text.<p id="nested">Nested text.</p></div>');
   });
 
+  it('places mixed card translations after direct text that follows nested metadata', () => {
+    document.body.innerHTML = `
+      <article id="card">
+        <h3 id="headline"><div class="category">Meta</div><span class="headline-text">Facebook and Instagram face changes in US as Meta settles teen addiction lawsuit for $18bn</span></h3>
+      </article>
+    `;
+    const headline = document.querySelector('#headline');
+    const blocks = collectTranslationBlocks(document.body);
+    const titleBlock = blocks.find((block) => block.element === headline);
+    const renderer = new TranslationRenderer({document, sessionId: 'guardian-placement-session'});
+
+    for (const block of blocks) {
+      renderer.insert({...block, translatedText: `ko:${block.text}`});
+    }
+
+    const titleTranslation = document.querySelector(
+      `translight-translation[data-translight-source-id="${titleBlock.sourceId}"]`
+    );
+    const originalHeadline = headline.querySelector('.headline-text');
+
+    expect(titleBlock.mixedContent).toBe(true);
+    expect(titleTranslation?.parentElement).toBe(headline);
+    expect(titleTranslation?.previousElementSibling).toBe(originalHeadline);
+    expect(originalHeadline?.nextElementSibling).toBe(titleTranslation);
+
+    renderer.removeAll();
+    expect(document.body.innerHTML).toContain(
+      '<span class="headline-text">Facebook and Instagram face changes in US as Meta settles teen addiction lawsuit for $18bn</span>'
+    );
+    expect(document.querySelector('translight-translation')).toBeNull();
+  });
+
   it('keeps translations inside table cells in original-translation mode', () => {
     document.body.innerHTML = '<table><tbody><tr><td id="cell">Original cell</td></tr></tbody></table>';
     const cell = document.querySelector('#cell');

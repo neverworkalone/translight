@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Translight Guardian translation placement reproduction</title>
+    <style>
+      html { scroll-behavior: auto; }
+      body {
+        margin: 0;
+        color: #121212;
+        background: #fff;
+        font: 16px/1.4 Georgia, serif;
+      }
+      #report {
+        position: fixed;
+        z-index: 10;
+        top: 0;
+        right: 0;
+        width: 440px;
+        max-height: 90vh;
+        overflow: auto;
+        box-sizing: border-box;
+        padding: 12px;
+        background: #111827;
+        color: white;
+        font: 12px/1.4 monospace;
+        white-space: pre-wrap;
+      }
+      #front {
+        width: min(940px, calc(100% - 48px));
+        margin: 96px auto 120px;
+      }
+      .story-card {
+        width: min(560px, 100%);
+        border-top: 1px solid #999;
+        padding-top: 16px;
+      }
+      #headline {
+        margin: 0;
+        font-size: 30px;
+        line-height: 1.05;
+      }
+      #category {
+        color: #c70000;
+        font: 16px/1.2 Arial, sans-serif;
+      }
+      #headline-text {
+        display: inline;
+      }
+    </style>
+  </head>
+  <body>
+    <pre id="report">starting…</pre>
+    <main id="front">
+      <article class="story-card">
+        <h3 id="headline"><div id="category">Meta</div><span id="headline-text">Facebook and Instagram face changes in US as Meta settles teen addiction lawsuit for $18bn</span></h3>
+      </article>
+    </main>
+    <script type="module" src="/tests/fixtures/guardian-translation-placement-repro.js"></script>
+  </body>
+</html>

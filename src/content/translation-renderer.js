@@ -64,6 +64,7 @@ const ATTRIBUTE_NAMES = [
   SEGMENT_ATTRIBUTE,
   SEGMENT_ID_ATTRIBUTE
 ];
+const MIXED_CONTENT_AFTER_DIRECT_TEXT_PLACEMENT = 'inside-after-direct-text';
 
 function escapeAttribute(value) {
   return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
@@ -136,6 +137,49 @@ function getDirectNestedList(element) {
     const tagName = child.tagName?.toLowerCase();
     return tagName === 'ul' || tagName === 'ol';
   });
+}
+
+function isNestedBlockNode(node) {
+  return node?.nodeType === 1 && (
+    node.matches?.(BLOCK_SELECTOR) ||
+    Boolean(node.querySelector?.(BLOCK_SELECTOR))
+  );
+}
+
+function getMixedContentDirectChildren(element) {
+  const directChildren = new Set();
+  for (const node of collectSourceTextNodes(element, true)) {
+    if (!(node.nodeValue ?? '').trim()) continue;
+    let child = node;
+    while (child.parentNode && child.parentNode !== element) child = child.parentNode;
+    if (child.parentNode === element) directChildren.add(child);
+  }
+  return directChildren;
+}
+
+function placeMixedContentTranslation(element, translation) {
+  const childNodes = Array.from(element.childNodes ?? []);
+  const firstNestedBlockIndex = childNodes.findIndex(isNestedBlockNode);
+  const directChildren = getMixedContentDirectChildren(element);
+  const directChildIndexes = childNodes
+    .map((child, index) => directChildren.has(child) ? index : -1)
+    .filter((index) => index >= 0);
+
+  if (firstNestedBlockIndex >= 0 && directChildIndexes.length &&
+      Math.max(...directChildIndexes) > firstNestedBlockIndex) {
+    const nextSibling = childNodes[Math.max(...directChildIndexes) + 1] ?? null;
+    element.insertBefore(translation, nextSibling);
+    return MIXED_CONTENT_AFTER_DIRECT_TEXT_PLACEMENT;
+  }
+
+  const firstNestedBlock = childNodes[firstNestedBlockIndex];
+  if (firstNestedBlock) {
+    element.insertBefore(translation, firstNestedBlock);
+    return 'inside-before-first-block';
+  }
+
+  element.appendChild(translation);
+  return 'inside';
 }
 
 function getStableListItem(element) {
@@ -242,20 +286,7 @@ function insertAtSafeLocation(element, translation, mixedContent = false) {
   }
 
   if (mixedContent) {
-    if (element.tagName?.toLowerCase() === 'li') {
-      const nestedList = getDirectNestedList(element);
-      if (nestedList) {
-        element.insertBefore(translation, nestedList);
-        return 'inside-before-first-block';
-      }
-    }
-    const firstNestedBlock = Array.from(element.children ?? []).find((child) =>
-      child.matches?.(BLOCK_SELECTOR) || child.querySelector?.(BLOCK_SELECTOR)
-    );
-    if (firstNestedBlock) {
-      element.insertBefore(translation, firstNestedBlock);
-      return 'inside-before-first-block';
-    }
+    return placeMixedContentTranslation(element, translation);
   }
 
   if (!shouldInsertInside(element)) {
@@ -315,6 +346,10 @@ function restorePlacement(record) {
       element.insertBefore(translation, firstNestedBlock);
       return;
     }
+  }
+  if (placement === MIXED_CONTENT_AFTER_DIRECT_TEXT_PLACEMENT) {
+    placeMixedContentTranslation(element, translation);
+    return;
   }
   element.appendChild(translation);
 }
@@ -820,6 +855,13 @@ export class TranslationRenderer {
     if (record.placement === 'sibling') {
       element.parentNode.insertBefore(translation, element);
       return;
+    }
+    if (record.placement === MIXED_CONTENT_AFTER_DIRECT_TEXT_PLACEMENT) {
+      const directChild = [...getMixedContentDirectChildren(element)][0];
+      if (directChild) {
+        element.insertBefore(translation, directChild);
+        return;
+      }
     }
     if (record.placement?.kind === COLLAPSED_REVIEW_CARD_PLACEMENT) {
       const anchor = record.placement.anchor;
