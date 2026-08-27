@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Translight Reuters article layout reproduction</title>
+    <style>
+      html { scroll-behavior: auto; }
+      body { margin: 0; color: #404040; background: #fff; font: 16px/1.5 Arial, sans-serif; }
+      #report {
+        position: fixed;
+        z-index: 10;
+        top: 0;
+        right: 0;
+        width: 390px;
+        max-height: 90vh;
+        overflow: auto;
+        box-sizing: border-box;
+        padding: 12px;
+        background: #111827;
+        color: white;
+        font: 12px/1.4 monospace;
+        white-space: pre-wrap;
+      }
+      .article-body-module__wrapper__kL0a8.article-body-module__premium__aDyMC {
+        width: 100%;
+        padding: 64px 0 120px;
+      }
+      .article-body-module__content__bnXL1 { width: 100%; }
+      .article-body-module__paragraph__Ts-yF {
+        width: 644px;
+        margin-top: 0;
+        margin-right: calc((100% - 644px) / 2);
+        margin-bottom: 24px;
+        margin-left: calc((100% - 644px) / 2);
+        font: 16px/24px Arial, sans-serif;
+      }
+      @media (max-width: 700px) {
+        .article-body-module__paragraph__Ts-yF {
+          width: calc(100% - 32px);
+          margin-right: 16px;
+          margin-left: 16px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <pre id="report">starting…</pre>
+    <article>
+      <div class="article-body-module__wrapper__kL0a8 article-body-module__premium__aDyMC">
+        <div class="article-body-module__content__bnXL1">
+          <div id="source" class="article-body-module__paragraph__Ts-yF">
+            In January, Meta CEO Mark Zuckerberg and his top lieutenants gathered for their annual leadership retreat at his Hawaii compound.
+          </div>
+          <div class="article-body-module__paragraph__Ts-yF">
+            They hatched a radical plan to reimagine work at the social-media giant in the age of artificial intelligence.
+          </div>
+        </div>
+      </div>
+    </article>
+    <script type="module" src="/tests/fixtures/reuters-article-layout-repro.js"></script>
+  </body>
+</html>

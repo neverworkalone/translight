@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { PageSession } from '../src/content/page-session.js';
 import { SEGMENT_SELECTOR } from '../src/content/block-collector.js';
 import { MODEL_STATE } from '../src/translation/model-state.js';
@@ -44,6 +44,27 @@ describe('PageSession', () => {
     ]);
     expect(statuses.at(-1).status).toBe('ACTIVE');
     session.stop();
+  });
+
+  it('refreshes sibling layouts when the active viewport is resized', async () => {
+    document.body.innerHTML = '<p>Article paragraph.</p>';
+    const session = new PageSession({
+      generation: 2,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider()
+    });
+
+    await session.start();
+    const scheduleLayoutSync = vi.spyOn(session.renderer, 'scheduleLayoutSync');
+
+    window.dispatchEvent(new Event('resize'));
+
+    expect(scheduleLayoutSync).toHaveBeenCalledTimes(1);
+    session.stop({notify: false});
+    scheduleLayoutSync.mockClear();
+    window.dispatchEvent(new Event('resize'));
+    expect(scheduleLayoutSync).not.toHaveBeenCalled();
   });
 
   it('translates direct text inside a semantic Craigslist posting body section', async () => {

@@ -449,6 +449,233 @@ describe('TranslationRenderer', () => {
     renderer.removeAll();
   });
 
+  it('matches the source block width and horizontal margins for sibling translations', () => {
+    document.head.innerHTML = `
+      <style>
+        .article-body { width: 100%; }
+        .article-body .paragraph { width: 644px; margin-left: auto; margin-right: auto; }
+      </style>
+    `;
+    document.body.innerHTML = `
+      <div class="article-body">
+        <div id="source" class="paragraph">Article paragraph</div>
+      </div>
+    `;
+    const source = document.querySelector('#source');
+    const sourceStyle = window.getComputedStyle(source);
+    const renderer = new TranslationRenderer({document, sessionId: 'source-layout-session'});
+
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'source-layout-source',
+      translatedText: '번역된 문단'
+    });
+
+    expect(translation.style.getPropertyValue('width')).toBe(sourceStyle.width);
+    expect(translation.style.getPropertyValue('margin-left')).toBe(sourceStyle.marginLeft);
+    expect(translation.style.getPropertyValue('margin-right')).toBe(sourceStyle.marginRight);
+    expect(window.getComputedStyle(translation).width).toBe(sourceStyle.width);
+
+    renderer.removeAll();
+  });
+
+  it('uses the untransformed layout width for sibling translations', () => {
+    document.head.innerHTML = `
+      <style>
+        .scaled { transform: scale(0.8); }
+        .scaled .paragraph { box-sizing: border-box; width: 1000px; padding: 20px; }
+      </style>
+    `;
+    document.body.innerHTML = `
+      <div class="scaled">
+        <div id="source" class="paragraph">Article paragraph</div>
+      </div>
+    `;
+    const source = document.querySelector('#source');
+    Object.defineProperty(source, 'offsetWidth', {configurable: true, value: 1000});
+    const visualMeasurement = vi.spyOn(source, 'getBoundingClientRect').mockReturnValue({
+      width: 800,
+      left: 100,
+      right: 900
+    });
+    const renderer = new TranslationRenderer({document, sessionId: 'transformed-layout-session'});
+
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'transformed-layout-source',
+      translatedText: '번역된 문단'
+    });
+
+    expect(translation.style.getPropertyValue('width')).toBe('1000px');
+    expect(visualMeasurement).not.toHaveBeenCalled();
+
+    renderer.removeAll();
+  });
+
+  it('syncs only records affected by a horizontal resize and ignores height-only changes', () => {
+    const previousResizeObserver = window.ResizeObserver;
+    const observers = [];
+    class ResizeObserverStub {
+      constructor(callback) {
+        this.callback = callback;
+        this.targets = new Set();
+        observers.push(this);
+      }
+
+      observe(target) {
+        this.targets.add(target);
+      }
+
+      unobserve(target) {
+        this.targets.delete(target);
+      }
+
+      disconnect() {
+        this.targets.clear();
+      }
+
+      emit(entries) {
+        this.callback(entries);
+      }
+    }
+
+    Object.defineProperty(window, 'ResizeObserver', {
+      configurable: true,
+      writable: true,
+      value: ResizeObserverStub
+    });
+    let renderer;
+    try {
+      document.body.innerHTML = `
+        <div id="first-container" style="width:800px">
+          <p id="first-source" style="width:600px">First paragraph</p>
+        </div>
+        <div id="second-container" style="width:800px">
+          <p id="second-source" style="width:600px">Second paragraph</p>
+        </div>
+      `;
+      const firstSource = document.querySelector('#first-source');
+      const secondSource = document.querySelector('#second-source');
+      const firstContainer = document.querySelector('#first-container');
+      const secondContainer = document.querySelector('#second-container');
+      renderer = new TranslationRenderer({document, sessionId: 'targeted-layout-session'});
+      const firstTranslation = renderer.insert({
+        element: firstSource,
+        sourceId: 'targeted-layout-first',
+        translatedText: '첫 번째 번역'
+      });
+      const secondTranslation = renderer.insert({
+        element: secondSource,
+        sourceId: 'targeted-layout-second',
+        translatedText: '두 번째 번역'
+      });
+      const firstWrites = vi.spyOn(firstTranslation.style, 'setProperty');
+      const secondWrites = vi.spyOn(secondTranslation.style, 'setProperty');
+      const observer = observers[0];
+
+      firstSource.style.width = '700px';
+      observer.emit([{
+        target: firstSource,
+        borderBoxSize: [{inlineSize: 700, blockSize: 24}],
+        contentRect: {width: 700, height: 24}
+      }]);
+
+      expect(firstWrites.mock.calls.some(([property]) => property === 'width')).toBe(true);
+      expect(secondWrites).not.toHaveBeenCalled();
+
+      firstWrites.mockClear();
+      secondWrites.mockClear();
+      secondSource.style.width = '650px';
+      observer.emit([{
+        target: secondContainer,
+        borderBoxSize: [{inlineSize: 900, blockSize: 100}],
+        contentRect: {width: 900, height: 100}
+      }]);
+
+      expect(firstWrites).not.toHaveBeenCalled();
+      expect(secondWrites.mock.calls.some(([property]) => property === 'width')).toBe(true);
+
+      firstWrites.mockClear();
+      secondWrites.mockClear();
+      observer.emit([{
+        target: secondContainer,
+        borderBoxSize: [{inlineSize: 900, blockSize: 200}],
+        contentRect: {width: 900, height: 200}
+      }]);
+
+      expect(firstWrites).not.toHaveBeenCalled();
+      expect(secondWrites).not.toHaveBeenCalled();
+      expect(observer.targets.has(firstContainer)).toBe(true);
+    } finally {
+      renderer?.removeAll();
+      if (previousResizeObserver === undefined) delete window.ResizeObserver;
+      else window.ResizeObserver = previousResizeObserver;
+    }
+  });
+
+  it('does not reuse content-box min/max widths on the border-box translation', () => {
+    document.head.innerHTML = `
+      <style>
+        .content-box-source {
+          box-sizing: content-box;
+          width: 600px;
+          min-width: 600px;
+          max-width: 600px;
+          padding: 0 20px;
+        }
+      </style>
+    `;
+    document.body.innerHTML = '<div id="source" class="content-box-source">Article paragraph</div>';
+    const source = document.querySelector('#source');
+    const renderer = new TranslationRenderer({document, sessionId: 'content-box-layout-session'});
+
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'content-box-layout-source',
+      translatedText: '번역된 문단'
+    });
+
+    expect(translation.style.getPropertyValue('width')).toBe('640px');
+    expect(translation.style.getPropertyValue('min-width')).toBe('');
+    expect(translation.style.getPropertyValue('max-width')).toBe('');
+
+    renderer.removeAll();
+  });
+
+  it('coalesces viewport-wide layout sync requests', () => {
+    const previousRequestAnimationFrame = window.requestAnimationFrame;
+    const previousCancelAnimationFrame = window.cancelAnimationFrame;
+    vi.useFakeTimers();
+    Object.defineProperty(window, 'requestAnimationFrame', {
+      configurable: true,
+      writable: true,
+      value: (callback) => setTimeout(callback, 0)
+    });
+    Object.defineProperty(window, 'cancelAnimationFrame', {
+      configurable: true,
+      writable: true,
+      value: (handle) => clearTimeout(handle)
+    });
+    let renderer;
+    try {
+      renderer = new TranslationRenderer({document, sessionId: 'coalesced-layout-session'});
+      const syncLayouts = vi.spyOn(renderer, 'syncLayouts');
+
+      renderer.scheduleLayoutSync();
+      renderer.scheduleLayoutSync();
+      vi.runOnlyPendingTimers();
+
+      expect(syncLayouts).toHaveBeenCalledTimes(1);
+    } finally {
+      renderer?.removeAll();
+      if (previousRequestAnimationFrame === undefined) delete window.requestAnimationFrame;
+      else window.requestAnimationFrame = previousRequestAnimationFrame;
+      if (previousCancelAnimationFrame === undefined) delete window.cancelAnimationFrame;
+      else window.cancelAnimationFrame = previousCancelAnimationFrame;
+      vi.useRealTimers();
+    }
+  });
+
   it('matches the typography of a nested source text wrapper', () => {
     document.body.innerHTML = `
       <div id="source" style="font-size:14px;line-height:20px">

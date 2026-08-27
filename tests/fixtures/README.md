@@ -170,6 +170,42 @@ The repaired case must report equal `sourceFontSize` and `translationFontSize`,
 equal `sourceLineHeight` and `translationLineHeight`,
 `bodyTranslationCount: 2`, and `testPassed: true`.
 
+## Reuters article translation layout
+
+Fixture: `reuters-article-layout-repro.html` and
+`reuters-article-layout-repro.js`
+
+Open this URL in Chrome while the Vite development server is running:
+
+```text
+http://127.0.0.1:5173/tests/fixtures/reuters-article-layout-repro.html
+```
+
+To exercise a resize while the translation session remains active, use the
+resize scenario:
+
+```text
+http://127.0.0.1:5173/tests/fixtures/reuters-article-layout-repro.html?scenario=resize
+```
+
+Open it at a desktop width such as 1200px, then resize the same window to
+1000px without reloading. The report keeps each measurement in
+`resizeSamples` and must continue to show matching source and translation
+horizontal bounds.
+
+This fixture models the supplied Reuters article body, where premium article
+paragraphs are centered at a fixed desktop width. The translation is inserted
+as a sibling, so it must preserve the source paragraph's horizontal bounds
+instead of expanding to the full article container. The same bounds must stay
+aligned after a resize within the desktop breakpoint and after the viewport
+crosses the mobile breakpoint.
+
+The repaired cleanup case must report equal `sourceLayout` and
+`translationLayout`, `translationCount: 2`, `restoredAfterStop: true`, and
+`testPassed: true`. The resize scenario must additionally report at least one
+aligned entry in `resizeSamples` and keep `testPassed: true` while the session
+is active.
+
 ## YouTube long description paragraph placement
 
 Fixture: `youtube-description-paragraphs-repro.html` and

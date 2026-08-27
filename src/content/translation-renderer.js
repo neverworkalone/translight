@@ -76,6 +76,12 @@ function getDisplay(element) {
 }
 
 const SOURCE_TYPOGRAPHY_PROPERTIES = ['font-size', 'line-height'];
+const SOURCE_LAYOUT_PROPERTIES = [
+  'width',
+  'margin-left',
+  'margin-right'
+];
+const SOURCE_LAYOUT_CONSTRAINT_PROPERTIES = ['min-width', 'max-width'];
 const MAIN_TEXT_RATIO = 0.5;
 
 function getComputedStyleValue(element, property) {
@@ -83,6 +89,22 @@ function getComputedStyleValue(element, property) {
   const computedStyle = view?.getComputedStyle?.(element);
   if (!computedStyle) return '';
   return computedStyle.getPropertyValue?.(property) || computedStyle[property] || '';
+}
+
+function getStyleValue(style, property) {
+  return style?.getPropertyValue?.(property) || style?.[property] || '';
+}
+
+function setStyleValue(style, property, value) {
+  const currentValue = style?.getPropertyValue?.(property) || '';
+  const currentPriority = style?.getPropertyPriority?.(property) || '';
+  if (value) {
+    if (currentValue !== value || currentPriority !== 'important') {
+      style.setProperty(property, value, 'important');
+    }
+    return;
+  }
+  if (currentValue) style.removeProperty(property);
 }
 
 function getSourceTypographyElement(record) {
@@ -130,6 +152,80 @@ function syncSourceTypography(record) {
     if (value) translation.style.setProperty(property, value, 'important');
     else translation.style.removeProperty(property);
   }
+}
+
+function clearSourceLayout(translation) {
+  if (!translation?.style) return;
+  for (const property of [...SOURCE_LAYOUT_PROPERTIES, ...SOURCE_LAYOUT_CONSTRAINT_PROPERTIES]) {
+    setStyleValue(translation.style, property, '');
+  }
+}
+
+function getSourceLayoutWidth(element, computedStyle) {
+  const offsetWidth = Number(element.offsetWidth);
+  if (Number.isFinite(offsetWidth) && offsetWidth > 0) return `${offsetWidth}px`;
+
+  const width = Number.parseFloat(getStyleValue(computedStyle, 'width'));
+  if (!Number.isFinite(width)) return '';
+  if (getStyleValue(computedStyle, 'box-sizing') === 'border-box') return `${width}px`;
+
+  const horizontalExtras = [
+    'padding-left',
+    'padding-right',
+    'border-left-width',
+    'border-right-width'
+  ].reduce((sum, property) => {
+    const value = Number.parseFloat(getStyleValue(computedStyle, property));
+    return sum + (Number.isFinite(value) ? value : 0);
+  }, 0);
+  return `${width + horizontalExtras}px`;
+}
+
+function syncSourceLayout(record) {
+  const {element, translation, placement} = record ?? {};
+  if (!element || !translation?.style) return;
+  // A sibling translation does not receive the source block's width and
+  // centering rules because host styles usually target the source class. The
+  // other placements already share the source's containing block, so copying
+  // a pixel width there would make nested/grid/table layouts less flexible.
+  if (placement !== 'sibling') {
+    clearSourceLayout(translation);
+    return;
+  }
+
+  const view = element.ownerDocument?.defaultView;
+  const computedStyle = view?.getComputedStyle?.(element);
+  if (!computedStyle) return;
+
+  const values = new Map(SOURCE_LAYOUT_PROPERTIES.map((property) => [
+    property,
+    getStyleValue(computedStyle, property)
+  ]));
+  const layoutWidth = getSourceLayoutWidth(element, computedStyle);
+  if (layoutWidth) values.set('width', layoutWidth);
+
+  for (const [property, value] of values) {
+    setStyleValue(translation.style, property, value);
+  }
+  // The generated node is always border-box. Its measured width already
+  // includes the source's padding and border, so copying content-box
+  // min/max constraints would clamp it in a different coordinate space.
+  for (const property of SOURCE_LAYOUT_CONSTRAINT_PROPERTIES) {
+    setStyleValue(translation.style, property, '');
+  }
+}
+
+function getResizeObserverInlineSize(entry) {
+  const boxSizes = [entry?.borderBoxSize, entry?.contentBoxSize];
+  for (const boxSize of boxSizes) {
+    const size = Array.isArray(boxSize) ? boxSize[0] : boxSize;
+    const inlineSize = Number(size?.inlineSize);
+    if (Number.isFinite(inlineSize)) return inlineSize;
+  }
+  const contentWidth = Number(entry?.contentRect?.width);
+  if (Number.isFinite(contentWidth)) return contentWidth;
+  const offsetWidth = Number(entry?.target?.offsetWidth);
+  return Number.isFinite(offsetWidth) ? offsetWidth : null;
 }
 
 function getDirectNestedList(element) {
@@ -722,6 +818,14 @@ export class TranslationRenderer {
     this.sessionId = sessionId;
     this.records = new Map();
     this.recordsByElement = new WeakMap();
+    const ResizeObserverClass = document.defaultView?.ResizeObserver ?? globalThis.ResizeObserver;
+    this.layoutRecordsByTarget = new Map();
+    this.layoutTargetWidths = new Map();
+    this.layoutSyncHandle = null;
+    this.layoutSyncUsesAnimationFrame = false;
+    this.layoutObserver = typeof ResizeObserverClass === 'function'
+      ? new ResizeObserverClass((entries) => this.handleLayoutResize(entries))
+      : null;
     this.presentation = normalizePresentation(settings);
     this.style = document.createElement('style');
     this.style.setAttribute(GENERATED_ATTRIBUTE, GENERATED_VALUE);
@@ -739,6 +843,101 @@ export class TranslationRenderer {
     this.presentation = normalizePresentation({...this.presentation, ...settings});
     this.updateStyleSheet();
     for (const record of this.records.values()) this.applyRecordPresentation(record);
+  }
+
+  handleLayoutResize(entries) {
+    const affectedRecords = new Set();
+    for (const entry of entries ?? []) {
+      const records = this.layoutRecordsByTarget.get(entry?.target);
+      if (!records?.size) continue;
+      const currentWidth = getResizeObserverInlineSize(entry);
+      const previousWidth = this.layoutTargetWidths.get(entry.target);
+      this.layoutTargetWidths.set(entry.target, currentWidth);
+      if (currentWidth != null && previousWidth != null && currentWidth === previousWidth) continue;
+      for (const record of records) affectedRecords.add(record);
+    }
+    for (const record of affectedRecords) {
+      if (this.records.get(record.sourceId) !== record) continue;
+      syncSourceLayout(record);
+    }
+  }
+
+  observeLayoutTarget(element, record) {
+    if (!this.layoutObserver || !element || !record) return;
+    let records = this.layoutRecordsByTarget.get(element);
+    if (!records) {
+      records = new Set();
+      this.layoutRecordsByTarget.set(element, records);
+      this.layoutObserver.observe(element);
+    }
+    records.add(record);
+  }
+
+  unobserveLayoutTarget(element, record) {
+    if (!this.layoutObserver || !element || !record) return;
+    const records = this.layoutRecordsByTarget.get(element);
+    if (!records) return;
+    records.delete(record);
+    if (!records.size) {
+      this.layoutObserver.unobserve(element);
+      this.layoutRecordsByTarget.delete(element);
+      this.layoutTargetWidths.delete(element);
+    }
+  }
+
+  observeSourceLayout(record) {
+    if (!this.layoutObserver || !record?.element) return;
+    const nextTargets = record.placement === 'sibling'
+      ? [record.element, record.element.parentElement].filter(Boolean)
+      : [];
+    const previousTargets = record.layoutTargets ?? [];
+    for (const target of previousTargets) {
+      if (!nextTargets.includes(target)) this.unobserveLayoutTarget(target, record);
+    }
+    for (const target of nextTargets) {
+      if (!previousTargets.includes(target)) this.observeLayoutTarget(target, record);
+    }
+    record.layoutTargets = nextTargets;
+  }
+
+  unobserveSourceLayout(record) {
+    for (const target of record?.layoutTargets ?? []) this.unobserveLayoutTarget(target, record);
+    if (record) record.layoutTargets = [];
+  }
+
+  syncLayouts() {
+    for (const record of this.records.values()) {
+      this.observeSourceLayout(record);
+      syncSourceLayout(record);
+    }
+  }
+
+  scheduleLayoutSync() {
+    if (this.layoutSyncHandle != null) return;
+    const view = this.document.defaultView ?? globalThis.window;
+    const sync = () => {
+      this.layoutSyncHandle = null;
+      this.layoutSyncUsesAnimationFrame = false;
+      this.syncLayouts();
+    };
+    if (typeof view?.requestAnimationFrame === 'function') {
+      this.layoutSyncUsesAnimationFrame = true;
+      this.layoutSyncHandle = view.requestAnimationFrame(sync);
+      return;
+    }
+    this.layoutSyncHandle = setTimeout(sync, 0);
+  }
+
+  cancelScheduledLayoutSync() {
+    if (this.layoutSyncHandle == null) return;
+    const view = this.document.defaultView ?? globalThis.window;
+    if (this.layoutSyncUsesAnimationFrame && typeof view?.cancelAnimationFrame === 'function') {
+      view.cancelAnimationFrame(this.layoutSyncHandle);
+    } else {
+      clearTimeout(this.layoutSyncHandle);
+    }
+    this.layoutSyncHandle = null;
+    this.layoutSyncUsesAnimationFrame = false;
   }
 
   currentSourceTextNodes(record) {
@@ -982,6 +1181,8 @@ export class TranslationRenderer {
     const {element, translation} = record;
     if (!element || !translation) return;
     const mode = this.presentation.translationMode;
+    this.observeSourceLayout(record);
+    syncSourceLayout(record);
     syncSourceTypography(record);
     this.clearFallbackPresentation(record);
     translation.setAttribute(MODE_ATTRIBUTE, mode);
@@ -1062,6 +1263,7 @@ export class TranslationRenderer {
     if (!replacement) return null;
 
     const originalAttributes = getOriginalAttributes(replacement);
+    this.unobserveSourceLayout(record);
     this.recordsByElement.delete(record.element);
     record.element = replacement;
     record.originalAttributes = originalAttributes;
@@ -1073,6 +1275,7 @@ export class TranslationRenderer {
     if (record.sourceHash) replacement.setAttribute(SOURCE_HASH_ATTRIBUTE, record.sourceHash);
     replacement.removeAttribute(PENDING_SOURCE_HASH_ATTRIBUTE);
     this.recordsByElement.set(replacement, record);
+    this.observeSourceLayout(record);
     return replacement;
   }
 
@@ -1215,6 +1418,7 @@ export class TranslationRenderer {
     element.setAttribute(SESSION_ATTRIBUTE, this.sessionId);
     this.records.set(sourceId, record);
     this.recordsByElement.set(element, record);
+    this.observeSourceLayout(record);
     this.applyRecordPresentation(record);
     return translation;
   }
@@ -1223,6 +1427,7 @@ export class TranslationRenderer {
     const record = this.recordsByElement.get(element);
     if (!record) return false;
 
+    this.unobserveSourceLayout(record);
     record.translation?.parentNode?.removeChild(record.translation);
     if (element?.getAttribute(SESSION_ATTRIBUTE) === this.sessionId) {
       this.restoreSourceText(record);
@@ -1238,6 +1443,7 @@ export class TranslationRenderer {
     for (const [sourceId, record] of this.records) {
       if (record.element?.isConnected !== false) continue;
       if (this.rebindDisconnectedRecord(record)) continue;
+      this.unobserveSourceLayout(record);
       record.translation?.parentNode?.removeChild(record.translation);
       if (record.element?.getAttribute(SESSION_ATTRIBUTE) === this.sessionId) {
         for (const name of ATTRIBUTE_NAMES) restoreAttribute(record.element, name, record.originalAttributes[name]);
@@ -1250,6 +1456,7 @@ export class TranslationRenderer {
   removeAll() {
     for (const record of this.records.values()) {
       const {element, translation, originalAttributes} = record;
+      this.unobserveSourceLayout(record);
       translation?.parentNode?.removeChild(translation);
       if (element?.getAttribute(SESSION_ATTRIBUTE) !== this.sessionId) continue;
       this.restoreSourceText(record);
@@ -1258,6 +1465,11 @@ export class TranslationRenderer {
       this.recordsByElement.delete(element);
     }
 
+    this.cancelScheduledLayoutSync();
+    this.layoutObserver?.disconnect?.();
+    this.layoutObserver = null;
+    this.layoutRecordsByTarget.clear();
+    this.layoutTargetWidths.clear();
     const generatedNodes = this.document.querySelectorAll(`[${SESSION_ATTRIBUTE}]`);
     for (const node of generatedNodes) {
       if (node.getAttribute(SESSION_ATTRIBUTE) !== this.sessionId) continue;
