@@ -26,28 +26,6 @@ The repaired case must report `translationAfterOriginal: true`,
 `categoryStillBeforeHeadline: true`, `translationCount: 2`,
 `testPassed: true`, and `restoredAfterStop: true`.
 
-## Booking property description paragraphs
-
-Fixture: `booking-property-paragraphs-repro.html` and
-`booking-property-paragraphs-repro.js`
-
-Open this URL in Chrome while the Vite development server is running:
-
-```text
-http://127.0.0.1:5173/tests/fixtures/booking-property-paragraphs-repro.html
-```
-
-This fixture models the supplied Booking.com property page at
-`file:///Users/genonfire/Downloads/booking.html`. Booking renders the four
-property-description paragraphs inside one `<p>` with `white-space: pre-wrap`;
-each paragraph starts with an inline `<b>` label and is separated by literal
-blank-line text. The collector must keep each label with its paragraph and the
-session must place one translation after each source paragraph.
-
-The repaired case must report `segmentCount: 4`, `translationCount: 4`,
-`translationsInsideDescription: true`, `interleaved: true`,
-`testPassed: true`, and `restoredAfterStop: true`.
-
 ## IMDb native scroll-anchor observation
 
 Fixture: `imdb-jitter-repro.html` and `imdb-jitter-repro.js`
