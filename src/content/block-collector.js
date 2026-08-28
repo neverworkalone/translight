@@ -221,20 +221,25 @@ function getDoubleLineBreakParts(value) {
   return parts;
 }
 
-function getTextNodes(node, root, nodes = []) {
-  if (node?.nodeType === 3) {
-    nodes.push(node);
-    return nodes;
-  }
-  if (!isElement(node)) return nodes;
+function getNestedNewlineContainers(node, root, containers = []) {
+  if (!isElement(node)) return containers;
   if (node !== root && (
     isExcluded(node) ||
     node.matches(GENERATED_SELECTOR) ||
     node.matches(SEGMENT_SELECTOR) ||
     isHidden(node)
-  )) return nodes;
-  for (const child of Array.from(node.childNodes ?? [])) getTextNodes(child, root, nodes);
-  return nodes;
+  )) return containers;
+
+  const textNodes = [];
+  for (const child of Array.from(node.childNodes ?? [])) {
+    if (child.nodeType === 3) {
+      if (DOUBLE_LINE_BREAK_PATTERN.test(child.nodeValue ?? '')) textNodes.push(child);
+      continue;
+    }
+    getNestedNewlineContainers(child, root, containers);
+  }
+  if (textNodes.length) containers.push({container: node, textNodes});
+  return containers;
 }
 
 function splitTextNodeAtDoubleLineBreaks(textNode, targetLanguage) {
@@ -391,7 +396,53 @@ function splitPhrasingContainerAtDoubleBreaks(container, targetLanguage) {
   return wrappers;
 }
 
-function splitUnsegmentedDirectChildrenIntoSegments(element, processedContainers, targetLanguage) {
+function getResidualElementsAndBoundaryNodes(element, processedContainers) {
+  const residualElements = [element];
+  const seenResidualElements = new Set(residualElements);
+  const boundaryNodesByElement = new Map([[element, new Set()]]);
+
+  const addBoundary = (residualElement, boundaryNode) => {
+    if (!boundaryNodesByElement.has(residualElement)) {
+      boundaryNodesByElement.set(residualElement, new Set());
+    }
+    boundaryNodesByElement.get(residualElement).add(boundaryNode);
+  };
+
+  for (const container of processedContainers) {
+    if (container === element) {
+      for (const node of Array.from(element.childNodes ?? [])) addBoundary(element, node);
+      continue;
+    }
+
+    const path = [];
+    let current = container;
+    while (current && current !== element) {
+      path.push(current);
+      current = current.parentElement;
+    }
+    if (current !== element) continue;
+
+    for (let index = 0; index < path.length; index += 1) {
+      const boundaryNode = path[index];
+      const residualElement = path[index + 1] ?? element;
+      if (!seenResidualElements.has(residualElement)) {
+        seenResidualElements.add(residualElement);
+        residualElements.push(residualElement);
+        boundaryNodesByElement.set(residualElement, new Set());
+      }
+      addBoundary(residualElement, boundaryNode);
+    }
+  }
+
+  return {residualElements, boundaryNodesByElement};
+}
+
+function splitUnsegmentedDirectChildrenIntoSegments(
+  element,
+  processedContainers,
+  targetLanguage,
+  {boundaryNodes = new Set()} = {}
+) {
   if (!processedContainers.length) return [];
 
   const ranges = [];
@@ -402,10 +453,7 @@ function splitUnsegmentedDirectChildrenIntoSegments(element, processedContainers
   };
 
   for (const node of Array.from(element.childNodes ?? [])) {
-    const isProcessedBoundary = processedContainers.some((container) =>
-      container === node || container.contains?.(node) || node.contains?.(container)
-    );
-    if (isProcessedBoundary) {
+    if (boundaryNodes.has(node)) {
       flush();
       continue;
     }
@@ -436,6 +484,38 @@ function splitUnsegmentedDirectChildrenIntoSegments(element, processedContainers
   return wrappers;
 }
 
+function hasUnsegmentedDirectText(element, boundaryNodes) {
+  return Array.from(element.childNodes ?? []).some((node) => {
+    if (boundaryNodes.has(node)) return false;
+    if (node.nodeType === 3) return Boolean((node.nodeValue ?? '').trim());
+    return isElement(node) && !node.querySelector('a') && !isNestedBlockNode(node);
+  });
+}
+
+function splitResidualElementsIntoSegments(
+  element,
+  processedContainers,
+  targetLanguage,
+  {requireDirectText = false} = {}
+) {
+  const {residualElements, boundaryNodesByElement} =
+    getResidualElementsAndBoundaryNodes(element, processedContainers);
+  const wrappers = [];
+  for (const residualElement of residualElements) {
+    const boundaryNodes = boundaryNodesByElement.get(residualElement) ?? new Set();
+    if (requireDirectText && !hasUnsegmentedDirectText(residualElement, boundaryNodes)) {
+      continue;
+    }
+    wrappers.push(...splitUnsegmentedDirectChildrenIntoSegments(
+      residualElement,
+      processedContainers,
+      targetLanguage,
+      {boundaryNodes}
+    ));
+  }
+  return wrappers;
+}
+
 function splitNestedBreaksIntoSegments(element, targetLanguage) {
   const containers = [];
   const seenContainers = new Set();
@@ -455,35 +535,50 @@ function splitNestedBreaksIntoSegments(element, targetLanguage) {
     wrappers.push(...containerWrappers);
   }
 
-  const residualElements = [element];
-  const seenResidualElements = new Set(residualElements);
-  for (const container of processedContainers) {
-    if (container === element) continue;
-    for (let ancestor = container.parentElement; ancestor && ancestor !== element; ancestor = ancestor.parentElement) {
-      if (seenResidualElements.has(ancestor)) continue;
-      seenResidualElements.add(ancestor);
-      residualElements.push(ancestor);
-    }
-  }
-  for (const residualElement of residualElements) {
-    wrappers.push(...splitUnsegmentedDirectChildrenIntoSegments(
-      residualElement,
-      processedContainers,
-      targetLanguage
-    ));
-  }
+  wrappers.push(...splitResidualElementsIntoSegments(
+    element,
+    processedContainers,
+    targetLanguage
+  ));
   return wrappers;
 }
 
 function splitNestedNewlineTextIntoSegments(element, targetLanguage) {
-  for (const textNode of getTextNodes(element, element)) {
-    if (!DOUBLE_LINE_BREAK_PATTERN.test(textNode.nodeValue ?? '')) continue;
-    const wrappers = splitTextNodeAtDoubleLineBreaks(textNode, targetLanguage);
-    if (wrappers.length) return wrappers;
-    const containerWrappers = splitPhrasingContainerAtDoubleBreaks(textNode.parentElement, targetLanguage);
-    if (containerWrappers.length) return containerWrappers;
+  const wrappers = [];
+  const processedContainers = [];
+  for (const {container, textNodes} of getNestedNewlineContainers(element, element)) {
+    const containerWrappers = splitPhrasingContainerAtDoubleBreaks(container, targetLanguage);
+    if (containerWrappers.length) {
+      processedContainers.push(container);
+      wrappers.push(...containerWrappers);
+      continue;
+    }
+
+    const textNodeWrappers = textNodes.flatMap((textNode) =>
+      textNode.parentNode ? splitTextNodeAtDoubleLineBreaks(textNode, targetLanguage) : []
+    );
+    if (!textNodeWrappers.length) continue;
+    processedContainers.push(container);
+    wrappers.push(...textNodeWrappers);
+    wrappers.push(...splitUnsegmentedDirectChildrenIntoSegments(
+      container,
+      textNodeWrappers,
+      targetLanguage,
+      {boundaryNodes: new Set(textNodeWrappers)}
+    ));
   }
-  return splitNestedBreaksIntoSegments(element, targetLanguage);
+  if (!wrappers.length) return splitNestedBreaksIntoSegments(element, targetLanguage);
+
+  // A newline split can begin inside an inline control tree. Only expand
+  // ancestors that also contain direct residual prose so unrelated inline
+  // siblings (such as chapter links) stay outside the new segment scope.
+  wrappers.push(...splitResidualElementsIntoSegments(
+    element,
+    processedContainers,
+    targetLanguage,
+    {requireDirectText: true}
+  ));
+  return wrappers;
 }
 
 function directContentRanges(element) {

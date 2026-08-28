@@ -348,6 +348,127 @@ describe('collectTranslationBlocks', () => {
     expect(description.querySelectorAll('[data-translight-segment="true"]')).toHaveLength(4);
   });
 
+  it('keeps surrounding text when splitting a nested inline newline container', () => {
+    document.body.innerHTML = '<p id="description">This introduction explains the hotel location.<span><b>Facilities: </b>Guests can use the hotel swimming pool.\n\n<b>Rooms: </b>Each room has a balcony with sea views.</span> This final note explains the cancellation policy.</p>';
+
+    const description = document.querySelector('#description');
+    const expectedTexts = [
+      'This introduction explains the hotel location.',
+      'Facilities: Guests can use the hotel swimming pool.',
+      'Rooms: Each room has a balcony with sea views.',
+      'This final note explains the cancellation policy.'
+    ];
+    const blocks = collectTranslationBlocks(description);
+    const secondPass = collectTranslationBlocks(description);
+
+    expect(blocks.map((block) => block.text)).toEqual(expectedTexts);
+    expect(secondPass.map((block) => block.text)).toEqual(expectedTexts);
+    expect(new Set(blocks.map((block) => block.text)).size).toBe(expectedTexts.length);
+    expect(blocks.every(({element}) => element.matches('[data-translight-segment="true"]')))
+      .toBe(true);
+  });
+
+  it('keeps surrounding text across sibling inline newline containers', () => {
+    document.body.innerHTML = '<p id="description">Opening note has enough English words.<span><b>First: </b>First inline paragraph has enough English words.\n\n<b>Second: </b>Second inline paragraph has enough English words.</span>Middle note has enough English words.<span><b>Third: </b>Third inline paragraph has enough English words.\n\n<b>Fourth: </b>Fourth inline paragraph has enough English words.</span>Closing note has enough English words.</p>';
+
+    const description = document.querySelector('#description');
+    const expectedTexts = [
+      'Opening note has enough English words.',
+      'First: First inline paragraph has enough English words.',
+      'Second: Second inline paragraph has enough English words.',
+      'Middle note has enough English words.',
+      'Third: Third inline paragraph has enough English words.',
+      'Fourth: Fourth inline paragraph has enough English words.',
+      'Closing note has enough English words.'
+    ];
+    const blocks = collectTranslationBlocks(description);
+
+    expect(blocks.map((block) => block.text)).toEqual(expectedTexts);
+    expect(new Set(blocks.map((block) => block.text)).size).toBe(expectedTexts.length);
+    expect(blocks.every(({element}) => element.matches('[data-translight-segment="true"]')))
+      .toBe(true);
+  });
+
+  it('keeps surrounding text when a nested text node is split directly', () => {
+    document.body.innerHTML = '<p id="description">Introductory note has enough English words.<span>First inline paragraph has enough English words.\n\nSecond inline paragraph has enough English words.</span>Concluding note has enough English words.</p>';
+
+    const description = document.querySelector('#description');
+    const expectedTexts = [
+      'Introductory note has enough English words.',
+      'First inline paragraph has enough English words.',
+      'Second inline paragraph has enough English words.',
+      'Concluding note has enough English words.'
+    ];
+    const blocks = collectTranslationBlocks(description);
+
+    expect(blocks.map((block) => block.text)).toEqual(expectedTexts);
+    expect(blocks.every(({element}) => element.matches('[data-translight-segment="true"]')))
+      .toBe(true);
+  });
+
+  it('keeps inline labels and trailing text around a partially split nested text node', () => {
+    document.body.innerHTML = '<p id="description">Opening hotel description has enough English words. <span><b>Facilities: </b>Guests can use the hotel swimming pool.\n\nGuests can also use the hotel spa. <b>Rooms: </b>Each room has a balcony with sea views.</span> Final cancellation policy has enough English words.</p>';
+
+    const description = document.querySelector('#description');
+    const expectedTexts = [
+      'Opening hotel description has enough English words.',
+      'Facilities: Guests can use the hotel swimming pool.',
+      'Guests can also use the hotel spa. Rooms: Each room has a balcony with sea views.',
+      'Final cancellation policy has enough English words.'
+    ];
+    const blocks = collectTranslationBlocks(description);
+
+    expect(blocks.map((block) => block.text)).toEqual(expectedTexts);
+    expect(new Set(blocks.map((block) => block.text)).size).toBe(expectedTexts.length);
+    expect(blocks.every(({element}) => element.matches('[data-translight-segment="true"]')))
+      .toBe(true);
+  });
+
+  it('does not create nested segments when ancestor and descendant text both contain breaks', () => {
+    document.body.innerHTML = '<p id="description">Opening hotel description has enough English words.\n\n<b>Facilities: </b><span>Guests can use the hotel swimming pool.\n\nGuests can also use the hotel spa.</span> Final cancellation policy has enough English words.</p>';
+
+    const description = document.querySelector('#description');
+    const expectedTexts = [
+      'Opening hotel description has enough English words.',
+      'Facilities:',
+      'Guests can use the hotel swimming pool.',
+      'Guests can also use the hotel spa.',
+      'Final cancellation policy has enough English words.'
+    ];
+    const blocks = collectTranslationBlocks(description);
+    const secondPass = collectTranslationBlocks(description);
+    const segments = Array.from(description.querySelectorAll('[data-translight-segment="true"]'));
+
+    expect(blocks.map((block) => block.text)).toEqual(expectedTexts);
+    expect(secondPass.map((block) => block.text)).toEqual(expectedTexts);
+    expect(segments).toHaveLength(expectedTexts.length);
+    expect(segments.every((segment) =>
+      segment.querySelector('[data-translight-segment="true"]') === null
+    )).toBe(true);
+  });
+
+  it('keeps ancestor and descendant br paragraphs as non-overlapping segments', () => {
+    document.body.innerHTML = '<div id="description"><span><span>Guests can use the hotel swimming pool.<br><br>Guests can also use the hotel spa.</span> Outer facilities note has enough English words.<br><br>Final outer note has enough English words.</span></div>';
+
+    const description = document.querySelector('#description');
+    const expectedTexts = [
+      'Guests can use the hotel swimming pool.',
+      'Guests can also use the hotel spa.',
+      'Outer facilities note has enough English words.',
+      'Final outer note has enough English words.'
+    ];
+    const blocks = collectTranslationBlocks(description);
+    const secondPass = collectTranslationBlocks(description);
+    const segments = Array.from(description.querySelectorAll('[data-translight-segment="true"]'));
+
+    expect(blocks.map((block) => block.text)).toEqual(expectedTexts);
+    expect(secondPass.map((block) => block.text)).toEqual(expectedTexts);
+    expect(segments).toHaveLength(expectedTexts.length);
+    expect(segments.every((segment) =>
+      segment.querySelector('[data-translight-segment="true"]') === null
+    )).toBe(true);
+  });
+
   it('keeps inline paragraph segmentation within a linear query budget', () => {
     const measure = (paragraphCount) => {
       document.body.innerHTML = `
@@ -389,6 +510,76 @@ describe('collectTranslationBlocks', () => {
     expect(larger.blocks).toHaveLength(200);
     expect(larger.queryCalls).toBeLessThanOrEqual(smaller.queryCalls * 2);
     expect(larger.returnedNodes).toBeLessThanOrEqual(smaller.returnedNodes * 2);
+  });
+
+  it('keeps nested residual segmentation within a linear operation budget', () => {
+    const measure = (containerCount) => {
+      document.body.innerHTML = `<p id="description">Opening note has enough English words.${Array.from({length: containerCount}, (_, index) => `<span><b>First ${index}: </b>First inline paragraph has enough English words.\n\n<b>Second ${index}: </b>Second inline paragraph has enough English words.</span>Middle note ${index} has enough English words.`).join('')}Closing note has enough English words.</p>`;
+
+      const originalQuerySelectorAll = Element.prototype.querySelectorAll;
+      const originalQuerySelector = Element.prototype.querySelector;
+      const originalContains = Element.prototype.contains;
+      let queryCalls = 0;
+      let querySelectorCalls = 0;
+      let containsCalls = 0;
+      Element.prototype.querySelectorAll = function (...args) {
+        queryCalls += 1;
+        return originalQuerySelectorAll.apply(this, args);
+      };
+      Element.prototype.querySelector = function (...args) {
+        querySelectorCalls += 1;
+        return originalQuerySelector.apply(this, args);
+      };
+      Element.prototype.contains = function (...args) {
+        containsCalls += 1;
+        return originalContains.apply(this, args);
+      };
+
+      try {
+        const blocks = collectTranslationBlocks(document.body);
+        return {blocks, queryCalls, querySelectorCalls, containsCalls};
+      } finally {
+        Element.prototype.querySelectorAll = originalQuerySelectorAll;
+        Element.prototype.querySelector = originalQuerySelector;
+        Element.prototype.contains = originalContains;
+      }
+    };
+
+    const smaller = measure(8);
+    const larger = measure(16);
+
+    expect(smaller.blocks).toHaveLength(8 * 3 + 1);
+    expect(larger.blocks).toHaveLength(16 * 3 + 1);
+    expect(larger.queryCalls).toBeLessThanOrEqual(smaller.queryCalls * 2);
+    expect(larger.querySelectorCalls).toBeLessThanOrEqual(smaller.querySelectorCalls * 2);
+    expect(larger.containsCalls).toBeLessThanOrEqual(smaller.containsCalls * 2);
+  });
+
+  it('keeps nested residual boundary checks within a linear operation budget', () => {
+    const measure = (containerCount) => {
+      document.body.innerHTML = `<p id="description">Opening note has enough English words.${Array.from({length: containerCount}, (_, index) => `<span>Outer introduction ${index} has enough English words. <span><b>First:</b>First paragraph has enough English words.\n\n<b>Second:</b>Second paragraph has enough English words.</span> Outer conclusion ${index} has enough English words.</span>`).join('')}</p>`;
+
+      const originalContains = Element.prototype.contains;
+      let containsCalls = 0;
+      Element.prototype.contains = function (...args) {
+        containsCalls += 1;
+        return originalContains.apply(this, args);
+      };
+
+      try {
+        const blocks = collectTranslationBlocks(document.body);
+        return {blocks, containsCalls};
+      } finally {
+        Element.prototype.contains = originalContains;
+      }
+    };
+
+    const smaller = measure(8);
+    const larger = measure(16);
+
+    expect(smaller.blocks).toHaveLength(8 * 4 + 1);
+    expect(larger.blocks).toHaveLength(16 * 4 + 1);
+    expect(larger.containsCalls).toBeLessThanOrEqual(smaller.containsCalls * 2);
   });
 
   it('splits blank-line paragraphs inside a nested YouTube attributed description', () => {
