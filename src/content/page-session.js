@@ -509,6 +509,7 @@ export class PageSession {
       }
       this.pendingMutationRoots.add(root);
     };
+    let shouldScheduleRecovery = false;
     for (const record of records) {
       const mutationTarget = record.target?.nodeType === 1
         ? record.target
@@ -519,13 +520,24 @@ export class PageSession {
           .some((node) => !node.matches?.(GENERATED_NODE_SELECTOR));
         const hasRelevantRemovedNodes = Array.from(record.removedNodes ?? [])
           .some((node) => !node.matches?.(GENERATED_NODE_SELECTOR));
-        if (!hasRelevantAddedNodes && !hasRelevantRemovedNodes) continue;
+        const hasGeneratedRemovedNodes = Array.from(record.removedNodes ?? [])
+          .some((node) => node.matches?.(GENERATED_NODE_SELECTOR));
+        if (!hasRelevantAddedNodes && !hasRelevantRemovedNodes) {
+          // A host removing a generated translation still needs recovery, but
+          // a generated-only insertion is produced by this session and does
+          // not justify scanning every live record.
+          shouldScheduleRecovery ||= hasGeneratedRemovedNodes;
+          continue;
+        }
+        shouldScheduleRecovery = true;
       }
       if (record.type === 'characterData') {
+        shouldScheduleRecovery = true;
         const block = getClosestBlock(record.target);
         addMutationRoot(block);
         continue;
       }
+      shouldScheduleRecovery = true;
       const changedBlock = getClosestBlock(record.target);
       addMutationRoot(changedBlock);
       for (const node of record.addedNodes ?? []) {
@@ -534,7 +546,7 @@ export class PageSession {
         addMutationRoot(node);
       }
     }
-    this.scheduleTranslationRecovery();
+    if (shouldScheduleRecovery) this.scheduleTranslationRecovery();
     if (!this.pendingMutationRoots.size && !this.mutationOverflow) {
       this.renderer?.pruneDisconnected?.();
       return;

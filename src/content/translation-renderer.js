@@ -133,6 +133,17 @@ function setStyleValue(style, property, value) {
   if (currentValue) style.removeProperty(property);
 }
 
+function insertBeforeIfNeeded(parent, node, reference = null) {
+  if (!parent || !node) return;
+  if (reference === node && node.parentNode === parent) return;
+  if (node.parentNode === parent && node.nextSibling === reference) return;
+  parent.insertBefore(node, reference);
+}
+
+function appendIfNeeded(parent, node) {
+  insertBeforeIfNeeded(parent, node, null);
+}
+
 function getSourceTypographyElement(record) {
   const {element, sourceTextNodes, originalTextNodeValues} = record;
   if (!element || !sourceTextNodes?.length) return element;
@@ -326,17 +337,17 @@ function placeMixedContentTranslation(element, translation, sourceTextNodes) {
   if (firstNestedBlockIndex >= 0 && directChildIndexes.length &&
       Math.max(...directChildIndexes) > firstNestedBlockIndex) {
     const nextSibling = childNodes[Math.max(...directChildIndexes) + 1] ?? null;
-    element.insertBefore(translation, nextSibling);
+    insertBeforeIfNeeded(element, translation, nextSibling);
     return MIXED_CONTENT_AFTER_DIRECT_TEXT_PLACEMENT;
   }
 
   const firstNestedBlock = childNodes[firstNestedBlockIndex];
   if (firstNestedBlock) {
-    element.insertBefore(translation, firstNestedBlock);
+    insertBeforeIfNeeded(element, translation, firstNestedBlock);
     return 'inside-before-first-block';
   }
 
-  element.appendChild(translation);
+  appendIfNeeded(element, translation);
   return 'inside';
 }
 
@@ -567,7 +578,7 @@ function placeGridLayoutTranslation(element, translation) {
   translation.style.setProperty('max-width', 'none', 'important');
   translation.style.setProperty('white-space', 'nowrap', 'important');
   translation.style.setProperty('margin', '0', 'important');
-  element.appendChild(translation);
+  appendIfNeeded(element, translation);
   return {
     kind: GRID_LAYOUT_ANCHORED_PLACEMENT,
     anchor: element,
@@ -781,7 +792,7 @@ function reconcileGridExternalGroupOrder(group) {
   if (!host || anchor?.parentNode !== host) return;
   let reference = group.beforeAnchor ? anchor : anchor.nextSibling;
   forEachGridExternalNode(group.root, (node) => {
-    if (node.translation !== reference) host.insertBefore(node.translation, reference ?? null);
+    insertBeforeIfNeeded(host, node.translation, reference ?? null);
     reference = node.translation.nextSibling;
   });
 }
@@ -937,7 +948,7 @@ function insertGridLayoutExternalTranslation({
   const insertionReference = beforeAnchor
     ? successor?.translation ?? anchor
     : successor?.translation ?? (predecessor ? predecessor.translation.nextSibling : anchor.nextSibling);
-  if (insertionReference !== translation) host.insertBefore(translation, insertionReference ?? null);
+  insertBeforeIfNeeded(host, translation, insertionReference ?? null);
   const node = {
     source,
     translation,
@@ -955,7 +966,7 @@ function placeGridLayoutExternalTranslation(element, translation) {
   const gridParent = element?.parentElement;
   const insertionPoint = getGridExternalInsertionPoint(gridParent);
   if (!gridParent || !insertionPoint) {
-    element?.parentNode?.insertBefore(translation, element.nextSibling);
+    insertBeforeIfNeeded(element?.parentNode, translation, element.nextSibling);
     return 'sibling';
   }
 
@@ -1029,7 +1040,8 @@ function placeCollapsedReviewTranslation(card, element, translation) {
     return Boolean(source && (element.compareDocumentPosition(source) & DOCUMENT_POSITION_FOLLOWING));
   });
   const insertionReference = nextTranslation ?? translations.at(-1) ?? card;
-  insertionReference.parentNode?.insertBefore(
+  insertBeforeIfNeeded(
+    insertionReference.parentNode,
     translation,
     nextTranslation ?? insertionReference.nextSibling
   );
@@ -1046,13 +1058,13 @@ function placeCollapsedReviewTranslationBeforeCard(card, element, translation) {
     return Boolean(source && (element.compareDocumentPosition(source) & DOCUMENT_POSITION_FOLLOWING));
   });
   const insertionReference = nextTranslation ?? card;
-  insertionReference.parentNode?.insertBefore(translation, insertionReference);
+  insertBeforeIfNeeded(insertionReference.parentNode, translation, insertionReference);
 }
 
 function insertAtSafeLocation(element, translation, mixedContent = false, sourceTextNodes) {
   const stableListItem = getStableListItem(element);
   if (stableListItem) {
-    stableListItem.parentNode.insertBefore(translation, stableListItem.nextSibling);
+    insertBeforeIfNeeded(stableListItem.parentNode, translation, stableListItem.nextSibling);
     return {
       kind: STABLE_LIST_SIBLING_PLACEMENT,
       anchor: stableListItem
@@ -1082,19 +1094,19 @@ function insertAtSafeLocation(element, translation, mixedContent = false, source
   }
 
   if (!shouldInsertInside(element)) {
-    element.parentNode.insertBefore(translation, element.nextSibling);
+    insertBeforeIfNeeded(element.parentNode, translation, element.nextSibling);
     return 'sibling';
   }
 
   if (element.tagName?.toLowerCase() === 'li') {
     const nestedList = getDirectNestedList(element);
     if (nestedList) {
-      element.insertBefore(translation, nestedList);
+      insertBeforeIfNeeded(element, translation, nestedList);
       return 'inside-before-nested-list';
     }
   }
 
-  element.appendChild(translation);
+  appendIfNeeded(element, translation);
   return 'inside';
 }
 
@@ -1123,7 +1135,7 @@ function restorePlacement(record) {
   markTranslationAttached(record);
   if (placement?.kind === STABLE_LIST_SIBLING_PLACEMENT) {
     const anchor = placement.anchor;
-    if (anchor?.parentNode) anchor.parentNode.insertBefore(translation, anchor.nextSibling);
+    if (anchor?.parentNode) insertBeforeIfNeeded(anchor.parentNode, translation, anchor.nextSibling);
     return;
   }
   if (placement?.kind === COLLAPSED_REVIEW_CARD_PLACEMENT) {
@@ -1152,13 +1164,13 @@ function restorePlacement(record) {
   }
   if (!element?.parentNode) return;
   if (placement === 'sibling') {
-    element.parentNode.insertBefore(translation, element.nextSibling);
+    insertBeforeIfNeeded(element.parentNode, translation, element.nextSibling);
     return;
   }
   if (placement === 'inside-before-nested-list') {
     const nestedList = getDirectNestedList(element);
     if (nestedList) {
-      element.insertBefore(translation, nestedList);
+      insertBeforeIfNeeded(element, translation, nestedList);
       return;
     }
   }
@@ -1167,7 +1179,7 @@ function restorePlacement(record) {
       child.matches?.(BLOCK_SELECTOR) || child.querySelector?.(BLOCK_SELECTOR)
     );
     if (firstNestedBlock) {
-      element.insertBefore(translation, firstNestedBlock);
+      insertBeforeIfNeeded(element, translation, firstNestedBlock);
       return;
     }
   }
@@ -1175,14 +1187,14 @@ function restorePlacement(record) {
     placeMixedContentTranslation(element, translation, record.sourceTextNodes);
     return;
   }
-  element.appendChild(translation);
+  appendIfNeeded(element, translation);
 }
 
 function placeTranslationAfterSource(record) {
   if (record?.placement === 'inside-before-first-block') {
     const {element, translation} = record;
     markTranslationAttached(record);
-    if (element?.parentNode && translation) element.appendChild(translation);
+    if (element?.parentNode && translation) appendIfNeeded(element, translation);
     return;
   }
   restorePlacement(record);
@@ -2040,13 +2052,13 @@ export class TranslationRenderer {
       return;
     }
     if (record.placement === 'sibling') {
-      element.parentNode.insertBefore(translation, element);
+      insertBeforeIfNeeded(element.parentNode, translation, element);
       return;
     }
     if (record.placement === MIXED_CONTENT_AFTER_DIRECT_TEXT_PLACEMENT) {
       const directChild = [...getMixedContentDirectChildren(element, record.sourceTextNodes)][0];
       if (directChild) {
-        element.insertBefore(translation, directChild);
+        insertBeforeIfNeeded(element, translation, directChild);
         return;
       }
     }
@@ -2058,7 +2070,7 @@ export class TranslationRenderer {
       }
       return;
     }
-    element.insertBefore(translation, element.firstChild);
+    insertBeforeIfNeeded(element, translation, element.firstChild);
   }
 
   applyFallbackPresentation(record, mode) {

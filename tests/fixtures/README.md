@@ -397,6 +397,26 @@ The repaired case must report `initialTranslationCount: 2`,
 `mutationTranslationCount: 4`, `testPassed: true`, and
 `restoredAfterStop: true`.
 
+## Metacritic translation CPU regression
+
+Fixture: `metacritic-cpu-repro.html` and `metacritic-cpu-repro.js`
+
+Open this URL in Chrome while the Vite development server is running:
+
+```text
+http://127.0.0.1:5173/tests/fixtures/metacritic-cpu-repro.html
+```
+
+This fixture models the supplied Metacritic homepage at
+`https://www.metacritic.com/`: many deeply nested card wrappers contain
+English headings, descriptions, and tags, and the source elements are laid
+out in flex containers like the live page. The session must not rescan every
+translation record in response to its own generated-node insertions, and it
+must not move a translation that is already in its requested position.
+
+The repaired case must report `recoverySchedules: 0`,
+`translationCount: 376`, `testPassed: true`, and `restoredAfterStop: true`.
+
 When adding another browser regression, use a descriptive `<bug-name>-repro`
 fixture name and document its reproducible URL and pass/fail signal in this
 file.

@@ -1656,6 +1656,32 @@ describe('PageSession', () => {
     document.documentElement.removeAttribute('lang');
   });
 
+  it('does not schedule recovery for its own generated translation insertions', async () => {
+    document.body.innerHTML = Array.from({length: 120}, (_, index) => `
+      <div class="metacritic-card-${index}">
+        <div class="card-content">
+          <p>This is Metacritic card ${index} with enough English content to translate.</p>
+        </div>
+      </div>
+    `).join('');
+    const session = new PageSession({
+      generation: 55,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider()
+    });
+    const recoverySpy = vi.spyOn(session, 'scheduleTranslationRecovery');
+
+    try {
+      await session.start();
+      await wait(50);
+
+      expect(recoverySpy).not.toHaveBeenCalled();
+    } finally {
+      session.stop({notify: false});
+    }
+  });
+
   it('starts with visible blocks, then adjacent blocks, then document-order blocks', async () => {
     document.title = '';
     document.body.innerHTML = `
