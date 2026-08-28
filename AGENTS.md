@@ -1,6 +1,6 @@
 # Translight Development Guidelines
 
-Scope: implementation, bug fixes, validation, and PR reviews for `neverworkalone/translight`.
+Scope: implementation, bug fixes, and validation for `neverworkalone/translight`.
 
 Core principle: **Do not patch by assumption. Reproduce the failure before changing code, then verify the fix under the same conditions. When changing DOM-processing paths, validate both functionality and performance.**
 
@@ -82,7 +82,7 @@ If a test itself is wrong, fix the test for a stated reason and re-confirm that 
 
 ## 3. Performance and Test Safety
 
-* When adding or changing site-specific handling, DOM collection, insertion, recovery, layout synchronization, or observer paths, validate both functional and performance regressions in the same PR.
+* When adding or changing site-specific handling, DOM collection, insertion, recovery, layout synchronization, or observer paths, validate both functional and performance regressions in the same change.
 * Prefer extending existing fixtures, instrumentation, and tests instead of creating a new test file for every case.
 * Exercise the actual production path at N/2N scale or another scale appropriate to the change.
 * Choose input shapes that expose the relevant risk, such as:
@@ -144,7 +144,7 @@ If a test itself is wrong, fix the test for a stated reason and re-confirm that 
 * Invalidate caches when relevant nodes are changed, removed, moved, or resized.
 * Keep re-checks limited to the affected scope whenever possible.
 
-## 4. Execution, Reporting, and PR Review
+## 4. Execution and Reporting
 
 ### Execution
 
@@ -172,40 +172,4 @@ Clearly distinguish between:
 
 Passing the full automated test suite alone does NOT prove that the reported user-visible issue is resolved.
 
-Do not report results from an older PR head or older commit as validation of the latest patch.
-
-### PR Reviews
-
-* Always review the latest PR head.
-* Review the entire PR diff against the merge base, not only the latest commits.
-* Inspect every changed file and relevant surrounding code.
-* Report all substantiated blocking findings visible in the first pass whenever possible.
-* Check:
-
-  * reproduction evidence
-  * connection between cause and fix
-  * functional regressions
-  * performance regressions
-  * cleanup and recovery behavior
-  * validation coverage
-* **Fix causes, not symptoms.** If a change works around the reported failure without fixing the causal path, treat the approach as suspect.
-* When the approach is flawed, explain why, recommend a safer design direction, and define how that direction should be validated.
-* Clearly distinguish:
-
-  * code-based expectations
-  * mocked-environment results
-  * actual browser observations
-* Read existing review threads and author replies before commenting.
-* DO NOT repeat resolved or convincingly rebutted findings without new evidence.
-* Keep findings proportional: DO NOT block on speculative edge cases that are not reachable under supported usage or a credible threat model.
-* DO NOT approve a fix as confirmed if the reported symptom was not revalidated.
-* DO NOT approve a performance-sensitive change when required performance regression coverage is missing.
-* Post confirmed blocking findings with supporting evidence and hold the merge.
-* Consolidate related findings and avoid duplicate comments.
-* When a new revision is pushed, review the latest head again.
-* DO NOT merge draft PRs or PRs explicitly marked do-not-merge, even when validation passes.
-* Unless the user has prohibited merging for the current task, merge only after all blockers are resolved and required validation is confirmed.
-* Before merging, verify that the PR head still matches the reviewed and validated commit.
-* For blocking findings, require regression coverage for the same class of failure when the case is automatable.
-* Keep site-specific rules in code and regression fixtures rather than accumulating them in this document.
-* 
+Do not report results from an older commit or patch state as validation of the latest change.
