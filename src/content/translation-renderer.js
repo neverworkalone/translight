@@ -2104,8 +2104,10 @@ export class TranslationRenderer {
     record.fallbackMode = mode;
   }
 
-  restoreChangedSources() {
-    for (const record of this.records.values()) {
+  restoreChangedSources(records = null) {
+    const candidates = records ?? this.records.values();
+    for (const record of candidates) {
+      if (records && this.records.get(record?.sourceId) !== record) continue;
       if (!record.replaced || !this.restoreSourceText(record, {onlyIfChanged: true})) continue;
       detachTranslationForPresentation(record);
       this.clearReplacementAttributes(record);

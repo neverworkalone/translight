@@ -80,6 +80,7 @@ export class PageSession {
     this.pendingRecoveryElements = new Set();
     this.mutationOverflow = false;
     this.pendingMutationNeedsCleanup = false;
+    this.pendingMutationSourceRecords = new Set();
     this.scrollHandler = null;
     this.resizeHandler = null;
     this.priorityTimer = null;
@@ -524,6 +525,7 @@ export class PageSession {
     this.routeVisibilityOverflow = false;
     this.mutationOverflow = false;
     this.pendingMutationNeedsCleanup = false;
+    this.pendingMutationSourceRecords.clear();
     const view = getView(this.document);
     if (this.scrollHandler) {
       view?.removeEventListener?.('scroll', this.scrollHandler);
@@ -588,6 +590,7 @@ export class PageSession {
       if (this.routeDecisionPending) this.routeMutationSeen = true;
       this.pendingMutationRoots.clear();
       this.mutationOverflow = false;
+      this.pendingMutationSourceRecords.clear();
       if (this.mutationTimer != null) clearTimeout(this.mutationTimer);
       this.mutationTimer = null;
       if (this.recoveryTimer != null) clearTimeout(this.recoveryTimer);
@@ -607,9 +610,14 @@ export class PageSession {
     let needsFullRecovery = false;
     let needsRecordCleanup = false;
     const targetedRecoveryElements = new Set();
+    const targetedSourceRecords = new Set();
     const addTargetedRecovery = (element) => {
       const record = this.renderer?.getRecordForElement?.(element);
       if (record?.element) targetedRecoveryElements.add(record.element);
+    };
+    const addTargetedSourceRestore = (element) => {
+      const record = this.renderer?.getRecordForElement?.(element);
+      if (record?.replaced) targetedSourceRecords.add(record);
     };
     const addTargetedRecoveriesIn = (root) => {
       if (!root?.matches || !root?.querySelectorAll) return;
@@ -652,6 +660,7 @@ export class PageSession {
         const changedBlock = getClosestBlock(record.target);
         addMutationRoot(changedBlock);
         addTargetedRecovery(changedBlock);
+        addTargetedSourceRestore(changedBlock);
         for (const node of record.addedNodes ?? []) {
           if (node?.nodeType !== 1 || isGeneratedMutationNode(node)) continue;
           addMutationRoot(node);
@@ -663,6 +672,7 @@ export class PageSession {
         const block = getClosestBlock(record.target);
         addMutationRoot(block);
         addTargetedRecovery(block);
+        addTargetedSourceRestore(block);
         continue;
       }
       hasRelevantMutation = true;
@@ -678,6 +688,7 @@ export class PageSession {
     }
     if (hasRelevantMutation) this.queue?.invalidateLayout?.();
     if (needsRecordCleanup) this.pendingMutationNeedsCleanup = true;
+    for (const record of targetedSourceRecords) this.pendingMutationSourceRecords.add(record);
     if (needsFullRecovery) this.scheduleTranslationRecovery();
     else if (targetedRecoveryElements.size) this.scheduleTranslationRecovery(targetedRecoveryElements);
     // Generated-only records cannot disconnect a source or require a new
@@ -688,6 +699,11 @@ export class PageSession {
         this.pendingMutationNeedsCleanup = false;
         this.renderer?.pruneDisconnected?.();
       }
+      if (this.pendingMutationSourceRecords.size) {
+        const sourceRecords = new Set(this.pendingMutationSourceRecords);
+        this.pendingMutationSourceRecords.clear();
+        this.renderer?.restoreChangedSources?.(sourceRecords);
+      }
       return;
     }
     if (this.mutationTimer != null) clearTimeout(this.mutationTimer);
@@ -697,16 +713,18 @@ export class PageSession {
         ? [this.document.body ?? this.document.documentElement]
         : [...this.pendingMutationRoots];
       const cleanupRecords = this.pendingMutationNeedsCleanup;
+      const sourceRecords = new Set(this.pendingMutationSourceRecords);
       this.pendingMutationRoots.clear();
       this.mutationOverflow = false;
       this.pendingMutationNeedsCleanup = false;
+      this.pendingMutationSourceRecords.clear();
       // Replacement modes can leave translated segments in unchanged inline
       // nodes while a site updates one sibling. Restore changed records before
       // collecting text so the provider receives the real source text.
       if (cleanupRecords) {
         this.renderer?.pruneDisconnected?.();
-        this.renderer?.restoreChangedSources?.();
       }
+      if (sourceRecords.size) this.renderer?.restoreChangedSources?.(sourceRecords);
       const blocks = [];
       const seen = new Set();
       for (const root of roots) {

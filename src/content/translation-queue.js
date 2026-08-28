@@ -2,6 +2,9 @@ export const DEFAULT_QUEUE_CONCURRENCY = 3;
 export const DEFAULT_CACHE_LIMIT = 256;
 export const DEFAULT_PENDING_LIMIT = 2048;
 export const DEFAULT_SEEN_LIMIT = 4096;
+// Cache hits do not cross a provider promise, so bound their synchronous
+// result-application work before yielding to the browser's next task.
+export const CACHE_RESULT_BATCH_SIZE = 16;
 
 function numeric(value, fallback = 0) {
   return Number.isFinite(value) ? value : fallback;
@@ -133,6 +136,10 @@ export class TranslationQueue {
     this.priorityRectCache = new Map();
     this.paused = false;
     this.signal = signal;
+    this.cacheResultBatchCount = 0;
+    this.cacheResultYieldPromise = null;
+    this.cacheResultYieldResolve = null;
+    this.cacheResultYieldTimer = null;
     this.abortListener = () => this.cancel();
     if (signal?.addEventListener) {
       signal.addEventListener('abort', this.abortListener, {once: true});
@@ -309,10 +316,45 @@ export class TranslationQueue {
     this.seenOrder.length = 0;
     this.inFlight.clear();
     this.priorityRectCache.clear();
+    this.cancelCacheResultYield();
     for (const resolve of this.idleResolvers.splice(0)) resolve();
     if (this.active === 0) {
       for (const resolve of this.settledResolvers.splice(0)) resolve();
     }
+  }
+
+  scheduleCacheResultYield() {
+    if (this.cacheResultYieldPromise) return this.cacheResultYieldPromise;
+    this.cacheResultYieldPromise = new Promise((resolve) => {
+      this.cacheResultYieldResolve = resolve;
+      this.cacheResultYieldTimer = setTimeout(() => {
+        this.cacheResultYieldTimer = null;
+        this.cacheResultYieldResolve = null;
+        this.cacheResultYieldPromise = null;
+        this.cacheResultBatchCount = 0;
+        resolve();
+      }, 0);
+    });
+    return this.cacheResultYieldPromise;
+  }
+
+  cancelCacheResultYield() {
+    if (this.cacheResultYieldTimer != null) clearTimeout(this.cacheResultYieldTimer);
+    const resolve = this.cacheResultYieldResolve;
+    this.cacheResultYieldTimer = null;
+    this.cacheResultYieldResolve = null;
+    this.cacheResultYieldPromise = null;
+    this.cacheResultBatchCount = 0;
+    resolve?.();
+  }
+
+  async waitForCacheResultSlot() {
+    if (this.cacheResultBatchCount < CACHE_RESULT_BATCH_SIZE) {
+      this.cacheResultBatchCount += 1;
+      return;
+    }
+    await this.scheduleCacheResultYield();
+    if (!this.cancelled) this.cacheResultBatchCount += 1;
   }
 
   destroy() {
@@ -356,7 +398,8 @@ export class TranslationQueue {
 
     try {
       if (this.cache.has(cacheKey)) {
-        if (this.isCurrent() && !this.cancelled) {
+        await this.waitForCacheResultSlot();
+        if (this.isCurrent() && !this.cancelled && !this.signal?.aborted) {
           this.onResult(block, this.cache.get(cacheKey), {fromCache: true});
         }
         return;

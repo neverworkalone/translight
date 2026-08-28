@@ -448,19 +448,31 @@ Open this URL in Chrome while the Vite development server is running:
 http://127.0.0.1:5173/tests/fixtures/metacritic-scroll-navigation-repro.html
 ```
 
-This fixture follows the supplied live-site path: start translation, scroll to
-`Latest News` and wait for its items, return to the top, click the
-`New and Notable` `Star Wars Zero Company` link, scroll the detail route to the
-bottom, then repeat browser back/forward cycles. The page uses a long queue so
-scroll reprioritization exercises the same pending work as the Metacritic
-homepage. Each restored route must retain exactly one translation per source,
-and stopping the session must clean up every generated node.
+This fixture follows the supplied live-site path: start translation through the
+real content controller, scroll to `Latest News` and wait for its items, return
+to the top, click the `New and Notable` `Star Wars Zero Company` link, scroll
+the detail route to the bottom, then repeat browser back/forward cycles. The
+page uses deeply nested cards so scroll reprioritization and controller route
+messages exercise the same pending work as the Metacritic homepage. It then
+stops and restarts translation three times through the same controller and
+page-memory cache on the full homepage, covering the cold initial run and a
+partial cache larger than the cache limit. It then uses a small, known working
+set on a `warm-cache-probe` route to repeat the same-controller OFF → ON cycle
+three times with cache-only results. Each restored route must retain exactly one
+translation per source, and stopping the session must clean up every generated
+node.
 
 The repaired case must report `latestNewsTranslated >= 8`,
-`interactionRectCalls <= 5000`, no disconnected renderer records, an empty
+`interactionRectCalls <= 5000` for the supplied navigation path (the report's
+`totalInteractionRectCalls` additionally includes the restart probes), no disconnected renderer records, an empty
 queue after each route completes, `recoveryScanCalls === 0` for the simulated
-path, `testPassed: true`, and
-`restoredAfterStop: true`. Add `?metrics=1` to inspect collect/mutation,
+path, three full-home `restartSnapshots`, and three
+`warmCacheProbe.snapshots` with cache hits and no provider calls. The result
+must report `testPassed: true` with `restoredAfterStop: true`. Each restart
+snapshot records the first host timer's observed cache-hit count; it must stay
+within the queue's cache-result batch budget. The `phases` report separates
+initial and post-prepare collection, `removeAll`, cache-result application,
+and Long Task observations. Add `?metrics=1` to inspect collect/mutation,
 prune/recovery-scan, queue-sort, and record-lifetime counters; add `?stacks=1`
 to attribute rectangle reads to production call sites. Add
 `&providerDelay=12` to keep retired route calls in flight long enough to

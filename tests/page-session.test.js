@@ -1780,6 +1780,51 @@ describe('PageSession', () => {
     );
   });
 
+  it.each([
+    ['a characterData change', 'characterData'],
+    ['a Text-node addition', 'text-addition']
+  ])('restores changed replacement source text before retranslation after %s', async (_label, mutationKind) => {
+    document.body.innerHTML = '<p id="source">Visit <a href="https://openai.com">OpenAI</a> docs</p>';
+    const inputs = [];
+    const session = new PageSession({
+      generation: 421,
+      document,
+      observe: false,
+      settings: {
+        translationMode: TRANSLATION_MODES.TRANSLATION_ORIGINAL,
+        translatePageTitle: false
+      },
+      provider: makeProvider({
+        translate: async (text) => {
+          inputs.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    await session.start();
+    const anchor = document.querySelector('a');
+    let mutation;
+    if (mutationKind === 'characterData') {
+      const replacementText = anchor.querySelector(
+        '[data-translight-replacement-text="true"]'
+      ).firstChild;
+      replacementText.data = 'OpenAI team';
+      mutation = {type: 'characterData', target: replacementText};
+    } else {
+      const addedText = document.createTextNode(' team');
+      anchor.appendChild(addedText);
+      mutation = {type: 'childList', target: anchor, addedNodes: [addedText], removedNodes: []};
+    }
+    session.handleMutations([mutation]);
+    await wait();
+
+    expect(inputs).toEqual(['Visit OpenAI docs', 'Visit OpenAI team docs']);
+    expect(inputs).not.toContain(expect.stringContaining('ko:'));
+    session.stop({notify: false});
+    expect(document.querySelector('#source').textContent).toBe('Visit OpenAI team docs');
+  });
+
   it('applies mode changes without calling the provider again', async () => {
     document.body.innerHTML = '<p>Mode paragraph.</p>';
     let calls = 0;

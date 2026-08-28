@@ -1,5 +1,9 @@
-import {describe, expect, it} from 'vitest';
-import {prioritizeBlocks, TranslationQueue} from '../src/content/translation-queue.js';
+import {describe, expect, it, vi} from 'vitest';
+import {
+  CACHE_RESULT_BATCH_SIZE,
+  prioritizeBlocks,
+  TranslationQueue
+} from '../src/content/translation-queue.js';
 
 function block(sourceId, text, rect) {
   return {
@@ -48,6 +52,62 @@ describe('TranslationQueue', () => {
     expect(maxActive).toBeLessThanOrEqual(2);
     expect(calls).toBe(2);
     expect(results).toHaveLength(3);
+  });
+
+  it('yields between bounded batches of warm-cache results', async () => {
+    const blocks = Array.from({length: 256}, (_, index) =>
+      block(`source-${index}`, `cached-${index}`, {
+        top: 0,
+        bottom: 20,
+        left: 0,
+        right: 100
+      })
+    );
+    const cache = new Map(blocks.map(({text}) => [text, `ko:${text}`]));
+    const results = [];
+    const translate = vi.fn();
+    const queue = new TranslationQueue({
+      concurrency: 3,
+      cache,
+      translate,
+      onResult: (_item, value, metadata) => results.push({value, metadata})
+    });
+    const firstTimer = new Promise((resolve) => setTimeout(() => resolve(results.length), 0));
+
+    const idle = queue.enqueue(blocks);
+    const processedBeforeTimer = await firstTimer;
+    await idle;
+
+    expect(processedBeforeTimer).toBeLessThanOrEqual(CACHE_RESULT_BATCH_SIZE);
+    expect(results).toHaveLength(blocks.length);
+    expect(results.every(({metadata}) => metadata.fromCache)).toBe(true);
+    expect(translate).not.toHaveBeenCalled();
+    queue.cancel();
+  });
+
+  it('cancels deferred warm-cache results before they reach the renderer', async () => {
+    const blocks = Array.from({length: 64}, (_, index) =>
+      block(`source-${index}`, `cached-${index}`, {
+        top: 0,
+        bottom: 20,
+        left: 0,
+        right: 100
+      })
+    );
+    const cache = new Map(blocks.map(({text}) => [text, `ko:${text}`]));
+    const results = [];
+    const queue = new TranslationQueue({
+      concurrency: 3,
+      cache,
+      onResult: (item) => results.push(item.sourceId)
+    });
+    setTimeout(() => queue.cancel(), 0);
+
+    await queue.enqueue(blocks);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(results.length).toBeLessThanOrEqual(CACHE_RESULT_BATCH_SIZE);
+    expect(queue.cacheResultYieldTimer).toBeNull();
   });
 
   it('drops late results after cancellation', async () => {

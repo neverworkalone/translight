@@ -7,12 +7,31 @@ import {
   installContentController
 } from '../src/content/controller.js';
 import { PageSession } from '../src/content/page-session.js';
+import { CACHE_RESULT_BATCH_SIZE } from '../src/content/translation-queue.js';
 
 afterEach(() => {
   vi.useRealTimers();
   delete globalThis[CONTENT_CONTROLLER_KEY];
   delete globalThis[DOCUMENT_TOKEN_KEY];
 });
+
+function waitFor(predicate, timeout = 3000) {
+  const deadline = Date.now() + timeout;
+  return new Promise((resolve, reject) => {
+    const check = () => {
+      if (predicate()) {
+        resolve();
+        return;
+      }
+      if (Date.now() >= deadline) {
+        reject(new Error('Timed out waiting for the controller fixture state.'));
+        return;
+      }
+      setTimeout(check, 0);
+    };
+    check();
+  });
+}
 
 describe('content navigation notifications', () => {
   it('reports same-document hash navigation to the background', async () => {
@@ -228,6 +247,136 @@ describe('content navigation notifications', () => {
       expect(document.querySelectorAll('translight-translation')).toHaveLength(2);
     } finally {
       controller.currentSession?.stop({notify: false});
+    }
+  });
+
+  it('reuses the controller cache across route changes and OFF/ON restarts', async () => {
+    history.replaceState({}, '', '/metacritic/home');
+    const homeTexts = Array.from({length: 48}, (_, index) =>
+      `Home Latest News item ${index + 1} has enough English text to translate.`
+    );
+    const detailTexts = Array.from({length: 16}, (_, index) =>
+      `Detail review item ${index + 1} has enough English text to translate.`
+    );
+    const render = (texts) => {
+      document.body.innerHTML = texts.map((text) => `<p>${text}</p>`).join('');
+    };
+    render(homeTexts);
+
+    const messages = [];
+    let listener;
+    const providerCalls = [];
+    const sessionMetrics = [];
+    const runtime = {
+      onMessage: {
+        addListener(next) {
+          listener = next;
+        }
+      },
+      sendMessage(message) {
+        messages.push(message);
+        return Promise.resolve();
+      }
+    };
+    const providerForSession = () => ({
+      getModelState: async () => 'Available',
+      prepare: async () => {},
+      translate: async (text) => {
+        providerCalls.push(text);
+        return `ko:${text}`;
+      },
+      cancel: () => {},
+      close: () => {}
+    });
+    const controller = installContentController({
+      runtime,
+      createSession: (options) => {
+        const metrics = {cacheHits: 0, results: 0};
+        const session = new PageSession({
+          ...options,
+          document,
+          observe: true,
+          settings: {translatePageTitle: false},
+          provider: providerForSession()
+        });
+        const createQueue = session.createQueue.bind(session);
+        session.createQueue = (signal) => {
+          createQueue(signal);
+          const onResult = session.queue.onResult;
+          session.queue.onResult = (block, value, metadata) => {
+            metrics.results += 1;
+            if (metadata?.fromCache) metrics.cacheHits += 1;
+            return onResult(block, value, metadata);
+          };
+        };
+        sessionMetrics.push(metrics);
+        return session;
+      }
+    });
+
+    await controller.settingsReady;
+    controller.stopNavigationWatcher();
+
+    const start = async (generation) => {
+      await listener({
+        type: 'TRANSLATION_START',
+        generation,
+        documentToken: controller.documentToken
+      }, {}, () => {});
+      const session = controller.currentSession;
+      await session.runPromise;
+      expect(document.querySelectorAll('translight-translation')).toHaveLength(homeTexts.length);
+      controller.stopNavigationWatcher();
+      return session;
+    };
+    const navigate = async (url, texts) => {
+      history.pushState({}, '', url);
+      expect(controller.navigationHandler()).toBe(true);
+      const route = messages.at(-1);
+      render(texts);
+      await Promise.resolve();
+      await listener({
+        type: 'TRANSLATION_ROUTE',
+        documentToken: controller.documentToken,
+        routeGeneration: route.routeGeneration,
+        continueTranslation: true
+      }, {}, () => {});
+      await waitFor(() => document.querySelectorAll('translight-translation').length === texts.length);
+      controller.stopNavigationWatcher();
+    };
+
+    try {
+      await start(1);
+      const providerCallCountBeforeRoutes = providerCalls.length;
+
+      await navigate('/metacritic/detail/star-wars-zero-company', detailTexts);
+      await navigate('/metacritic/home', homeTexts);
+      expect(providerCalls.length).toBeGreaterThan(providerCallCountBeforeRoutes);
+      const providerCallCountBeforeRestart = providerCalls.length;
+
+      for (let generation = 2; generation <= 4; generation += 1) {
+        await listener({
+          type: 'TRANSLATION_STOP',
+          generation: generation - 1,
+          documentToken: controller.documentToken
+        }, {}, () => {});
+        expect(document.querySelectorAll('translight-translation')).toHaveLength(0);
+
+        const metricsBeforeRestart = sessionMetrics.length;
+        const firstTimer = new Promise((resolve) =>
+          setTimeout(() => resolve(sessionMetrics[metricsBeforeRestart]?.cacheHits ?? 0), 0)
+        );
+        await start(generation);
+        const cacheHitsBeforeFirstTimer = await firstTimer;
+
+        expect(cacheHitsBeforeFirstTimer).toBeLessThanOrEqual(CACHE_RESULT_BATCH_SIZE);
+        expect(sessionMetrics.at(-1).cacheHits).toBe(homeTexts.length);
+        expect(providerCalls.length).toBe(providerCallCountBeforeRestart);
+        expect(document.querySelectorAll('translight-translation')).toHaveLength(homeTexts.length);
+      }
+    } finally {
+      controller.currentSession?.stop({notify: false});
+      controller.stopNavigationWatcher();
     }
   });
 });
