@@ -1682,6 +1682,85 @@ describe('PageSession', () => {
     }
   });
 
+  it('does not scan translation records for generated-only insertion batches', async () => {
+    document.body.innerHTML = '<p id="seed">The seed paragraph keeps the session active.</p>';
+    const session = new PageSession({
+      generation: 56,
+      document,
+      settings: {translatePageTitle: false},
+      observe: false,
+      provider: makeProvider()
+    });
+
+    await session.start();
+    const originalPrune = session.renderer.pruneDisconnected.bind(session.renderer);
+    let pruneVisits = 0;
+    vi.spyOn(session.renderer, 'pruneDisconnected').mockImplementation(function () {
+      pruneVisits += this.records.size;
+      return originalPrune();
+    });
+
+    const createGeneratedRecords = (count) => Array.from({length: count}, (_, index) => {
+      const source = document.createElement('p');
+      source.textContent = `Generated batch source ${count}-${index} has enough English text.`;
+      document.body.appendChild(source);
+      const translation = session.renderer.insert({
+        element: source,
+        sourceId: `generated-batch-${count}-${index}`,
+        text: source.textContent,
+        translatedText: `ko:${source.textContent}`
+      });
+      return {
+        type: 'childList',
+        target: translation.parentNode,
+        addedNodes: [translation],
+        removedNodes: []
+      };
+    });
+    const handleGeneratedBatches = (count) => {
+      pruneVisits = 0;
+      const records = createGeneratedRecords(count);
+      for (let index = 0; index < records.length; index += 3) {
+        session.handleMutations(records.slice(index, index + 3));
+      }
+      return pruneVisits;
+    };
+
+    try {
+      expect(handleGeneratedBatches(8)).toBe(0);
+      expect(handleGeneratedBatches(16)).toBe(0);
+
+      const hostUpdate = document.createElement('div');
+      document.body.appendChild(hostUpdate);
+      session.handleMutations([{
+        type: 'childList',
+        target: document.body,
+        addedNodes: [hostUpdate],
+        removedNodes: []
+      }]);
+      const pendingMutationTimer = session.mutationTimer;
+      expect(pendingMutationTimer).not.toBeNull();
+      const generatedRecord = createGeneratedRecords(1)[0];
+      session.handleMutations([generatedRecord]);
+      expect(session.mutationTimer).toBe(pendingMutationTimer);
+
+      const seed = document.querySelector('#seed');
+      seed.remove();
+      session.handleMutations([{
+        type: 'childList',
+        target: document.body,
+        addedNodes: [],
+        removedNodes: [seed]
+      }]);
+      await wait(120);
+
+      expect(pruneVisits).toBeGreaterThan(0);
+      expect(session.renderer.hasRecord(seed)).toBe(false);
+    } finally {
+      session.stop({notify: false});
+    }
+  });
+
   it('starts with visible blocks, then adjacent blocks, then document-order blocks', async () => {
     document.title = '';
     document.body.innerHTML = `

@@ -510,6 +510,7 @@ export class PageSession {
       this.pendingMutationRoots.add(root);
     };
     let shouldScheduleRecovery = false;
+    let hasRelevantMutation = false;
     for (const record of records) {
       const mutationTarget = record.target?.nodeType === 1
         ? record.target
@@ -525,19 +526,23 @@ export class PageSession {
         if (!hasRelevantAddedNodes && !hasRelevantRemovedNodes) {
           // A host removing a generated translation still needs recovery, but
           // a generated-only insertion is produced by this session and does
-          // not justify scanning every live record.
+          // not justify scanning every live record. The same is true for the
+          // generated removal itself; recovery will restore that translation.
           shouldScheduleRecovery ||= hasGeneratedRemovedNodes;
           continue;
         }
         shouldScheduleRecovery = true;
+        hasRelevantMutation = true;
       }
       if (record.type === 'characterData') {
         shouldScheduleRecovery = true;
+        hasRelevantMutation = true;
         const block = getClosestBlock(record.target);
         addMutationRoot(block);
         continue;
       }
       shouldScheduleRecovery = true;
+      hasRelevantMutation = true;
       const changedBlock = getClosestBlock(record.target);
       addMutationRoot(changedBlock);
       for (const node of record.addedNodes ?? []) {
@@ -547,6 +552,9 @@ export class PageSession {
       }
     }
     if (shouldScheduleRecovery) this.scheduleTranslationRecovery();
+    // Generated-only records cannot disconnect a source or require a new
+    // collection. Return before touching an already-debounced host mutation.
+    if (!hasRelevantMutation) return;
     if (!this.pendingMutationRoots.size && !this.mutationOverflow) {
       this.renderer?.pruneDisconnected?.();
       return;
