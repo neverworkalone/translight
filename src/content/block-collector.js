@@ -208,6 +208,19 @@ function createSegmentWrapper(element) {
   return wrapper;
 }
 
+function getDoubleLineBreakParts(value) {
+  const separatorPattern = new RegExp(DOUBLE_LINE_BREAK_PATTERN.source, 'g');
+  const parts = [];
+  let cursor = 0;
+  let match;
+  while ((match = separatorPattern.exec(value))) {
+    parts.push({text: value.slice(cursor, match.index), separator: match[0]});
+    cursor = separatorPattern.lastIndex;
+  }
+  parts.push({text: value.slice(cursor), separator: ''});
+  return parts;
+}
+
 function getTextNodes(node, root, nodes = []) {
   if (node?.nodeType === 3) {
     nodes.push(node);
@@ -229,15 +242,7 @@ function splitTextNodeAtDoubleLineBreaks(textNode, targetLanguage) {
   if (!parent) return [];
 
   const value = textNode.nodeValue ?? '';
-  const separatorPattern = new RegExp(DOUBLE_LINE_BREAK_PATTERN.source, 'g');
-  const parts = [];
-  let cursor = 0;
-  let match;
-  while ((match = separatorPattern.exec(value))) {
-    parts.push({text: value.slice(cursor, match.index), separator: match[0]});
-    cursor = separatorPattern.lastIndex;
-  }
-  parts.push({text: value.slice(cursor), separator: ''});
+  const parts = getDoubleLineBreakParts(value);
 
   const translatableParts = parts.filter(({text}) => {
     const normalized = normalizeSourceText(text);
@@ -263,6 +268,14 @@ function splitTextNodeAtDoubleLineBreaks(textNode, targetLanguage) {
   return wrappers;
 }
 
+function textFromPhrasingItems(items, root) {
+  return items.map(({node, text}) => text == null ? textFromNode(node, root) : text).join('');
+}
+
+function isPhrasingItems(items) {
+  return isPhrasingContent(items.map(({node}) => node));
+}
+
 function splitPhrasingContainerAtDoubleBreaks(container, targetLanguage) {
   if (
     isExcluded(container) ||
@@ -273,33 +286,101 @@ function splitPhrasingContainerAtDoubleBreaks(container, targetLanguage) {
   ) return [];
   const childNodes = Array.from(container.childNodes ?? []);
   const ranges = [];
+  const textPartsByNode = new Map();
   let current = [];
   let hasBlockBoundary = false;
   const flush = () => {
-    if (current.length) ranges.push(...splitNodesAtDoubleBreaks(current));
+    if (current.length && isPhrasingItems(current)) ranges.push({items: current});
     current = [];
   };
 
-  for (const node of childNodes) {
+  for (let index = 0; index < childNodes.length;) {
+    const node = childNodes[index];
     if (isNestedBlockNode(node)) {
       flush();
       hasBlockBoundary = true;
+      index += 1;
       continue;
     }
-    current.push(node);
+
+    if (isBreak(node)) {
+      let cursor = index;
+      let breakCount = 0;
+      while (cursor < childNodes.length) {
+        if (isBreak(childNodes[cursor])) {
+          breakCount += 1;
+          cursor += 1;
+          continue;
+        }
+        if (isWhitespaceText(childNodes[cursor])) {
+          cursor += 1;
+          continue;
+        }
+        break;
+      }
+      if (breakCount >= 2) {
+        flush();
+        index = cursor;
+        continue;
+      }
+      current.push({node});
+      index += 1;
+      continue;
+    }
+
+    if (node.nodeType === 3) {
+      const parts = getDoubleLineBreakParts(node.nodeValue ?? '');
+      if (parts.length > 1) {
+        const textParts = [];
+        textPartsByNode.set(node, textParts);
+        for (const {text, separator} of parts) {
+          if (text) {
+            const item = {node, text};
+            current.push(item);
+            textParts.push(item);
+          }
+          if (separator) flush();
+        }
+      } else {
+        current.push({node});
+      }
+      index += 1;
+      continue;
+    }
+
+    current.push({node});
+    index += 1;
   }
   flush();
 
   if (!ranges.length || (!hasBlockBoundary && ranges.length < 2)) return [];
 
-  const translatableRanges = ranges.filter(({nodes}) => {
-    const text = normalizeSourceText(textFromNodes(nodes, container));
+  const translatableRanges = ranges.filter(({items}) => {
+    const text = normalizeSourceText(textFromPhrasingItems(items, container));
     return text.length >= 2 && isTranslatableBlock(container, text, targetLanguage);
   });
   if (!translatableRanges.length) return [];
 
+  for (const [textNode, textParts] of textPartsByNode) {
+    if (!textNode.parentNode) continue;
+    const fragment = textNode.ownerDocument.createDocumentFragment();
+    let textPartIndex = 0;
+    for (const {text, separator} of getDoubleLineBreakParts(textNode.nodeValue ?? '')) {
+      if (text) {
+        const replacement = textNode.ownerDocument.createTextNode(text);
+        textParts[textPartIndex++].replacement = replacement;
+        fragment.appendChild(replacement);
+      }
+      if (separator) fragment.appendChild(textNode.ownerDocument.createTextNode(separator));
+    }
+    textNode.parentNode.replaceChild(fragment, textNode);
+  }
+
   const wrappers = [];
-  for (const {nodes} of [...translatableRanges].reverse()) {
+  for (const {items} of [...translatableRanges].reverse()) {
+    const nodes = items
+      .map((item) => item.replacement ?? item.node)
+      .filter((node) => node?.parentNode);
     const firstNode = nodes[0];
     if (!firstNode?.parentNode) continue;
     const wrapper = createSegmentWrapper(container);
@@ -399,6 +480,8 @@ function splitNestedNewlineTextIntoSegments(element, targetLanguage) {
     if (!DOUBLE_LINE_BREAK_PATTERN.test(textNode.nodeValue ?? '')) continue;
     const wrappers = splitTextNodeAtDoubleLineBreaks(textNode, targetLanguage);
     if (wrappers.length) return wrappers;
+    const containerWrappers = splitPhrasingContainerAtDoubleBreaks(textNode.parentElement, targetLanguage);
+    if (containerWrappers.length) return containerWrappers;
   }
   return splitNestedBreaksIntoSegments(element, targetLanguage);
 }

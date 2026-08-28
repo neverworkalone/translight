@@ -343,6 +343,63 @@ describe('PageSession', () => {
     expect(expanded.querySelector('[data-translight-segment="true"]')).toBeNull();
   });
 
+  it('interleaves translations for Booking property paragraphs across inline labels', async () => {
+    document.body.innerHTML = `
+      <div data-capla-component-boundary="b-property-web-property-page/PropertyDescriptionDesktop">
+        <p data-testid="property-description" class="booking-property-description"><b>Prime Location:</b> OUTRIGGER Waikiki Beachcomber Hotel in Honolulu offers easy access to Waikiki Beach, a 3-minute walk away. Nearby attractions include Royal Hawaiian Shopping Center (984 feet) and Royal Hawaiian Theater (4-minute walk). Honolulu International Airport is 9.3 mi from the property.
+
+<b>Exceptional Facilities:</b> Guests enjoy a swimming pool with stunning views, a sun terrace, and a family-friendly restaurant serving American cuisine. Additional amenities include a hot tub, fitness center, yoga classes, and film nights.
+
+<b>Comfortable Accommodations:</b> Rooms feature air-conditioning, balconies with sea or city views, private bathrooms, and modern amenities such as tea and coffee makers, hairdryers, and free toiletries. Family rooms and sofa beds cater to all travelers.
+
+<b>Dining Experience:</b> The on-site restaurant offers American cuisine with vegetarian and gluten-free options. Breakfast includes local specialties, warm dishes, and fresh fruits. A pool bar and coffee shop provide additional dining options.</p>
+      </div>
+    `;
+    const description = document.querySelector('[data-testid="property-description"]');
+    const originalDescription = description.textContent;
+    const expectedTexts = [
+      'Prime Location: OUTRIGGER Waikiki Beachcomber Hotel in Honolulu offers easy access to Waikiki Beach, a 3-minute walk away. Nearby attractions include Royal Hawaiian Shopping Center (984 feet) and Royal Hawaiian Theater (4-minute walk). Honolulu International Airport is 9.3 mi from the property.',
+      'Exceptional Facilities: Guests enjoy a swimming pool with stunning views, a sun terrace, and a family-friendly restaurant serving American cuisine. Additional amenities include a hot tub, fitness center, yoga classes, and film nights.',
+      'Comfortable Accommodations: Rooms feature air-conditioning, balconies with sea or city views, private bathrooms, and modern amenities such as tea and coffee makers, hairdryers, and free toiletries. Family rooms and sofa beds cater to all travelers.',
+      'Dining Experience: The on-site restaurant offers American cuisine with vegetarian and gluten-free options. Breakfast includes local specialties, warm dishes, and fresh fruits. A pool bar and coffee shop provide additional dining options.'
+    ];
+    const calls = [];
+    const session = new PageSession({
+      generation: 608,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    try {
+      await session.start();
+
+      const segments = Array.from(description.querySelectorAll('[data-translight-segment="true"]'));
+      const translations = Array.from(description.querySelectorAll('translight-translation'));
+      expect(calls).toEqual(expectedTexts);
+      expect(translations.map((translation) => translation.textContent)).toEqual(
+        expectedTexts.map((text) => `ko:${text}`)
+      );
+      expect(segments).toHaveLength(expectedTexts.length);
+      expect(translations).toHaveLength(expectedTexts.length);
+      expect(translations.every((translation) => translation.parentElement === description)).toBe(true);
+      expect(segments.every((segment) =>
+        segment.nextElementSibling?.matches('translight-translation')
+      )).toBe(true);
+    } finally {
+      session.stop({notify: false});
+    }
+
+    expect(description.textContent).toBe(originalDescription);
+    expect(description.querySelector('[data-translight-segment="true"]')).toBeNull();
+    expect(description.querySelector('translight-translation')).toBeNull();
+  });
+
   it('keeps Goodreads translations after source paragraphs through nested inline wrappers', async () => {
     document.body.innerHTML = '<div id="review-text"><span class="outer-one">Introductory outer text has enough English words.<span class="outer-two">Introductory inner text has enough English words.<span class="Formatted">First review paragraph has enough English text.<br><br>Second review paragraph has enough English text.</span>Concluding inner text has enough English words.</span>Concluding outer text has enough English words.</span></div>';
     const reviewText = document.querySelector('#review-text');
