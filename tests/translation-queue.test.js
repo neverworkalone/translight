@@ -85,6 +85,49 @@ describe('TranslationQueue', () => {
     queue.cancel();
   });
 
+  it('keeps a cache hit value stable while a miss evicts its key during yield', async () => {
+    const cache = new Map([
+      ['victim', 'ko:victim'],
+      ['repeat', 'ko:repeat']
+    ]);
+    for (let index = 2; index < 256; index += 1) {
+      cache.set(`filler-${index}`, `ko:filler-${index}`);
+    }
+    const results = [];
+    const providerCalls = [];
+    const queue = new TranslationQueue({
+      concurrency: 3,
+      cache,
+      cacheLimit: 256,
+      translate: async (text) => {
+        providerCalls.push(text);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        return `ko:${text}`;
+      },
+      onResult: (item, value, metadata) => results.push({sourceId: item.sourceId, value, metadata})
+    });
+    const repeatBlocks = Array.from({length: CACHE_RESULT_BATCH_SIZE}, (_, index) =>
+      block(`repeat-${index}`, 'repeat', {top: 0, bottom: 20, left: 0, right: 100})
+    );
+
+    await queue.enqueue([
+      block('new', 'new', {top: 0, bottom: 20, left: 0, right: 100}),
+      ...repeatBlocks,
+      block('victim', 'victim', {top: 0, bottom: 20, left: 0, right: 100})
+    ]);
+
+    expect(providerCalls).toEqual(['new']);
+    expect(results).toHaveLength(CACHE_RESULT_BATCH_SIZE + 2);
+    expect(results.find(({sourceId}) => sourceId === 'victim')).toEqual({
+      sourceId: 'victim',
+      value: 'ko:victim',
+      metadata: {fromCache: true}
+    });
+    expect(results.some(({value}) => value === undefined)).toBe(false);
+    expect(cache.has('victim')).toBe(false);
+    queue.cancel();
+  });
+
   it('cancels deferred warm-cache results before they reach the renderer', async () => {
     const blocks = Array.from({length: 64}, (_, index) =>
       block(`source-${index}`, `cached-${index}`, {

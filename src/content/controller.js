@@ -9,6 +9,46 @@ import {
 export const CONTENT_CONTROLLER_KEY = '__translight_content_controller__';
 export const DOCUMENT_TOKEN_KEY = '__translight_document_token__';
 const NAVIGATION_POLL_MS = 500;
+const METACRITIC_GALLERY_PATH_PATTERN =
+  /^\/pictures\/([^/]+)\/([1-9]\d*)\/?$/u;
+
+/**
+ * Metacritic keeps one gallery document in the DOM and uses replaceState to
+ * reflect the item currently under the scroll position. Those URLs are
+ * presentation state, not a new route that should cancel the translation
+ * queue and rescan the document.
+ */
+export function isMetacriticGalleryStateChange({document, previousUrl, currentUrl} = {}) {
+  if (!document?.querySelectorAll || typeof URL !== 'function') return false;
+
+  let previous;
+  let current;
+  try {
+    previous = new URL(previousUrl);
+    current = new URL(currentUrl);
+  } catch {
+    return false;
+  }
+  if (previous.origin !== current.origin ||
+      previous.search !== current.search ||
+      previous.hash !== current.hash) {
+    return false;
+  }
+
+  const previousMatch = previous.pathname.match(METACRITIC_GALLERY_PATH_PATTERN);
+  const currentMatch = current.pathname.match(METACRITIC_GALLERY_PATH_PATTERN);
+  if (!previousMatch || !currentMatch || previousMatch[1] !== currentMatch[1] ||
+      previousMatch[2] === currentMatch[2]) {
+    return false;
+  }
+
+  const galleryItems = [...document.querySelectorAll('[data-testid="gallery-item"]')];
+  // The URL shape plus the gallery's own slug marker identify this
+  // presentation state without relying on a particular hostname, which also
+  // lets the local production-path fixture exercise the same controller code.
+  return galleryItems.length > 1 &&
+    galleryItems.some((item) => item.getAttribute('slug') === currentMatch[1]);
+}
 
 function getDocumentToken() {
   if (globalThis[DOCUMENT_TOKEN_KEY]) return globalThis[DOCUMENT_TOKEN_KEY];
@@ -109,6 +149,13 @@ export function installContentController({
     if (!url || url === controller.lastNavigationUrl) return false;
     const previousUrl = controller.lastNavigationUrl;
     controller.lastNavigationUrl = url;
+    if (isMetacriticGalleryStateChange({
+      document: globalThis.document,
+      previousUrl,
+      currentUrl: url
+    })) {
+      return false;
+    }
     const routeGeneration = ++controller.routeGeneration;
     const route = {
       previousUrl,

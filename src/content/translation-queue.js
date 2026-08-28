@@ -398,9 +398,10 @@ export class TranslationQueue {
 
     try {
       if (this.cache.has(cacheKey)) {
+        const cachedValue = this.cache.get(cacheKey);
         await this.waitForCacheResultSlot();
         if (this.isCurrent() && !this.cancelled && !this.signal?.aborted) {
-          this.onResult(block, this.cache.get(cacheKey), {fromCache: true});
+          this.onResult(block, cachedValue, {fromCache: true});
         }
         return;
       }

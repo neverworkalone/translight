@@ -19,6 +19,11 @@ const LAYER_COUNT = 6;
 const SCROLL_BURST_COUNT = 8;
 const NAVIGATION_CYCLE_COUNT = 4;
 const MAX_INTERACTION_RECT_CALLS = 5000;
+const MAX_FIRST_TIMER_DELAY_MS = 250;
+const MAX_COLLECTION_PHASE_MS = 250;
+const MAX_REMOVE_ALL_MS = 100;
+const MAX_RESULT_APPLY_MS = 16;
+const MAX_LONG_TASK_MS = 250;
 const PROVIDER_CONCURRENCY_BUDGET = 3;
 const BLOCK_TAGS = ['h3', 'p', 'li', 'h4'];
 const report = document.querySelector('#report');
@@ -157,6 +162,12 @@ function currentRecords() {
 
 function currentTranslationCount() {
   return currentRecords().filter((record) => record.translation?.isConnected).length;
+}
+
+function currentTranslationContentMismatches() {
+  return currentRecords().filter((record) =>
+    record.translation?.textContent !== `ko:${record.originalText}`
+  ).length;
 }
 
 async function waitForCurrentRouteReady() {
@@ -497,6 +508,7 @@ async function run() {
       generatedCountAfterStop,
       sourceCount,
       translationCount,
+      translationContentMismatches: currentTranslationContentMismatches(),
       removeAllMs: stoppedSessionMetric?.removeAllMs ?? [],
       stopMs: stoppedSessionMetric?.stopMs ?? null
     };
@@ -535,6 +547,7 @@ async function run() {
       sourceCount: root.querySelectorAll('[data-fixture-source="true"]').length,
       recordCount: currentRecords().length,
       translationCount: currentTranslationCount(),
+      translationContentMismatches: currentTranslationContentMismatches(),
       retiredQueues: session.retiredQueues?.size ?? 0
     });
   }
@@ -576,6 +589,17 @@ async function run() {
   const allRecords = [...session.renderer.records.values()];
   const disconnectedRecordCount = allRecords.filter((record) => !record.element?.isConnected).length;
   const queueSortLengths = metrics.queueSortLengths;
+  const allRestartSnapshots = [...restartSnapshots, ...warmCacheProbeSnapshots];
+  const maxFirstTimerDelayMs = Math.max(
+    ...allRestartSnapshots.map((snapshot) => snapshot.firstTimer.elapsedMs),
+    0
+  );
+  const maxCollectionPhaseMs = Math.max(
+    ...metrics.collectPhases.map((entry) => entry.durationMs),
+    0
+  );
+  const maxRemoveAllMs = Math.max(...metrics.removeAllMs, 0);
+  const translationContentMismatches = currentTranslationContentMismatches();
   const result = {
     fixture: 'metacritic-scroll-navigation-repro',
     path: 'translate → scroll Latest News → wait → scroll top → click New and Notable → scroll bottom → back/forward cycles',
@@ -611,8 +635,24 @@ async function run() {
     totalInteractionRectCalls,
     restartRectCalls: totalInteractionRectCalls - navigationRectCalls,
     rectBudget: MAX_INTERACTION_RECT_CALLS,
+    responseBudgets: {
+      firstTimerDelayMs: MAX_FIRST_TIMER_DELAY_MS,
+      collectionPhaseMs: MAX_COLLECTION_PHASE_MS,
+      removeAllMs: MAX_REMOVE_ALL_MS,
+      resultApplyMs: MAX_RESULT_APPLY_MS,
+      longTaskMs: MAX_LONG_TASK_MS
+    },
+    responseMetrics: {
+      maxFirstTimerDelayMs: Math.round(maxFirstTimerDelayMs * 100) / 100,
+      maxCollectionPhaseMs: Math.round(maxCollectionPhaseMs * 100) / 100,
+      maxRemoveAllMs: Math.round(maxRemoveAllMs * 100) / 100,
+      maxResultApplyMs: Math.round(metrics.maxResultApplyMs * 100) / 100,
+      longestMainThreadTask: Math.round(metrics.longestMainThreadTask * 100) / 100,
+      longTaskBudgetApplied: metrics.longTaskSupported
+    },
     rendererRecordCount: allRecords.length,
     disconnectedRecordCount,
+    translationContentMismatches: currentTranslationContentMismatches(),
     queueState: {
       pending: session.queue?.pending.length ?? 0,
       active: session.queue?.active ?? 0,
@@ -660,19 +700,27 @@ async function run() {
     routeSnapshots,
     testPassed: latestNewsTranslated >= 8 && routeSnapshots.every((snapshot) =>
       snapshot.sourceCount === snapshot.recordCount &&
-      snapshot.recordCount === snapshot.translationCount
+      snapshot.recordCount === snapshot.translationCount &&
+      snapshot.translationContentMismatches === 0
     ) && navigationRectCalls <= MAX_INTERACTION_RECT_CALLS &&
       allRecords.length === root.querySelectorAll('[data-fixture-source="true"]').length &&
       disconnectedRecordCount === 0 &&
+      translationContentMismatches === 0 &&
       (session.queue?.pending.length ?? 0) === 0 &&
       (session.queue?.active ?? 0) === 0 &&
       providerActive === 0 &&
       providerMaxActive <= PROVIDER_CONCURRENCY_BUDGET &&
+      maxFirstTimerDelayMs <= MAX_FIRST_TIMER_DELAY_MS &&
+      maxCollectionPhaseMs <= MAX_COLLECTION_PHASE_MS &&
+      maxRemoveAllMs <= MAX_REMOVE_ALL_MS &&
+      metrics.maxResultApplyMs <= MAX_RESULT_APPLY_MS &&
+      (!metrics.longTaskSupported || metrics.longestMainThreadTask <= MAX_LONG_TASK_MS) &&
       restartSnapshots.length === restartCount &&
       restartSnapshots.every((snapshot) =>
         snapshot.sourceCountAfterStop > 0 &&
         snapshot.generatedCountAfterStop === 0 &&
         snapshot.sourceCount === snapshot.translationCount &&
+        snapshot.translationContentMismatches === 0 &&
         snapshot.firstTimer.cacheHits <= CACHE_RESULT_BATCH_SIZE
       ) &&
       warmCacheProbeSnapshots.length === restartCount &&
@@ -681,6 +729,7 @@ async function run() {
         snapshot.sourceCountAfterStop === WARM_CACHE_PROBE_BLOCK_COUNT + 1 &&
         snapshot.generatedCountAfterStop === 0 &&
         snapshot.sourceCount === snapshot.translationCount &&
+        snapshot.translationContentMismatches === 0 &&
         snapshot.cacheHits === WARM_CACHE_PROBE_BLOCK_COUNT + 1 &&
         snapshot.providerCallsAfter === snapshot.providerCallsBefore &&
         snapshot.firstTimer.cacheHits <= CACHE_RESULT_BATCH_SIZE

@@ -472,12 +472,42 @@ must report `testPassed: true` with `restoredAfterStop: true`. Each restart
 snapshot records the first host timer's observed cache-hit count; it must stay
 within the queue's cache-result batch budget. The `phases` report separates
 initial and post-prepare collection, `removeAll`, cache-result application,
-and Long Task observations. Add `?metrics=1` to inspect collect/mutation,
+and Long Task observations. `testPassed` also applies response budgets of
+250 ms for the first timer, each collection phase, and each Long Task, 100 ms
+for `removeAll`, and 16 ms for one result application; if Long Task entries are
+unsupported, that one browser metric is reported but not gated. Add
+`?metrics=1` to inspect collect/mutation,
 prune/recovery-scan, queue-sort, and record-lifetime counters; add `?stacks=1`
 to attribute rectangle reads to production call sites. Add
 `&providerDelay=12` to keep retired route calls in flight long enough to
 exercise the provider-overlap budget; `providerMaxActive` must remain at most
 the queue concurrency budget.
+
+## Metacritic gallery scroll-state translation stability
+
+Fixture: `metacritic-gallery-scroll-repro.html` and
+`metacritic-gallery-scroll-repro.js`
+
+Open this URL in Chrome while the Vite development server is running:
+
+```text
+http://127.0.0.1:5173/tests/fixtures/metacritic-gallery-scroll-repro.html
+```
+
+This fixture models the supplied Metacritic article at
+`https://www.metacritic.com/pictures/august-september-2026-game-preview-wolverine-silent-hill-townfall-control-resonant/5`.
+The page keeps 22 gallery items in one document and updates
+`/pictures/<slug>/<item>` with `history.replaceState` as the scroll position
+changes, matching the live page's scroll spy. The controller must treat those
+URLs as presentation state: it must keep one queue and the translated article
+paragraphs connected while the gallery URL changes.
+
+The repaired case must report `galleryUrlChanges > 0`,
+`contentRouteMessages: 0`, `sessionRouteChanges: 0`,
+`controllerRouteGeneration: 0`,
+`minimumTranslatedParagraphs === sourceParagraphs`,
+`translationContentsMatch: true`, and `testPassed: true` with
+`restoredAfterStop: true`.
 
 When adding another browser regression, use a descriptive `<bug-name>-repro`
 fixture name and document its reproducible URL and pass/fail signal in this

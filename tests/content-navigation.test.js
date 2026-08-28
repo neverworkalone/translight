@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
+// @vitest-environment-options {"url":"https://www.metacritic.com/"}
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   CONTENT_CONTROLLER_KEY,
   DOCUMENT_TOKEN_KEY,
-  installContentController
+  installContentController,
+  isMetacriticGalleryStateChange
 } from '../src/content/controller.js';
 import { PageSession } from '../src/content/page-session.js';
 import { CACHE_RESULT_BATCH_SIZE } from '../src/content/translation-queue.js';
@@ -34,6 +36,64 @@ function waitFor(predicate, timeout = 3000) {
 }
 
 describe('content navigation notifications', () => {
+  it('does not restart translation for Metacritic gallery URLs updated by scroll', () => {
+    history.replaceState({}, '', '/pictures/august-september-2026-game-preview/5');
+    document.body.innerHTML = `
+      <main>
+        <div data-testid="gallery-item" slug="august-september-2026-game-preview" id="gallery-item-5"><p>Gallery item five.</p></div>
+        <div data-testid="gallery-item" slug="august-september-2026-game-preview" id="gallery-item-6"><p>Gallery item six.</p></div>
+      </main>
+    `;
+    const runtime = {
+      onMessage: {addListener() {}},
+      sendMessage() {
+        return Promise.resolve();
+      }
+    };
+    const controller = installContentController({runtime});
+    const session = {
+      isNavigationWatching: () => true,
+      beginRouteChange: vi.fn(),
+      generation: 42,
+      status: 'ACTIVE',
+      activation: 'manual'
+    };
+    controller.currentSession = session;
+
+    expect(isMetacriticGalleryStateChange({
+      document,
+      previousUrl: `${location.origin}/pictures/august-september-2026-game-preview/5`,
+      currentUrl: `${location.origin}/pictures/august-september-2026-game-preview/6`
+    })).toBe(true);
+
+    history.replaceState({}, '', '/pictures/august-september-2026-game-preview/6');
+
+    expect(controller.navigationHandler()).toBe(false);
+    expect(controller.lastNavigationUrl).toBe(`${location.origin}/pictures/august-september-2026-game-preview/6`);
+    expect(session.beginRouteChange).not.toHaveBeenCalled();
+  });
+
+  it('keeps ordinary Metacritic routes and unrelated gallery slugs navigable', () => {
+    history.replaceState({}, '', '/pictures/august-september-2026-game-preview/5');
+    document.body.innerHTML = `
+      <main>
+        <div data-testid="gallery-item" slug="august-september-2026-game-preview"><p>Gallery item five.</p></div>
+        <div data-testid="gallery-item" slug="august-september-2026-game-preview"><p>Gallery item six.</p></div>
+      </main>
+    `;
+    expect(isMetacriticGalleryStateChange({
+      document,
+      previousUrl: 'https://www.metacritic.com/pictures/august-september-2026-game-preview/5',
+      currentUrl: 'https://www.metacritic.com/pictures/another-preview/6'
+    })).toBe(false);
+    document.querySelector('[data-testid="gallery-item"]').remove();
+    expect(isMetacriticGalleryStateChange({
+      document,
+      previousUrl: 'https://www.metacritic.com/pictures/august-september-2026-game-preview/5',
+      currentUrl: 'https://www.metacritic.com/pictures/august-september-2026-game-preview/6'
+    })).toBe(false);
+  });
+
   it('reports same-document hash navigation to the background', async () => {
     history.replaceState({}, '', '/wiki/Well-being');
     const messages = [];
