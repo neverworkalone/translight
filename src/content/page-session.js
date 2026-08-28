@@ -34,6 +34,23 @@ function getClosestBlock(node) {
   return node.parentElement?.closest?.(CANDIDATE_SELECTOR) ?? null;
 }
 
+function isTranslightOwnedNode(node) {
+  const element = node?.nodeType === 1 ? node : node?.parentElement;
+  return Boolean(element?.matches?.(`${GENERATED_NODE_SELECTOR},${SEGMENT_SELECTOR}`) ||
+    element?.closest?.(`${GENERATED_NODE_SELECTOR},${SEGMENT_SELECTOR}`));
+}
+
+function hasRouteRelevantMutation(records) {
+  return Array.from(records ?? []).some((record) => {
+    if (record.type === 'characterData') return !isTranslightOwnedNode(record.target);
+    if (record.type === 'attributes') return !isTranslightOwnedNode(record.target);
+    if (record.type !== 'childList') return false;
+    if (isTranslightOwnedNode(record.target)) return false;
+    return Array.from(record.addedNodes ?? []).some((node) => !isTranslightOwnedNode(node)) ||
+      Array.from(record.removedNodes ?? []).some((node) => !isTranslightOwnedNode(node));
+  });
+}
+
 export class PageSession {
   constructor({
     generation,
@@ -83,6 +100,9 @@ export class PageSession {
     this.routeGeneration = Number.isInteger(initialRouteGeneration) ? initialRouteGeneration : 0;
     this.routeDecisionPending = false;
     this.routeMutationSeen = false;
+    this.routeMutationVersion = 0;
+    this.lastRouteRescanGeneration = null;
+    this.lastRouteRescanVersion = -1;
     this.routeSettleTimers = new Set();
     this.routeDecisionWaiters = [];
     this.originalTitle = null;
@@ -403,7 +423,10 @@ export class PageSession {
       if (this.updatingTitle) return;
       const routeChanged = this.onDomMutation?.();
       if (routeChanged || this.routeDecisionPending) {
-        if (this.routeDecisionPending) this.routeMutationSeen = true;
+        if (this.routeDecisionPending) {
+          this.routeMutationSeen = true;
+          this.routeMutationVersion += 1;
+        }
         return;
       }
       if (this.watchOnly) {
@@ -489,6 +512,7 @@ export class PageSession {
 
   handleMutations(records) {
     if (!this.isCurrent()) return;
+    if (hasRouteRelevantMutation(records)) this.routeMutationVersion += 1;
     const routeChanged = this.onDomMutation?.();
     if (routeChanged || this.routeDecisionPending) {
       if (this.routeDecisionPending) this.routeMutationSeen = true;
@@ -676,6 +700,10 @@ export class PageSession {
 
   rescanRoute(routeGeneration) {
     if (!this.isCurrent() || this.routeDecisionPending || routeGeneration !== this.routeGeneration) return;
+    if (this.lastRouteRescanGeneration === routeGeneration &&
+        this.lastRouteRescanVersion === this.routeMutationVersion) return;
+    this.lastRouteRescanGeneration = routeGeneration;
+    this.lastRouteRescanVersion = this.routeMutationVersion;
     this.renderer?.pruneMissingTranslations?.();
     this.renderer?.pruneDisconnected?.();
     this.renderer?.restoreChangedSources?.();

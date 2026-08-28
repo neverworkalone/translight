@@ -745,6 +745,39 @@ describe('PageSession', () => {
     session.stop({notify: false});
   });
 
+  it('does not repeat unchanged route settle scans during back-forward cycles', async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '<p>Stable route content.</p>';
+    const session = new PageSession({
+      generation: 120,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider()
+    });
+    const collectSpy = vi.spyOn(session, 'collectBlocks');
+
+    try {
+      await session.start();
+      expect(collectSpy).toHaveBeenCalledTimes(2);
+
+      for (let routeGeneration = 1; routeGeneration <= 8; routeGeneration += 1) {
+        expect(session.beginRouteChange({routeGeneration})).toBe(true);
+        expect(session.applyRouteDecision({
+          routeGeneration,
+          continueTranslation: true
+        })).toBe(true);
+
+        await vi.advanceTimersByTimeAsync(100);
+        await vi.advanceTimersByTimeAsync(400);
+      }
+
+      expect(collectSpy).toHaveBeenCalledTimes(2 + 8);
+    } finally {
+      session.stop({notify: false});
+      vi.useRealTimers();
+    }
+  });
+
   it('does not let a previous route title result overwrite the next title', async () => {
     document.title = 'Old route title';
     document.body.innerHTML = '<p>Old route body.</p>';

@@ -417,6 +417,26 @@ must not move a translation that is already in its requested position.
 The repaired case must report `recoverySchedules: 0`,
 `translationCount: 376`, `testPassed: true`, and `restoredAfterStop: true`.
 
+## Metacritic repeated navigation regression
+
+Fixture: `metacritic-navigation-repro.html` and
+`metacritic-navigation-repro.js`
+
+Open this URL in Chrome while the Vite development server is running:
+
+```text
+http://127.0.0.1:5173/tests/fixtures/metacritic-navigation-repro.html
+```
+
+This fixture replaces a deeply nested Metacritic-style card page eight times,
+matching repeated link and back/forward route changes in one live session. Each
+route must end with exactly one translation per source block, and stopping the
+session must remove every generated node. The settle window must not rescan the
+same unchanged route repeatedly.
+
+The repaired case must report `testPassed: true`,
+`restoredAfterStop: true`, and `collectCalls <= 18`.
+
 When adding another browser regression, use a descriptive `<bug-name>-repro`
 fixture name and document its reproducible URL and pass/fail signal in this
 file.

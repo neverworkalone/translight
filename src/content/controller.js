@@ -162,6 +162,7 @@ export function installContentController({
   });
 
   const startSession = (message) => {
+    if (message.documentToken != null && message.documentToken !== controller.documentToken) return;
     controller.stopNavigationWatcher();
     controller.currentSession?.stop({ notify: false });
     // Navigation that happened while translation was OFF is the baseline for
@@ -184,6 +185,7 @@ export function installContentController({
   };
 
   const stopSession = (message) => {
+    if (message.documentToken != null && message.documentToken !== controller.documentToken) return;
     const session = controller.currentSession;
     if (!session) return;
     if (message.generation != null && session.generation !== message.generation) return;
@@ -206,6 +208,10 @@ export function installContentController({
     }
 
     if (message?.type === 'TRANSLATION_ROUTE') {
+      if (message.documentToken != null && message.documentToken !== controller.documentToken) {
+        sendResponse?.({ok: true});
+        return false;
+      }
       controller.currentSession?.applyRouteDecision?.(message);
       sendResponse?.({ok: true});
       return false;

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Translight Metacritic navigation reproduction</title>
+    <style>
+      :root { font: 16px/1.5 system-ui, sans-serif; color: #172033; }
+      body { margin: 0; background: #f5f7fb; }
+      #report-panel {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        padding: 12px 16px;
+        background: #172033;
+        color: #fff;
+      }
+      #report { margin: 0; white-space: pre-wrap; font: 12px/1.4 ui-monospace, monospace; }
+      #metacritic-root { max-width: 960px; margin: 0 auto; padding: 24px; }
+      .metacritic-card { margin: 0 0 16px; padding: 16px; background: #fff; border: 1px solid #d9dfeb; }
+      .card-leaf-host { display: flex; flex-direction: column; }
+      .card-layer { min-width: 0; }
+      h3, h4, p, li { margin: 0 0 4px; }
+    </style>
+  </head>
+  <body>
+    <div id="report-panel"><pre id="report">Running Metacritic navigation reproduction…</pre></div>
+    <main id="metacritic-root"></main>
+    <script type="module" src="/tests/fixtures/metacritic-navigation-repro.js"></script>
+  </body>
+</html>

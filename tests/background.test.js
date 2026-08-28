@@ -263,6 +263,7 @@ describe('background automatic translation status', () => {
     await clickedListeners[0]({id: 1, url: 'https://example.com/questions'});
     await settle();
     const startMessage = contentMessages.find(({message}) => message.type === 'TRANSLATION_START')?.message;
+    expect(startMessage.documentToken).toBe('document-a');
     expect(startMessage.activation).toBe('manual');
 
     await updatedListeners[0](1, {status: 'loading', url: 'https://example.com/other'});
@@ -287,6 +288,100 @@ describe('background automatic translation status', () => {
     expect(contentMessages.at(-1)?.message).toMatchObject({
       type: 'TRANSLATION_STOP',
       generation: startMessage.generation
+    });
+  });
+
+  it('ignores a stale loading update after a BFCache document resumes', async () => {
+    installChrome({autoTranslateSites: [], autoTranslateSameSite: true});
+    await import('../src/background/index.js?background-bfcache-stale-loading');
+    await runtimeMessage({
+      type: 'CONTENT_READY',
+      documentToken: 'document-a',
+      url: 'https://example.com/questions'
+    }, {tab: {id: 1, url: 'https://example.com/questions'}});
+    await settle();
+
+    await clickedListeners[0]({id: 1, url: 'https://example.com/questions'});
+    await settle();
+    const startMessage = contentMessages.find(({message}) => message.type === 'TRANSLATION_START')?.message;
+
+    globalThis.chrome.tabs.get = async () => ({url: 'https://example.com/questions'});
+    await updatedListeners[0](1, {status: 'loading', url: 'https://example.com/other'});
+    await settle();
+    await runtimeMessage({
+      type: 'CONTENT_READY',
+      documentToken: 'document-a',
+      url: 'https://example.com/questions',
+      resume: true,
+      contentSessionActive: true,
+      contentSessionGeneration: startMessage.generation,
+      contentSessionStatus: 'ACTIVE',
+      contentSessionActivation: 'manual'
+    }, {tab: {id: 1, url: 'https://example.com/questions'}});
+    await settle();
+    expect(iconCalls.at(-1)?.path?.[16]).toBe('icon-active16.png');
+
+    await updatedListeners[0](1, {status: 'loading', url: 'https://example.com/other'});
+    await settle();
+
+    expect(iconCalls.at(-1)?.path?.[16]).toBe('icon-active16.png');
+    expect(contentMessages.filter(({message}) => message.type === 'TRANSLATION_STOP')).toHaveLength(0);
+  });
+
+  it('processes a loading update without sending a tab-wide stop for a known document', async () => {
+    installChrome({autoTranslateSites: [], autoTranslateSameSite: true});
+    await import('../src/background/index.js?background-current-loading');
+    await runtimeMessage({
+      type: 'CONTENT_READY',
+      documentToken: 'document-a',
+      url: 'https://example.com/first'
+    }, {tab: {id: 1, url: 'https://example.com/first'}});
+    await settle();
+    await clickedListeners[0]({id: 1, url: 'https://example.com/first'});
+    await settle();
+
+    globalThis.chrome.tabs.get = async () => ({url: 'https://example.com/second'});
+    await updatedListeners[0](1, {status: 'loading', url: 'https://example.com/second'});
+    await settle();
+
+    expect(contentMessages.filter(({message}) => message.type === 'TRANSLATION_STOP')).toHaveLength(0);
+    expect(iconCalls.at(-1)?.path?.[16]).toBe('icon16.png');
+  });
+
+  it('ignores an older same-document route when back navigation has already won', async () => {
+    installChrome({autoTranslateSites: [], autoTranslateSameSite: true});
+    await import('../src/background/index.js?background-stale-spa-route');
+    await runtimeMessage({
+      type: 'CONTENT_READY',
+      documentToken: 'document-a',
+      url: 'https://example.com/first'
+    }, {tab: {id: 1, url: 'https://example.com/first'}});
+    await settle();
+    await clickedListeners[0]({id: 1, url: 'https://example.com/first'});
+    await settle();
+
+    runtimeMessage({
+      type: 'CONTENT_NAVIGATION',
+      documentToken: 'document-a',
+      url: 'https://other.example/second',
+      routeGeneration: 1
+    }, {tab: {id: 1, url: 'https://other.example/second'}});
+    runtimeMessage({
+      type: 'CONTENT_NAVIGATION',
+      documentToken: 'document-a',
+      url: 'https://example.com/first',
+      routeGeneration: 2
+    }, {tab: {id: 1, url: 'https://example.com/first'}});
+    await settle();
+    await settle();
+
+    expect(contentMessages.filter(({message}) => message.type === 'TRANSLATION_START')).toHaveLength(1);
+    expect(contentMessages.filter(({message}) => message.type === 'TRANSLATION_STOP')).toHaveLength(0);
+    expect(contentMessages.at(-1)?.message).toMatchObject({
+      type: 'TRANSLATION_ROUTE',
+      routeGeneration: 2,
+      continueTranslation: true,
+      documentToken: 'document-a'
     });
   });
 
