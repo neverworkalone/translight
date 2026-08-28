@@ -391,6 +391,41 @@ describe('collectTranslationBlocks', () => {
     expect(larger.returnedNodes).toBeLessThanOrEqual(smaller.returnedNodes * 2);
   });
 
+  it('keeps visibility checks bounded for deeply nested detail-page candidates', () => {
+    const tags = ['h3', 'p', 'li', 'h4'];
+    document.body.innerHTML = `
+      <main id="detail-page">
+        ${Array.from({length: 24}, (_, cardIndex) => `
+          <section class="global-carousel">
+            <div class="grid-container"><div class="product-card"><div class="product-card-content">
+              ${tags.map((tagName, blockIndex) => `
+                <${tagName}>Metacritic detail card ${cardIndex} ${blockIndex} content has enough English text to translate.</${tagName}>
+              `).join('')}
+            </div></div></div>
+          </section>
+        `).join('')}
+      </main>
+    `;
+
+    const originalGetComputedStyle = window.getComputedStyle;
+    let getComputedStyleCalls = 0;
+    window.getComputedStyle = (...args) => {
+      getComputedStyleCalls += 1;
+      return originalGetComputedStyle(...args);
+    };
+
+    try {
+      const blocks = collectTranslationBlocks(document.body);
+
+      expect(blocks).toHaveLength(24 * tags.length);
+      expect(getComputedStyleCalls).toBeLessThanOrEqual(
+        document.querySelectorAll('*').length * 5
+      );
+    } finally {
+      window.getComputedStyle = originalGetComputedStyle;
+    }
+  });
+
   it('splits blank-line paragraphs inside a nested YouTube attributed description', () => {
     document.body.innerHTML = `
       <div id="expanded">

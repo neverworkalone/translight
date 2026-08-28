@@ -36,6 +36,7 @@ const PHRASING_TAGS = new Set([
 ]);
 
 let sourceSequence = 0;
+let activeVisibilityCache = null;
 
 function isElement(node) {
   return node?.nodeType === 1;
@@ -70,8 +71,20 @@ export function isHidden(element, {includeAncestors = true} = {}) {
   const view = element.ownerDocument?.defaultView;
   if (!view?.getComputedStyle) return false;
 
+  const cache = includeAncestors ? activeVisibilityCache : null;
+  const cached = cache?.get(element);
+  if (cached !== undefined) return cached;
+
+  const visited = [];
+  let hidden = false;
   let current = element;
   while (current && current.nodeType === 1) {
+    const cachedAncestor = cache?.get(current);
+    if (cachedAncestor !== undefined) {
+      hidden = cachedAncestor;
+      break;
+    }
+    visited.push(current);
     const style = view.getComputedStyle(current);
     if (
       style.display === 'none' ||
@@ -80,12 +93,20 @@ export function isHidden(element, {includeAncestors = true} = {}) {
       style.opacity === '0' ||
       isVisuallyHiddenStyle(style)
     ) {
-      return true;
+      hidden = true;
+      break;
     }
     if (!includeAncestors) break;
     current = current.parentElement;
   }
-  return false;
+  if (cache) {
+    for (const visitedElement of visited) cache.set(visitedElement, hidden);
+  }
+  return hidden;
+}
+
+function invalidateVisibilityCache() {
+  if (activeVisibilityCache) activeVisibilityCache = new WeakMap();
 }
 
 function textFromNode(node, root) {
@@ -265,6 +286,7 @@ function splitTextNodeAtDoubleLineBreaks(textNode, targetLanguage) {
     if (separator) fragment.appendChild(textNode.ownerDocument.createTextNode(separator));
   }
   textNode.parentNode.replaceChild(fragment, textNode);
+  invalidateVisibilityCache();
   return wrappers;
 }
 
@@ -388,6 +410,7 @@ function splitPhrasingContainerAtDoubleBreaks(container, targetLanguage) {
     for (const node of nodes) wrapper.appendChild(node);
     wrappers.unshift(wrapper);
   }
+  invalidateVisibilityCache();
   return wrappers;
 }
 
@@ -433,6 +456,7 @@ function splitUnsegmentedDirectChildrenIntoSegments(element, processedContainers
     for (const node of nodes) wrapper.appendChild(node);
     wrappers.unshift(wrapper);
   }
+  if (wrappers.length) invalidateVisibilityCache();
   return wrappers;
 }
 
@@ -526,6 +550,7 @@ function splitDirectTextIntoSegments(element, targetLanguage, {hasNestedBlocks =
     for (const node of nodes) wrapper.appendChild(node);
     wrappers.unshift(wrapper);
   }
+  if (wrappers.length) invalidateVisibilityCache();
   return wrappers;
 }
 
@@ -569,6 +594,8 @@ export function collectTranslationBlocks(
   const candidates = getCandidates(root);
   const candidateSet = new Set(candidates);
   const blocks = [];
+  const previousVisibilityCache = activeVisibilityCache;
+  activeVisibilityCache = new WeakMap();
 
   const processCandidate = (element, {allowSegmentation = splitSegments} = {}) => {
     if (!isElement(element)) return;
@@ -619,14 +646,20 @@ export function collectTranslationBlocks(
     });
   };
 
-  for (const element of candidates) processCandidate(element);
+  let sortedBlocks;
+  try {
+    for (const element of candidates) processCandidate(element);
 
-  return blocks.sort((left, right) => {
-    const position = left.element.compareDocumentPosition?.(right.element) ?? 0;
-    if (position & 4) return -1;
-    if (position & 2) return 1;
-    return 0;
-  });
+    sortedBlocks = blocks.sort((left, right) => {
+      const position = left.element.compareDocumentPosition?.(right.element) ?? 0;
+      if (position & 4) return -1;
+      if (position & 2) return 1;
+      return 0;
+    });
+  } finally {
+    activeVisibilityCache = previousVisibilityCache;
+  }
+  return sortedBlocks;
 }
 
 export function resetSourceSequence() {
