@@ -2227,6 +2227,10 @@ export class TranslationRenderer {
     return Boolean(element && this.recordsByElement.has(element));
   }
 
+  getRecordForElement(element) {
+    return element ? this.recordsByElement.get(element) ?? null : null;
+  }
+
   getRecordForTranslation(element) {
     if (!element?.matches?.(TRANSLATION_TAG)) return null;
     const sourceId = element.getAttribute(SOURCE_ATTRIBUTE);

@@ -458,10 +458,11 @@ and stopping the session must clean up every generated node.
 
 The repaired case must report `latestNewsTranslated >= 8`,
 `interactionRectCalls <= 5000`, no disconnected renderer records, an empty
-queue after each route completes, `testPassed: true`, and
+queue after each route completes, `recoveryScanCalls === 0` for the simulated
+path, `testPassed: true`, and
 `restoredAfterStop: true`. Add `?metrics=1` to inspect collect/mutation,
-prune/recovery, queue-sort, and record-lifetime counters; add `?stacks=1` to
-attribute rectangle reads to production call sites. Add
+prune/recovery-scan, queue-sort, and record-lifetime counters; add `?stacks=1`
+to attribute rectangle reads to production call sites. Add
 `&providerDelay=12` to keep retired route calls in flight long enough to
 exercise the provider-overlap budget; `providerMaxActive` must remain at most
 the queue concurrency budget.

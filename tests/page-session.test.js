@@ -946,6 +946,51 @@ describe('PageSession', () => {
     }
   });
 
+  it.each([128, 129])('does not drop an independent hidden route candidate at the visibility limit (%i)', async (candidateCount) => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '<p id="seed">The initial route content keeps the session active.</p>' +
+      Array.from({length: candidateCount}, (_, index) =>
+        `<p class="late" hidden>Late independent paragraph ${index} becomes visible.</p>`
+      ).join('');
+    const calls = [];
+    const session = new PageSession({
+      generation: 124 + candidateCount,
+      document,
+      settings: {translatePageTitle: false},
+      observe: false,
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    try {
+      await session.start();
+      expect(session.beginRouteChange({routeGeneration: 1})).toBe(true);
+      expect(session.applyRouteDecision({
+        routeGeneration: 1,
+        continueTranslation: true
+      })).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(100);
+      expect(session.routeVisibilityCandidates.size).toBe(128);
+      expect(session.routeVisibilityOverflow).toBe(candidateCount > 128);
+
+      document.querySelectorAll('.late').forEach((element) => { element.hidden = false; });
+      await vi.advanceTimersByTimeAsync(400);
+
+      expect(calls.filter((text) => text.startsWith('Late independent paragraph')))
+        .toHaveLength(candidateCount);
+      expect(document.querySelectorAll('.late + translight-translation'))
+        .toHaveLength(candidateCount);
+    } finally {
+      session.stop({notify: false});
+      vi.useRealTimers();
+    }
+  });
+
   it('does not let a previous route title result overwrite the next title', async () => {
     document.title = 'Old route title';
     document.body.innerHTML = '<p>Old route body.</p>';
@@ -1957,6 +2002,50 @@ describe('PageSession', () => {
 
       expect(pruneVisits).toBeGreaterThan(0);
       expect(session.renderer.hasRecord(seed)).toBe(false);
+    } finally {
+      session.stop({notify: false});
+    }
+  });
+
+  it.each([
+    [120, 40],
+    [240, 80]
+  ])('does not run a full recovery scan for repeated unrelated host additions (%i records, %i callbacks)', async (recordCount, callbackCount) => {
+    document.body.innerHTML = Array.from({length: recordCount}, (_, index) =>
+      `<p>Stable host source ${index} with enough English text for recovery.</p>`
+    ).join('');
+    const session = new PageSession({
+      generation: 58 + recordCount,
+      document,
+      settings: {translatePageTitle: false},
+      observe: false,
+      provider: makeProvider()
+    });
+
+    await session.start();
+    const getMissingTranslations = vi.spyOn(session.renderer, 'getMissingTranslations');
+    const getRecoveryState = vi.spyOn(session.renderer, 'getRecoveryState');
+    const pruneDisconnected = vi.spyOn(session.renderer, 'pruneDisconnected');
+    const restoreChangedSources = vi.spyOn(session.renderer, 'restoreChangedSources');
+
+    try {
+      for (let index = 0; index < callbackCount; index += 1) {
+        const added = document.createElement('meta');
+        added.setAttribute('data-host-update', String(index));
+        document.body.appendChild(added);
+        session.handleMutations([{
+          type: 'childList',
+          target: document.body,
+          addedNodes: [added],
+          removedNodes: []
+        }]);
+      }
+      await wait(140);
+
+      expect(getMissingTranslations).not.toHaveBeenCalled();
+      expect(getRecoveryState).not.toHaveBeenCalled();
+      expect(pruneDisconnected).not.toHaveBeenCalled();
+      expect(restoreChangedSources).not.toHaveBeenCalled();
     } finally {
       session.stop({notify: false});
     }

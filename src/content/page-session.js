@@ -79,6 +79,7 @@ export class PageSession {
     this.pendingMutationRoots = new Set();
     this.pendingRecoveryElements = new Set();
     this.mutationOverflow = false;
+    this.pendingMutationNeedsCleanup = false;
     this.scrollHandler = null;
     this.resizeHandler = null;
     this.priorityTimer = null;
@@ -87,6 +88,7 @@ export class PageSession {
     this.routeMutationSeen = false;
     this.lastRouteRescanGeneration = null;
     this.routeVisibilityCandidates = new Set();
+    this.routeVisibilityOverflow = false;
     this.routeSettleTimers = new Set();
     this.routeDecisionWaiters = [];
     this.originalTitle = null;
@@ -519,7 +521,9 @@ export class PageSession {
     this.pendingMutationRoots.clear();
     this.pendingRecoveryElements.clear();
     this.routeVisibilityCandidates.clear();
+    this.routeVisibilityOverflow = false;
     this.mutationOverflow = false;
+    this.pendingMutationNeedsCleanup = false;
     const view = getView(this.document);
     if (this.scrollHandler) {
       view?.removeEventListener?.('scroll', this.scrollHandler);
@@ -599,9 +603,33 @@ export class PageSession {
       }
       this.pendingMutationRoots.add(root);
     };
-    let shouldScheduleRecovery = false;
     let hasRelevantMutation = false;
+    let needsFullRecovery = false;
+    let needsRecordCleanup = false;
     const targetedRecoveryElements = new Set();
+    const addTargetedRecovery = (element) => {
+      const record = this.renderer?.getRecordForElement?.(element);
+      if (record?.element) targetedRecoveryElements.add(record.element);
+    };
+    const addTargetedRecoveriesIn = (root) => {
+      if (!root?.matches || !root?.querySelectorAll) return;
+      if (root.matches(CANDIDATE_SELECTOR)) addTargetedRecovery(root);
+      for (const candidate of root.querySelectorAll(CANDIDATE_SELECTOR)) {
+        addTargetedRecovery(candidate);
+      }
+    };
+    const addRemovedTranslationRecovery = (node) => {
+      if (node?.nodeType !== 1) return;
+      const candidates = [];
+      if (node.matches?.(GENERATED_NODE_SELECTOR)) candidates.push(node);
+      candidates.push(...(node.querySelectorAll?.(GENERATED_NODE_SELECTOR) ?? []));
+      for (const candidate of candidates) {
+        const recoveredRecord = this.renderer?.getRecordForTranslation?.(candidate);
+        if (recoveredRecord?.element) targetedRecoveryElements.add(recoveredRecord.element);
+      }
+    };
+    const isGeneratedMutationNode = (node) =>
+      node?.nodeType === 1 && node.matches?.(GENERATED_NODE_SELECTOR);
     for (const record of records) {
       const mutationTarget = record.target?.nodeType === 1
         ? record.target
@@ -609,58 +637,57 @@ export class PageSession {
       if (mutationTarget?.closest?.('[data-translight-generated="true"]')) continue;
       if (record.type === 'childList') {
         const hasRelevantAddedNodes = Array.from(record.addedNodes ?? [])
-          .some((node) => !node.matches?.(GENERATED_NODE_SELECTOR));
+          .some((node) => !isGeneratedMutationNode(node));
         const hasRelevantRemovedNodes = Array.from(record.removedNodes ?? [])
-          .some((node) => !node.matches?.(GENERATED_NODE_SELECTOR));
+          .some((node) => !isGeneratedMutationNode(node));
         const hasGeneratedRemovedNodes = Array.from(record.removedNodes ?? [])
-          .some((node) => node.matches?.(GENERATED_NODE_SELECTOR));
-        if (!hasRelevantAddedNodes && !hasRelevantRemovedNodes) {
-          // A host removing a generated translation still needs recovery, but
-          // a generated-only insertion is produced by this session and does
-          // not justify scanning every live record. The same is true for the
-          // generated removal itself; recovery will restore that translation.
-          if (hasGeneratedRemovedNodes) {
-            shouldScheduleRecovery = true;
-            for (const node of record.removedNodes ?? []) {
-              if (!node.matches?.(GENERATED_NODE_SELECTOR)) continue;
-              const recoveredRecord = this.renderer?.getRecordForTranslation?.(node);
-              if (recoveredRecord?.element) targetedRecoveryElements.add(recoveredRecord.element);
-            }
-          }
-          continue;
+          .some((node) => isGeneratedMutationNode(node) ||
+            node?.querySelector?.(GENERATED_NODE_SELECTOR));
+        if (hasGeneratedRemovedNodes) {
+          for (const node of record.removedNodes ?? []) addRemovedTranslationRecovery(node);
         }
-        shouldScheduleRecovery = true;
+        if (!hasRelevantAddedNodes && !hasRelevantRemovedNodes) continue;
         hasRelevantMutation = true;
+        needsRecordCleanup ||= hasRelevantRemovedNodes;
+        const changedBlock = getClosestBlock(record.target);
+        addMutationRoot(changedBlock);
+        addTargetedRecovery(changedBlock);
+        for (const node of record.addedNodes ?? []) {
+          if (node?.nodeType !== 1 || isGeneratedMutationNode(node)) continue;
+          addMutationRoot(node);
+        }
+        continue;
       }
       if (record.type === 'characterData') {
-        shouldScheduleRecovery = true;
         hasRelevantMutation = true;
         const block = getClosestBlock(record.target);
         addMutationRoot(block);
+        addTargetedRecovery(block);
         continue;
       }
-      shouldScheduleRecovery = true;
       hasRelevantMutation = true;
       const changedBlock = getClosestBlock(record.target);
       addMutationRoot(changedBlock);
-      for (const node of record.addedNodes ?? []) {
-        if (node.nodeType !== 1) continue;
-        if (node.matches?.(GENERATED_NODE_SELECTOR)) continue;
-        addMutationRoot(node);
+      if (record.attributeName === 'lang') {
+        needsFullRecovery = true;
+      } else if (record.attributeName === 'hidden' || record.attributeName === 'aria-hidden') {
+        addTargetedRecoveriesIn(record.target);
+      } else {
+        addTargetedRecovery(changedBlock);
       }
     }
     if (hasRelevantMutation) this.queue?.invalidateLayout?.();
-    if (shouldScheduleRecovery) {
-      const recoveryElements = hasRelevantMutation ? null : targetedRecoveryElements;
-      if (recoveryElements === null || recoveryElements.size) {
-        this.scheduleTranslationRecovery(recoveryElements);
-      }
-    }
+    if (needsRecordCleanup) this.pendingMutationNeedsCleanup = true;
+    if (needsFullRecovery) this.scheduleTranslationRecovery();
+    else if (targetedRecoveryElements.size) this.scheduleTranslationRecovery(targetedRecoveryElements);
     // Generated-only records cannot disconnect a source or require a new
     // collection. Return before touching an already-debounced host mutation.
     if (!hasRelevantMutation) return;
     if (!this.pendingMutationRoots.size && !this.mutationOverflow) {
-      this.renderer?.pruneDisconnected?.();
+      if (this.pendingMutationNeedsCleanup) {
+        this.pendingMutationNeedsCleanup = false;
+        this.renderer?.pruneDisconnected?.();
+      }
       return;
     }
     if (this.mutationTimer != null) clearTimeout(this.mutationTimer);
@@ -669,13 +696,17 @@ export class PageSession {
       const roots = this.mutationOverflow
         ? [this.document.body ?? this.document.documentElement]
         : [...this.pendingMutationRoots];
+      const cleanupRecords = this.pendingMutationNeedsCleanup;
       this.pendingMutationRoots.clear();
       this.mutationOverflow = false;
+      this.pendingMutationNeedsCleanup = false;
       // Replacement modes can leave translated segments in unchanged inline
       // nodes while a site updates one sibling. Restore changed records before
       // collecting text so the provider receives the real source text.
-      this.renderer?.pruneDisconnected?.();
-      this.renderer?.restoreChangedSources?.();
+      if (cleanupRecords) {
+        this.renderer?.pruneDisconnected?.();
+        this.renderer?.restoreChangedSources?.();
+      }
       const blocks = [];
       const seen = new Set();
       for (const root of roots) {
@@ -700,7 +731,7 @@ export class PageSession {
         }
         else void this.enqueueBlocks(blocks);
       }
-      this.renderer?.pruneDisconnected?.();
+      if (cleanupRecords) this.renderer?.pruneDisconnected?.();
     }, MUTATION_DEBOUNCE_MS);
   }
 
@@ -721,6 +752,8 @@ export class PageSession {
     }
     if (this.routeVisibilityCandidates.size < MAX_ROUTE_VISIBILITY_CANDIDATES) {
       this.routeVisibilityCandidates.add(element);
+    } else {
+      this.routeVisibilityOverflow = true;
     }
   }
 
@@ -757,6 +790,7 @@ export class PageSession {
     this.pendingMutationRoots.clear();
     this.pendingRecoveryElements.clear();
     this.routeVisibilityCandidates.clear();
+    this.routeVisibilityOverflow = false;
     this.mutationOverflow = false;
     const retiredQueue = this.queue;
     retiredQueue?.cancel();
@@ -801,7 +835,9 @@ export class PageSession {
     const isFirstRescan = this.lastRouteRescanGeneration !== routeGeneration;
     const roots = isFirstRescan
       ? [this.document.body]
-      : [...this.routeVisibilityCandidates].filter((element) => element?.isConnected);
+      : this.routeVisibilityOverflow
+        ? [this.document.body]
+        : [...this.routeVisibilityCandidates].filter((element) => element?.isConnected);
     // The first settle pass covers the route. A later pass is retained only
     // for candidates that were hidden during that pass. This catches content
     // revealed by an unobserved class/style change without rescanning the
@@ -809,6 +845,7 @@ export class PageSession {
     if (!isFirstRescan && !roots.length) return;
     this.lastRouteRescanGeneration = routeGeneration;
     this.routeVisibilityCandidates.clear();
+    this.routeVisibilityOverflow = false;
     this.renderer?.pruneMissingTranslations?.();
     this.renderer?.pruneDisconnected?.();
     this.renderer?.restoreChangedSources?.();

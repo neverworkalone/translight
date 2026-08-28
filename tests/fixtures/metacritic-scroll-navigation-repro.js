@@ -23,6 +23,8 @@ const metrics = {
   mutationCallbacks: 0,
   pruneCalls: 0,
   pruneRecordVisits: 0,
+  recoveryScanCalls: 0,
+  recoveryStateVisits: 0,
   recoveryCalls: 0,
   rescanCalls: 0,
   queueEnqueueAllCalls: 0,
@@ -262,6 +264,16 @@ async function run() {
       metrics.pruneRecordVisits = (metrics.pruneRecordVisits ?? 0) + this.records.size;
       return originalPruneDisconnected.apply(this, args);
     };
+    const originalGetRecoveryState = session.renderer.getRecoveryState.bind(session.renderer);
+    session.renderer.getRecoveryState = function (...args) {
+      metrics.recoveryStateVisits += 1;
+      return originalGetRecoveryState(...args);
+    };
+    const originalGetMissingTranslations = session.renderer.getMissingTranslations;
+    session.renderer.getMissingTranslations = function (...args) {
+      metrics.recoveryScanCalls += 1;
+      return originalGetMissingTranslations.apply(this, args);
+    };
     const originalRecoverMissingTranslations = session.recoverMissingTranslations.bind(session);
     session.recoverMissingTranslations = (...args) => {
       metrics.recoveryCalls += 1;
@@ -352,7 +364,8 @@ async function run() {
       (session.queue?.pending.length ?? 0) === 0 &&
       (session.queue?.active ?? 0) === 0 &&
       providerActive === 0 &&
-      providerMaxActive <= PROVIDER_CONCURRENCY_BUDGET
+      providerMaxActive <= PROVIDER_CONCURRENCY_BUDGET &&
+      (!collectMetrics || metrics.recoveryScanCalls === 0)
   };
 
   session.stop({notify: false});
