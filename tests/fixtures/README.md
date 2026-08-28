@@ -5,6 +5,31 @@ README. Each fixture should keep its page and runner together, and each new bug
 should add a short section here with the URL, setup, scenarios, and expected
 result.
 
+## Metacritic Chrome automation runner
+
+The local runner launches a separate Chrome user-data directory with the built
+Translight extension loaded, drives the browser through the Chrome DevTools
+Protocol, samples Chrome processes and page translation state, and writes a
+JSON report plus a Chrome trace under `artifacts/metacritic-chrome/`.
+
+It requires Chromium or Chrome for Testing. The official Google Chrome app
+ignores the command-line switches used to load an unpacked extension, so the
+runner reports `validation blocked` instead of silently measuring a browser
+without Translight.
+
+Build the extension and run the gallery scroll scenario with:
+
+```bash
+npm run test:metacritic:chrome
+```
+
+Use `--scenario=navigation` for the homepage → Latest News → New and Notable
+→ back flow, `--cycles=5` for more repetitions, or `--skip-translation` to
+smoke-test browser control without requiring Chrome's Translator model. The
+runner auto-detects Chrome for Testing or Chromium; pass
+`--chrome=/path/to/browser` when it is installed elsewhere. A temporary Chrome
+profile is removed after the run unless `--keep-profile` is supplied.
+
 ## Guardian card translation placement
 
 Fixture: `guardian-translation-placement-repro.html` and

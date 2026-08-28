@@ -13,6 +13,7 @@
     "package": "bash pack.sh --minify",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:metacritic:chrome": "node tests/fixtures/metacritic-chrome-runner.mjs",
     "check": "npm run test && npm run build"
   },
   "dependencies": {
@@ -22,6 +23,7 @@
     "@vitejs/plugin-vue": "^6.0.8",
     "jsdom": "^25.0.1",
     "vite": "^8.2.2",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.11",
+    "ws": "^8.21.3"
   }
 }
