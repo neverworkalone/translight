@@ -849,6 +849,51 @@ describe('TranslationRenderer', () => {
     expect(sourceComparisons).toBe(0);
   });
 
+  it('keeps incremental external grid insertion within the order-index budget', () => {
+    const measureIncrementalOrderWork = (sourceCount, sessionId) => {
+      document.body.innerHTML = '';
+      const host = document.createElement('div');
+      const layout = document.createElement('div');
+      layout.style.display = 'grid';
+      layout.style.gridTemplateColumns = '100px 100px';
+      layout.style.gridTemplateRows = Array(Math.ceil(sourceCount / 2)).fill('20px').join(' ');
+      host.appendChild(layout);
+      document.body.appendChild(host);
+
+      let sourceComparisons = 0;
+      const nodePrototype = document.defaultView.Node.prototype;
+      const originalCompareDocumentPosition = nodePrototype.compareDocumentPosition;
+      nodePrototype.compareDocumentPosition = function(other) {
+        if (this.parentNode === layout && other?.parentNode === layout) sourceComparisons += 1;
+        return originalCompareDocumentPosition.call(this, other);
+      };
+      const renderer = new TranslationRenderer({document, sessionId});
+      try {
+        for (let index = 0; index < sourceCount; index += 1) {
+          const source = document.createElement('div');
+          source.style.display = 'flex';
+          source.textContent = `Item ${index}`;
+          layout.appendChild(source);
+          renderer.insert({
+            element: source,
+            sourceId: `${sessionId}-${index}`,
+            translatedText: `T${index}`
+          });
+        }
+      } finally {
+        nodePrototype.compareDocumentPosition = originalCompareDocumentPosition;
+        renderer.removeAll();
+      }
+      return sourceComparisons;
+    };
+    const budget = (sourceCount) => sourceCount * Math.ceil(Math.log2(sourceCount + 1)) * 5;
+    const small = measureIncrementalOrderWork(250, 'incremental-grid-order-250');
+    const large = measureIncrementalOrderWork(500, 'incremental-grid-order-500');
+
+    expect(small).toBeLessThan(budget(250));
+    expect(large).toBeLessThan(budget(500));
+  });
+
   it('bounds external grid ordering work without scanning the host children', () => {
     const measureExternalOrderWork = (sourceCount, sessionId) => {
       document.body.innerHTML = '';
