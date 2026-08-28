@@ -73,6 +73,52 @@ function runTailOrderCase(insertionOrder, sessionId, update = false) {
   return {order, restored};
 }
 
+function runMovedOrderCase(removeMovedSource, sessionId) {
+  const host = document.createElement('div');
+  const layout = document.createElement('div');
+  layout.style.display = 'grid';
+  layout.style.gridTemplateColumns = '100px';
+  layout.style.gridTemplateRows = '20px 20px 20px 20px';
+  const sources = {};
+  for (const id of ['A', 'B', 'C']) {
+    const source = document.createElement('div');
+    source.style.display = 'flex';
+    source.textContent = id;
+    layout.appendChild(source);
+    sources[id] = source;
+  }
+  host.appendChild(layout);
+  const following = document.createElement('p');
+  following.textContent = 'Following content';
+  host.appendChild(following);
+  document.body.appendChild(host);
+
+  const renderer = new TranslationRenderer({document, sessionId});
+  for (const id of ['A', 'B', 'C']) {
+    renderer.insert({element: sources[id], sourceId: id, translatedText: id});
+  }
+  layout.appendChild(sources.A);
+  if (removeMovedSource) {
+    renderer.remove(sources.A);
+  } else {
+    renderer.insert({element: sources.A, sourceId: 'A', translatedText: 'A updated'});
+  }
+  const sourceX = document.createElement('div');
+  sourceX.style.display = 'flex';
+  sourceX.textContent = 'X';
+  layout.insertBefore(sourceX, sources.B);
+  renderer.insert({element: sourceX, sourceId: 'X', translatedText: 'X'});
+
+  const order = [...host.children]
+    .filter((child) => child.matches('translight-translation'))
+    .map((child) => child.textContent);
+  const sourceOrder = [...layout.children].map((child) => child.textContent);
+  renderer.removeAll();
+  const restored = host.children.length === 2 && !host.querySelector('translight-translation');
+  host.remove();
+  return {order, sourceOrder, restored};
+}
+
 function run() {
   const multiRenderer = new TranslationRenderer({document, sessionId: 'grid-safety-multi'});
   const multiSource = document.querySelector('#multi-row-source');
@@ -137,6 +183,10 @@ function run() {
     reverse: runTailOrderCase([2, 1, 0], 'grid-safety-tail-reverse'),
     asyncUpdate: runTailOrderCase([2, 0, 1], 'grid-safety-tail-async-update', true)
   };
+  const movedOrder = {
+    update: runMovedOrderCase(false, 'grid-safety-moved-update'),
+    remove: runMovedOrderCase(true, 'grid-safety-moved-remove')
+  };
 
   const multiSourceRect = rect(multiSource);
   const multiTranslationRect = rect(multiTranslation);
@@ -193,7 +243,8 @@ function run() {
       hostLayoutSafe: !overlaps(transitionAfterTranslation, transitionAfter.source) &&
         !overlaps(transitionAfterTranslation, transitionAfter.control)
     },
-    tailOrder
+    tailOrder,
+    movedOrder
   };
 
   const passed = result.twoRowGrid.placement === 'grid-layout-external' &&
@@ -220,7 +271,13 @@ function run() {
     Object.entries(result.tailOrder).every(([name, {order, restored}]) => {
       const expected = name === 'asyncUpdate' ? 'T0 updated|T1|T2' : 'T0|T1|T2';
       return restored && order.join('|') === expected;
-    });
+    }) &&
+    result.movedOrder.update.restored &&
+    result.movedOrder.update.order.join('|') === 'X|B|C|A updated' &&
+    result.movedOrder.update.sourceOrder.join('|') === 'X|B|C|A' &&
+    result.movedOrder.remove.restored &&
+    result.movedOrder.remove.order.join('|') === 'X|B|C' &&
+    result.movedOrder.remove.sourceOrder.join('|') === 'X|B|C|A';
 
   multiRenderer.removeAll();
   clippedRenderer.removeAll();

@@ -57,6 +57,7 @@ const gridLayoutReservations = new WeakMap();
 const gridLayoutSafetyCache = new WeakMap();
 const gridLayoutExternalSources = new WeakMap();
 const gridLayoutExternalGroups = new WeakMap();
+const gridLayoutExternalObservers = new WeakMap();
 const GRID_LAYOUT_SAFETY_STYLE_PROPERTIES = [
   'grid-template-columns',
   'grid-template-rows',
@@ -611,7 +612,9 @@ function createGridExternalGroup(host, gridParent, anchor, beforeAnchor) {
     anchor,
     beforeAnchor,
     root: null,
-    nodes: new Map()
+    nodes: new Map(),
+    orderDirty: false,
+    observerEntry: null
   };
 }
 
@@ -638,12 +641,48 @@ function getGridExternalGroup(host, gridParent, anchor, beforeAnchor, {create = 
   const key = beforeAnchor ? 'before' : 'after';
   if (!groupPair[key] && create) {
     groupPair[key] = createGridExternalGroup(host, gridParent, anchor, beforeAnchor);
+    observeGridExternalGroup(groupPair[key]);
+  } else if (groupPair[key] && !groupPair[key].observerEntry) {
+    observeGridExternalGroup(groupPair[key]);
   }
   return groupPair[key] ?? null;
 }
 
+function observeGridExternalGroup(group) {
+  if (!group?.gridParent || group.observerEntry) return;
+  const MutationObserverClass = group.gridParent.ownerDocument?.defaultView?.MutationObserver ??
+    globalThis.MutationObserver;
+  if (typeof MutationObserverClass !== 'function') return;
+  let entry = gridLayoutExternalObservers.get(group.gridParent);
+  if (!entry) {
+    entry = {groups: new Set(), observer: null};
+    entry.observer = new MutationObserverClass(() => {
+      for (const observedGroup of entry.groups) {
+        observedGroup.orderDirty = true;
+        reconcileGridExternalGroupOrder(observedGroup);
+      }
+    });
+    entry.observer.observe(group.gridParent, {childList: true});
+    gridLayoutExternalObservers.set(group.gridParent, entry);
+  }
+  entry.groups.add(group);
+  group.observerEntry = entry;
+}
+
+function unobserveGridExternalGroup(group) {
+  const entry = group?.observerEntry;
+  if (!entry) return;
+  entry.groups.delete(group);
+  if (!entry.groups.size) {
+    entry.observer.disconnect();
+    gridLayoutExternalObservers.delete(group.gridParent);
+  }
+  group.observerEntry = null;
+}
+
 function releaseGridExternalGroup(group) {
   if (!group?.host || group.nodes.size) return;
+  unobserveGridExternalGroup(group);
   const groupsByAnchor = gridLayoutExternalGroups.get(group.host);
   const groupsByGridParent = groupsByAnchor?.get(group.anchor);
   const groupPair = groupsByGridParent?.get(group.gridParent);
@@ -677,6 +716,47 @@ function updateGridExternalNodeHeight(node) {
     );
   }
   return node;
+}
+
+function rebuildGridExternalGroupOrder(group) {
+  if (!group?.orderDirty) return;
+  let root = null;
+  for (const [source, node] of group.nodes) {
+    node.left = null;
+    node.right = null;
+    node.height = 1;
+    if (source?.parentNode !== group.gridParent) continue;
+    root = insertGridExternalNode(root, node);
+  }
+  group.root = root;
+  group.orderDirty = false;
+}
+
+function forEachGridExternalNode(root, callback) {
+  if (!root) return;
+  forEachGridExternalNode(root.left, callback);
+  callback(root);
+  forEachGridExternalNode(root.right, callback);
+}
+
+function reconcileGridExternalGroupOrder(group) {
+  rebuildGridExternalGroupOrder(group);
+  const {host, anchor} = group ?? {};
+  if (!host || anchor?.parentNode !== host) return;
+  let reference = group.beforeAnchor ? anchor : anchor.nextSibling;
+  forEachGridExternalNode(group.root, (node) => {
+    if (node.translation !== reference) host.insertBefore(node.translation, reference ?? null);
+    reference = node.translation.nextSibling;
+  });
+}
+
+function consumeGridExternalOrderChanges(group) {
+  const entry = group?.observerEntry;
+  if (entry?.observer?.takeRecords?.().length) {
+    for (const observedGroup of entry.groups) observedGroup.orderDirty = true;
+  }
+  if (!group?.orderDirty) return;
+  reconcileGridExternalGroupOrder(group);
 }
 
 function rotateGridExternalLeft(node) {
@@ -792,6 +872,7 @@ function removeGridLayoutExternalTranslation(translation) {
   const metadata = gridLayoutExternalSources.get(translation);
   if (!metadata) return false;
   const {group, source} = metadata;
+  consumeGridExternalOrderChanges(group);
   const node = group?.nodes.get(source);
   if (node) {
     group.root = source.parentNode === group.gridParent
@@ -816,6 +897,7 @@ function insertGridLayoutExternalTranslation({
   removeGridLayoutExternalTranslation(translation);
   const group = getGridExternalGroup(host, gridParent, anchor, beforeAnchor);
   if (!group) return false;
+  consumeGridExternalOrderChanges(group);
   const {predecessor, successor} = getGridExternalNeighbors(group.root, source);
   const insertionReference = beforeAnchor
     ? successor?.translation ?? anchor

@@ -674,6 +674,68 @@ describe('TranslationRenderer', () => {
       .toEqual(['T0 updated', 'T1', 'T2']);
   });
 
+  it('rebuilds external grid order after source moves and updates', () => {
+    const run = ({removeMovedSource = false, sessionId}) => {
+      document.body.innerHTML = '';
+      const host = document.createElement('div');
+      const layout = document.createElement('div');
+      layout.style.display = 'grid';
+      layout.style.gridTemplateColumns = '100px';
+      layout.style.gridTemplateRows = '20px 20px 20px 20px';
+      const sources = {};
+      for (const id of ['A', 'B', 'C']) {
+        const source = document.createElement('div');
+        source.id = `moved-source-${id}`;
+        source.style.display = 'flex';
+        source.textContent = id;
+        layout.appendChild(source);
+        sources[id] = source;
+      }
+      host.appendChild(layout);
+      const following = document.createElement('p');
+      following.textContent = 'Following content';
+      host.appendChild(following);
+      document.body.appendChild(host);
+
+      const renderer = new TranslationRenderer({document, sessionId});
+      for (const id of ['A', 'B', 'C']) {
+        renderer.insert({element: sources[id], sourceId: id, translatedText: id});
+      }
+
+      layout.appendChild(sources.A);
+      if (removeMovedSource) {
+        renderer.remove(sources.A);
+      } else {
+        renderer.insert({element: sources.A, sourceId: 'A', translatedText: 'A updated'});
+      }
+
+      const sourceX = document.createElement('div');
+      sourceX.style.display = 'flex';
+      sourceX.textContent = 'X';
+      layout.insertBefore(sourceX, sources.B);
+      expect(() => renderer.insert({element: sourceX, sourceId: 'X', translatedText: 'X'}))
+        .not.toThrow();
+
+      const translationOrder = Array.from(host.children)
+        .filter((child) => child.matches('translight-translation'))
+        .map((child) => child.textContent);
+      const sourceOrder = Array.from(layout.children).map((child) => child.textContent);
+      renderer.removeAll();
+      return {translationOrder, sourceOrder, hostChildCount: host.children.length};
+    };
+
+    expect(run({sessionId: 'moved-grid-update'})).toEqual({
+      translationOrder: ['X', 'B', 'C', 'A updated'],
+      sourceOrder: ['X', 'B', 'C', 'A'],
+      hostChildCount: 2
+    });
+    expect(run({removeMovedSource: true, sessionId: 'moved-grid-remove'})).toEqual({
+      translationOrder: ['X', 'B', 'C'],
+      sourceOrder: ['X', 'B', 'C', 'A'],
+      hostChildCount: 2
+    });
+  });
+
   it('bounds external grid ordering work without scanning the host children', () => {
     const measureExternalOrderWork = (sourceCount, sessionId) => {
       document.body.innerHTML = '';
