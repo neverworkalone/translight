@@ -67,8 +67,13 @@ export function installContentController({
   });
   controller.pageLifecycleHandler = (event) => {
     // A history back/forward can restore this document from the back-forward
-    // cache. Keep its live session and translated DOM intact until pageshow.
-    if (event?.persisted) return;
+    // cache. Keep its live session and translated DOM intact until pageshow,
+    // but stop starting more provider work while this document is hidden.
+    if (event?.persisted) {
+      controller.stopNavigationWatcher();
+      controller.currentSession?.pause?.();
+      return;
+    }
     if (controller.navigationTimer != null) {
       const clearInterval = controller.navigationView?.clearInterval ?? globalThis.clearInterval;
       clearInterval?.(controller.navigationTimer);
@@ -80,6 +85,7 @@ export function installContentController({
   controller.pageShowHandler = (event) => {
     if (!event?.persisted) return;
     const session = controller.currentSession;
+    session?.resume?.();
     if (session) controller.startNavigationWatcher(session);
     sendRuntimeMessage(runtime, {
       type: 'CONTENT_READY',

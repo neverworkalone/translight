@@ -11,6 +11,7 @@ const DEFAULT_CONCURRENCY = 3;
 const MUTATION_DEBOUNCE_MS = 100;
 const RECOVERY_STABILIZATION_MS = 350;
 const MAX_MUTATION_ROOTS = 64;
+const MAX_ROUTE_VISIBILITY_CANDIDATES = 128;
 const BLOCK_SELECTOR = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,figcaption,div,section,td,th';
 const CANDIDATE_SELECTOR = `${BLOCK_SELECTOR},${SEGMENT_SELECTOR}`;
 const GENERATED_NODE_SELECTOR = '[data-translight-generated="true"]';
@@ -32,23 +33,6 @@ function getClosestBlock(node) {
   if (!node) return null;
   if (node.nodeType === 1 && node.matches?.(CANDIDATE_SELECTOR)) return node;
   return node.parentElement?.closest?.(CANDIDATE_SELECTOR) ?? null;
-}
-
-function isTranslightOwnedNode(node) {
-  const element = node?.nodeType === 1 ? node : node?.parentElement;
-  return Boolean(element?.matches?.(`${GENERATED_NODE_SELECTOR},${SEGMENT_SELECTOR}`) ||
-    element?.closest?.(`${GENERATED_NODE_SELECTOR},${SEGMENT_SELECTOR}`));
-}
-
-function hasRouteRelevantMutation(records) {
-  return Array.from(records ?? []).some((record) => {
-    if (record.type === 'characterData') return !isTranslightOwnedNode(record.target);
-    if (record.type === 'attributes') return !isTranslightOwnedNode(record.target);
-    if (record.type !== 'childList') return false;
-    if (isTranslightOwnedNode(record.target)) return false;
-    return Array.from(record.addedNodes ?? []).some((node) => !isTranslightOwnedNode(node)) ||
-      Array.from(record.removedNodes ?? []).some((node) => !isTranslightOwnedNode(node));
-  });
 }
 
 export class PageSession {
@@ -87,6 +71,7 @@ export class PageSession {
     this.sessionId = `session-${generation}-${Date.now()}-${++sessionSequence}`;
     this.renderer = null;
     this.queue = null;
+    this.retiredQueues = new Set();
     this.observer = null;
     this.titleObserver = null;
     this.mutationTimer = null;
@@ -100,9 +85,8 @@ export class PageSession {
     this.routeGeneration = Number.isInteger(initialRouteGeneration) ? initialRouteGeneration : 0;
     this.routeDecisionPending = false;
     this.routeMutationSeen = false;
-    this.routeMutationVersion = 0;
     this.lastRouteRescanGeneration = null;
-    this.lastRouteRescanVersion = -1;
+    this.routeVisibilityCandidates = new Set();
     this.routeSettleTimers = new Set();
     this.routeDecisionWaiters = [];
     this.originalTitle = null;
@@ -110,6 +94,7 @@ export class PageSession {
     this.titleRequest = 0;
     this.updatingTitle = false;
     this.providerReady = false;
+    this.paused = false;
     this.running = false;
     this.watchOnly = false;
     this.status = null;
@@ -118,6 +103,20 @@ export class PageSession {
     this.translatedCount = 0;
     this.failedCount = 0;
     this.firstError = null;
+  }
+
+  pause() {
+    if (!this.running || this.paused) return;
+    this.paused = true;
+    if (this.priorityTimer != null) clearTimeout(this.priorityTimer);
+    this.priorityTimer = null;
+    this.queue?.pause?.();
+  }
+
+  resume() {
+    if (!this.running || !this.paused) return;
+    this.paused = false;
+    this.queue?.resume?.();
   }
 
   isCurrent() {
@@ -169,6 +168,7 @@ export class PageSession {
 
   stop({notify = true} = {}) {
     const wasRunning = this.running;
+    this.paused = false;
     this.running = false;
     this.watchOnly = false;
     this.routeDecisionPending = false;
@@ -176,7 +176,9 @@ export class PageSession {
     this.clearRouteSettleTimers();
     this.resolveRouteDecisionWaiters();
     this.controller?.abort();
-    this.queue?.cancel();
+    const retiredQueue = this.queue;
+    retiredQueue?.cancel();
+    this.retireQueue(retiredQueue);
     this.queue = null;
     this.disconnectObservers();
     this.provider.cancel?.();
@@ -321,8 +323,9 @@ export class PageSession {
     this.translatedCount = 0;
     this.failedCount = 0;
     this.firstError = null;
-    this.queue = new TranslationQueue({
-      translate: (text, options) => this.provider.translate(text, options),
+    let queue;
+    queue = new TranslationQueue({
+      translate: (text, options) => this.translateThroughQueue(text, options),
       concurrency: this.concurrency,
       cache: this.translationCache,
       document: this.document,
@@ -337,6 +340,9 @@ export class PageSession {
             !this.renderer?.isSourceHashCurrent?.(block)) return;
         const translation = this.renderer?.insert({...block, translatedText});
         if (translation) {
+          // Generated translations are block-level content in the default
+          // presentation and can move every pending source below them.
+          this.queue?.invalidateLayout?.();
           this.segmentWrappers.delete(block.element);
           this.translatedCount += 1;
         }
@@ -348,6 +354,64 @@ export class PageSession {
         this.failedCount += 1;
       }
     });
+    this.queue = queue;
+    if (this.paused) this.queue.pause();
+  }
+
+  retireQueue(queue) {
+    if (!queue) return;
+    // Chrome's Translator API does not expose per-request cancellation. Keep
+    // a canceled queue until its provider promises settle so a new route
+    // cannot build another native translation backlog on top of it.
+    this.retiredQueues.add(queue);
+    void queue.whenSettled().then(() => this.retiredQueues.delete(queue));
+  }
+
+  waitForSignalOrSettled(promise, signal) {
+    if (!signal?.addEventListener) return promise;
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const cleanup = () => signal.removeEventListener('abort', onAbort);
+      const onAbort = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(new TranslationCancelledError());
+      };
+      signal.addEventListener('abort', onAbort, {once: true});
+      if (signal.aborted) {
+        onAbort();
+        return;
+      }
+      promise.then((value) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(value);
+      }, (error) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(error);
+      });
+    });
+  }
+
+  async translateThroughQueue(text, {signal, queue} = {}) {
+    if (queue?.cancelled || signal?.aborted || !this.isCurrent()) {
+      throw new TranslationCancelledError();
+    }
+    const retiredQueues = [...this.retiredQueues].filter((candidate) => candidate !== queue);
+    if (retiredQueues.length) {
+      await this.waitForSignalOrSettled(
+        Promise.all(retiredQueues.map((candidate) => candidate.whenSettled())),
+        signal
+      );
+    }
+    if (queue?.cancelled || signal?.aborted || !this.isCurrent()) {
+      throw new TranslationCancelledError();
+    }
+    return this.provider.translate(text, {signal});
   }
 
   async translateBlocks(blocks, signal) {
@@ -396,13 +460,15 @@ export class PageSession {
     }
 
     this.scrollHandler = () => {
-      if (this.priorityTimer != null) return;
+      if (this.paused) return;
+      if (this.priorityTimer != null) clearTimeout(this.priorityTimer);
       this.priorityTimer = setTimeout(() => {
         this.priorityTimer = null;
         this.queue?.reprioritize();
-      }, 50);
+      }, 100);
     };
     this.resizeHandler = () => {
+      this.queue?.invalidateLayout?.();
       this.renderer?.scheduleLayoutSync?.();
       this.scrollHandler?.();
     };
@@ -425,7 +491,6 @@ export class PageSession {
       if (routeChanged || this.routeDecisionPending) {
         if (this.routeDecisionPending) {
           this.routeMutationSeen = true;
-          this.routeMutationVersion += 1;
         }
         return;
       }
@@ -453,6 +518,7 @@ export class PageSession {
     this.priorityTimer = null;
     this.pendingMutationRoots.clear();
     this.pendingRecoveryElements.clear();
+    this.routeVisibilityCandidates.clear();
     this.mutationOverflow = false;
     const view = getView(this.document);
     if (this.scrollHandler) {
@@ -465,9 +531,9 @@ export class PageSession {
     this.resizeHandler = null;
   }
 
-  scheduleTranslationRecovery() {
+  scheduleTranslationRecovery(elements = null) {
     if (!this.isCurrent() || this.routeDecisionPending || !this.renderer) return;
-    const missing = this.renderer.getMissingTranslations?.({
+    const missing = elements ?? this.renderer.getMissingTranslations?.({
       targetLanguage: this.settings.targetLanguage
     }) ?? [];
     for (const element of missing) this.pendingRecoveryElements.add(element);
@@ -487,6 +553,7 @@ export class PageSession {
       elements,
       targetLanguage: this.settings.targetLanguage
     }) ?? {restored: [], invalid: []};
+    if (result.restored?.length) this.queue?.invalidateLayout?.();
     const roots = new Set();
     for (const element of result.invalid ?? []) {
       const root = element?.parentElement;
@@ -511,8 +578,7 @@ export class PageSession {
   }
 
   handleMutations(records) {
-    if (!this.isCurrent()) return;
-    if (hasRouteRelevantMutation(records)) this.routeMutationVersion += 1;
+    if (!this.isCurrent() || this.paused) return;
     const routeChanged = this.onDomMutation?.();
     if (routeChanged || this.routeDecisionPending) {
       if (this.routeDecisionPending) this.routeMutationSeen = true;
@@ -535,6 +601,7 @@ export class PageSession {
     };
     let shouldScheduleRecovery = false;
     let hasRelevantMutation = false;
+    const targetedRecoveryElements = new Set();
     for (const record of records) {
       const mutationTarget = record.target?.nodeType === 1
         ? record.target
@@ -552,7 +619,14 @@ export class PageSession {
           // a generated-only insertion is produced by this session and does
           // not justify scanning every live record. The same is true for the
           // generated removal itself; recovery will restore that translation.
-          shouldScheduleRecovery ||= hasGeneratedRemovedNodes;
+          if (hasGeneratedRemovedNodes) {
+            shouldScheduleRecovery = true;
+            for (const node of record.removedNodes ?? []) {
+              if (!node.matches?.(GENERATED_NODE_SELECTOR)) continue;
+              const recoveredRecord = this.renderer?.getRecordForTranslation?.(node);
+              if (recoveredRecord?.element) targetedRecoveryElements.add(recoveredRecord.element);
+            }
+          }
           continue;
         }
         shouldScheduleRecovery = true;
@@ -575,7 +649,13 @@ export class PageSession {
         addMutationRoot(node);
       }
     }
-    if (shouldScheduleRecovery) this.scheduleTranslationRecovery();
+    if (hasRelevantMutation) this.queue?.invalidateLayout?.();
+    if (shouldScheduleRecovery) {
+      const recoveryElements = hasRelevantMutation ? null : targetedRecoveryElements;
+      if (recoveryElements === null || recoveryElements.size) {
+        this.scheduleTranslationRecovery(recoveryElements);
+      }
+    }
     // Generated-only records cannot disconnect a source or require a new
     // collection. Return before touching an already-debounced host mutation.
     if (!hasRelevantMutation) return;
@@ -629,6 +709,21 @@ export class PageSession {
     this.routeSettleTimers.clear();
   }
 
+  rememberRouteVisibilityCandidate(element) {
+    if (!element?.isConnected || this.routeVisibilityCandidates.has(element)) return;
+    for (const candidate of this.routeVisibilityCandidates) {
+      if (!candidate?.isConnected) {
+        this.routeVisibilityCandidates.delete(candidate);
+        continue;
+      }
+      if (candidate.contains?.(element)) return;
+      if (element.contains?.(candidate)) this.routeVisibilityCandidates.delete(candidate);
+    }
+    if (this.routeVisibilityCandidates.size < MAX_ROUTE_VISIBILITY_CANDIDATES) {
+      this.routeVisibilityCandidates.add(element);
+    }
+  }
+
   resolveRouteDecisionWaiters() {
     for (const resolve of this.routeDecisionWaiters.splice(0)) resolve();
   }
@@ -661,8 +756,11 @@ export class PageSession {
     this.recoveryTimer = null;
     this.pendingMutationRoots.clear();
     this.pendingRecoveryElements.clear();
+    this.routeVisibilityCandidates.clear();
     this.mutationOverflow = false;
-    this.queue?.cancel();
+    const retiredQueue = this.queue;
+    retiredQueue?.cancel();
+    this.retireQueue(retiredQueue);
     this.queue = null;
     if (this.queue || this.providerReady) this.provider.cancel?.();
     this.restoreTitle();
@@ -700,18 +798,34 @@ export class PageSession {
 
   rescanRoute(routeGeneration) {
     if (!this.isCurrent() || this.routeDecisionPending || routeGeneration !== this.routeGeneration) return;
-    if (this.lastRouteRescanGeneration === routeGeneration &&
-        this.lastRouteRescanVersion === this.routeMutationVersion) return;
+    const isFirstRescan = this.lastRouteRescanGeneration !== routeGeneration;
+    const roots = isFirstRescan
+      ? [this.document.body]
+      : [...this.routeVisibilityCandidates].filter((element) => element?.isConnected);
+    // The first settle pass covers the route. A later pass is retained only
+    // for candidates that were hidden during that pass. This catches content
+    // revealed by an unobserved class/style change without rescanning the
+    // entire document on every back/forward settle timer.
+    if (!isFirstRescan && !roots.length) return;
     this.lastRouteRescanGeneration = routeGeneration;
-    this.lastRouteRescanVersion = this.routeMutationVersion;
+    this.routeVisibilityCandidates.clear();
     this.renderer?.pruneMissingTranslations?.();
     this.renderer?.pruneDisconnected?.();
     this.renderer?.restoreChangedSources?.();
     const shouldTranslateTitle = this.settings.translatePageTitle || this.legacyTranslatePageTitle;
-    const blocks = this.collectBlocks(this.document.body, {
-      targetLanguage: this.settings.targetLanguage,
-      onExcluded: (element) => this.renderer?.remove(element)
-    });
+    const blocks = [];
+    const seen = new Set();
+    for (const root of roots) {
+      for (const block of this.collectBlocks(root, {
+        targetLanguage: this.settings.targetLanguage,
+        onExcluded: (element) => this.renderer?.remove(element),
+        onHidden: (element) => this.rememberRouteVisibilityCandidate(element)
+      })) {
+        if (seen.has(block.element)) continue;
+        seen.add(block.element);
+        blocks.push(block);
+      }
+    }
     const hasTranslatableTitle = shouldTranslateTitle &&
       isTranslatableTitle(this.document, this.settings.targetLanguage);
     if (!blocks.length && !hasTranslatableTitle) return;

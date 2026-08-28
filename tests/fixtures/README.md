@@ -457,7 +457,14 @@ homepage. Each restored route must retain exactly one translation per source,
 and stopping the session must clean up every generated node.
 
 The repaired case must report `latestNewsTranslated >= 8`,
-`testPassed: true`, and `restoredAfterStop: true`.
+`interactionRectCalls <= 5000`, no disconnected renderer records, an empty
+queue after each route completes, `testPassed: true`, and
+`restoredAfterStop: true`. Add `?metrics=1` to inspect collect/mutation,
+prune/recovery, queue-sort, and record-lifetime counters; add `?stacks=1` to
+attribute rectangle reads to production call sites. Add
+`&providerDelay=12` to keep retired route calls in flight long enough to
+exercise the provider-overlap budget; `providerMaxActive` must remain at most
+the queue concurrency budget.
 
 When adding another browser regression, use a descriptive `<bug-name>-repro`
 fixture name and document its reproducible URL and pass/fail signal in this

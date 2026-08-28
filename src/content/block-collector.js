@@ -587,7 +587,7 @@ function hasNonSegmentBlockDescendant(element, candidateSet) {
 
 export function collectTranslationBlocks(
   root = globalThis.document?.body,
-  {targetLanguage = 'ko', onExcluded, splitSegments = true, isActiveSource} = {}
+  {targetLanguage = 'ko', onExcluded, onHidden, splitSegments = true, isActiveSource} = {}
 ) {
   if (!root || typeof root.querySelectorAll !== 'function') return [];
 
@@ -607,7 +607,10 @@ export function collectTranslationBlocks(
     const excludeExisting = () => {
       if (isExistingSource) onExcluded?.(element);
     };
-    if (isHidden(element) && !isExistingSource) return;
+    if (isHidden(element) && !isExistingSource) {
+      onHidden?.(element);
+      return;
+    }
     const hasSegmentDescendant = Boolean(element.querySelector(SEGMENT_SELECTOR));
     if (!isExistingSource && hasSegmentDescendant && !hasNonSegmentBlockDescendant(element, candidateSet)) return;
     const hasNestedBlocks = hasBlockDescendant(element, candidateSet);

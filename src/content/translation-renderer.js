@@ -2227,6 +2227,13 @@ export class TranslationRenderer {
     return Boolean(element && this.recordsByElement.has(element));
   }
 
+  getRecordForTranslation(element) {
+    if (!element?.matches?.(TRANSLATION_TAG)) return null;
+    const sourceId = element.getAttribute(SOURCE_ATTRIBUTE);
+    const record = sourceId ? this.records.get(sourceId) : null;
+    return record?.translation === element ? record : null;
+  }
+
   resetRecoveryAttempts() {
     for (const record of this.records.values()) record.recoveryAttempts = 0;
   }

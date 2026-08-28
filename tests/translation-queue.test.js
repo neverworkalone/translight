@@ -64,6 +64,51 @@ describe('TranslationQueue', () => {
     expect(results).toEqual([]);
   });
 
+  it('detaches its session abort listener when a route cancels the queue', () => {
+    const listeners = new Set();
+    const signal = {
+      addEventListener: (_type, listener) => listeners.add(listener),
+      removeEventListener: (_type, listener) => listeners.delete(listener)
+    };
+    const cache = new Map([['shared', 'cached']]);
+    const queue = new TranslationQueue({signal, cache});
+
+    expect(listeners).toHaveLength(1);
+    queue.cancel();
+
+    expect(listeners).toHaveLength(0);
+    expect(cache).toEqual(new Map([['shared', 'cached']]));
+  });
+
+  it('pauses pending work without dropping it until the document is visible again', async () => {
+    let resolveActive;
+    const calls = [];
+    const queue = new TranslationQueue({
+      concurrency: 1,
+      translate: (text) => {
+        calls.push(text);
+        if (text === 'active') return new Promise((resolve) => { resolveActive = resolve; });
+        return Promise.resolve(`ko:${text}`);
+      }
+    });
+    const idle = queue.enqueue([
+      block('active', 'active', {top: 0, bottom: 20, left: 0, right: 100}),
+      block('pending', 'pending', {top: 30, bottom: 50, left: 0, right: 100})
+    ]);
+
+    queue.pause();
+    resolveActive('ko:active');
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(calls).toEqual(['active']);
+    expect(queue.pending).toHaveLength(1);
+
+    queue.resume();
+    await idle;
+    expect(calls).toEqual(['active', 'pending']);
+    queue.cancel();
+  });
+
   it('does not permanently lose blocks beyond the pending limit', async () => {
     let resolveActive;
     const rectState = new Map();
@@ -118,10 +163,19 @@ describe('TranslationQueue', () => {
 
   it('re-evaluates pending priority when the viewport changes', async () => {
     let resolveActive;
-    let viewport = {innerHeight: 800, innerWidth: 1000};
+    const viewport = {innerHeight: 800, innerWidth: 1000, scrollY: 0};
+    const documentRect = (top) => () => ({
+      top: top - viewport.scrollY,
+      bottom: top + 50 - viewport.scrollY,
+      left: 0,
+      right: 100
+    });
     const far = block('far', 'far', {top: 2200, bottom: 2250, left: 0, right: 100});
+    far.element.getBoundingClientRect = documentRect(2200);
     const visibleAfterScroll = block('after-scroll', 'after-scroll', {top: 2200, bottom: 2250, left: 0, right: 100});
-    const stillFar = block('still-far', 'still-far', {top: 2400, bottom: 2450, left: 0, right: 100});
+    visibleAfterScroll.element.getBoundingClientRect = documentRect(2200);
+    const stillFar = block('still-far', 'still-far', {top: 4400, bottom: 4450, left: 0, right: 100});
+    stillFar.element.getBoundingClientRect = documentRect(4400);
     const results = [];
     const queue = new TranslationQueue({
       concurrency: 1,
@@ -135,8 +189,7 @@ describe('TranslationQueue', () => {
 
     queue.enqueue([far, visibleAfterScroll, stillFar]);
     await Promise.resolve();
-    visibleAfterScroll.element.getBoundingClientRect = () => ({top: 100, bottom: 120, left: 0, right: 100});
-    viewport = {innerHeight: 800, innerWidth: 1000};
+    viewport.scrollY = 2100;
     queue.reprioritize();
 
     resolveActive('ko:far');
@@ -148,6 +201,7 @@ describe('TranslationQueue', () => {
     let resolveActive;
     let rectCalls = 0;
     const results = [];
+    const viewport = {innerHeight: 800, innerWidth: 1000, scrollY: 0};
     const rectState = new Map();
     const blocks = Array.from({length: 2050}, (_, index) => ({
       sourceId: `scroll-source-${index}`,
@@ -155,7 +209,12 @@ describe('TranslationQueue', () => {
       element: {
         getBoundingClientRect: () => {
           rectCalls += 1;
-          return rectState.get(index);
+          const rect = rectState.get(index);
+          return {
+            ...rect,
+            top: rect.top - viewport.scrollY,
+            bottom: rect.bottom - viewport.scrollY
+          };
         }
       }
     }));
@@ -165,7 +224,7 @@ describe('TranslationQueue', () => {
     const queue = new TranslationQueue({
       concurrency: 1,
       pendingLimit: 2048,
-      viewport: {innerHeight: 800, innerWidth: 1000},
+      getViewport: () => viewport,
       translate: (text) => text === 'scroll-text-0'
         ? new Promise((resolve) => { resolveActive = resolve; })
         : Promise.resolve(`ko:${text}`),
@@ -174,13 +233,14 @@ describe('TranslationQueue', () => {
 
     queue.enqueue(blocks);
     const setupCalls = rectCalls;
-    rectState.set(2047, {top: 100, bottom: 120, left: 0, right: 100});
+    viewport.scrollY = 4947;
     for (let index = 0; index < 8; index += 1) queue.reprioritize();
 
     expect(rectCalls).toBe(setupCalls);
     resolveActive?.('ko:scroll-text-0');
     return queue.whenIdle().then(() => {
       expect(results.slice(0, 2)).toEqual(['scroll-source-0', 'scroll-source-2047']);
+      expect(rectCalls).toBe(setupCalls);
       queue.cancel();
     });
   });

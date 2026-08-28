@@ -6,6 +6,7 @@ import {
   DOCUMENT_TOKEN_KEY,
   installContentController
 } from '../src/content/controller.js';
+import { PageSession } from '../src/content/page-session.js';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -125,6 +126,8 @@ describe('content navigation notifications', () => {
     const session = {
       isNavigationWatching: () => true,
       stop: vi.fn(),
+      pause: vi.fn(),
+      resume: vi.fn(),
       generation: 42,
       status: 'ACTIVE',
       activation: 'manual'
@@ -133,8 +136,10 @@ describe('content navigation notifications', () => {
 
     controller.pageLifecycleHandler({persisted: true});
     expect(session.stop).not.toHaveBeenCalled();
+    expect(session.pause).toHaveBeenCalledTimes(1);
 
     controller.pageShowHandler({persisted: true});
+    expect(session.resume).toHaveBeenCalledTimes(1);
     expect(messages.at(-1)).toMatchObject({
       type: 'CONTENT_READY',
       documentToken: expect.any(String),
@@ -146,5 +151,83 @@ describe('content navigation notifications', () => {
       contentSessionActivation: 'manual'
     });
     controller.stopNavigationWatcher();
+  });
+
+  it('pauses the real page session across a BFCache lifecycle', async () => {
+    history.replaceState({}, '', '/questions');
+    document.body.innerHTML = `
+      <p>First BFCache paragraph.</p>
+      <p>Second BFCache paragraph.</p>
+    `;
+    const messages = [];
+    let resolveActive;
+    let startListener;
+    const runtime = {
+      onMessage: {
+        addListener(next) {
+          startListener = next;
+        }
+      },
+      sendMessage(message) {
+        messages.push(message);
+        return Promise.resolve();
+      }
+    };
+    const provider = {
+      getModelState: async () => 'Available',
+      prepare: async () => {},
+      translate: (text) => {
+        if (text === 'First BFCache paragraph.') {
+          return new Promise((resolve) => { resolveActive = resolve; });
+        }
+        return Promise.resolve(`ko:${text}`);
+      },
+      cancel: () => {},
+      close: () => {}
+    };
+    const controller = installContentController({
+      runtime,
+      createSession: (options) => new PageSession({
+        ...options,
+        document,
+        settings: {translatePageTitle: false},
+        concurrency: 1,
+        provider
+      })
+    });
+
+    try {
+      await startListener({
+        type: 'TRANSLATION_START',
+        generation: 77,
+        documentToken: controller.documentToken
+      }, {}, () => {});
+      for (let attempt = 0; attempt < 20 &&
+          (!controller.currentSession?.queue || typeof resolveActive !== 'function'); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      const session = controller.currentSession;
+      expect(session?.queue).toBeTruthy();
+
+      const pagehide = new Event('pagehide');
+      Object.defineProperty(pagehide, 'persisted', {value: true});
+      globalThis.dispatchEvent(pagehide);
+      expect(session.paused).toBe(true);
+      expect(session.queue.paused).toBe(true);
+      resolveActive('ko:First BFCache paragraph.');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(session.queue.pending).toHaveLength(1);
+
+      const pageshow = new Event('pageshow');
+      Object.defineProperty(pageshow, 'persisted', {value: true});
+      globalThis.dispatchEvent(pageshow);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await session.runPromise;
+      expect(session.paused).toBe(false);
+      expect(messages.some((message) => message.type === 'CONTENT_READY' && message.resume)).toBe(true);
+      expect(document.querySelectorAll('translight-translation')).toHaveLength(2);
+    } finally {
+      controller.currentSession?.stop({notify: false});
+    }
   });
 });

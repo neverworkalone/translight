@@ -34,9 +34,15 @@ function rectFor(block) {
  * viewport, rank 1 is in the immediately adjacent viewport, and rank 2 is
  * everything else. The index keeps each rank stable in document order.
  */
-export function getViewportPriority(block, index = 0, {document = globalThis.document, viewport} = {}) {
+export function getViewportPriority(
+  block,
+  index = 0,
+  {document = globalThis.document, viewport, getRect} = {}
+) {
   const {height, width} = viewportSize(document, viewport);
-  const rect = rectFor(block);
+  const rect = typeof getRect === 'function'
+    ? getRect(block)
+    : rectFor(block);
   if (!rect) return {rank: 2, distance: index, index};
 
   const visible = rect.bottom >= 0 && rect.top <= height && rect.right >= 0 && rect.left <= width;
@@ -120,12 +126,20 @@ export class TranslationQueue {
     this.inFlight = new Map();
     this.cancelled = false;
     this.idleResolvers = [];
+    this.settledResolvers = [];
     this.batchChain = Promise.resolve();
     this.viewportVersion = 0;
     this.priorityDirty = true;
+    this.priorityRectCache = new Map();
+    this.paused = false;
     this.signal = signal;
     this.abortListener = () => this.cancel();
-    signal?.addEventListener?.('abort', this.abortListener, {once: true});
+    if (signal?.addEventListener) {
+      signal.addEventListener('abort', this.abortListener, {once: true});
+      this.abortListenerAttached = true;
+    } else {
+      this.abortListenerAttached = false;
+    }
   }
 
   isIdle() {
@@ -135,6 +149,14 @@ export class TranslationQueue {
   whenIdle() {
     if (this.cancelled || this.isIdle()) return Promise.resolve();
     return new Promise((resolve) => this.idleResolvers.push(resolve));
+  }
+
+  whenSettled() {
+    // cancel() stops new work but cannot interrupt a provider promise that
+    // is already running. Route changes use this separate barrier before
+    // starting another queue against the same provider.
+    if (this.active === 0) return Promise.resolve();
+    return new Promise((resolve) => this.settledResolvers.push(resolve));
   }
 
   enqueue(blocks = []) {
@@ -193,10 +215,50 @@ export class TranslationQueue {
   }
 
   currentPriorityOptions() {
+    const viewport = this.getViewport?.();
     return {
       document: this.document,
-      viewport: this.getViewport?.()
+      viewport,
+      getRect: (block) => this.getCachedRect(block, viewport)
     };
+  }
+
+  getCachedRect(block, viewport) {
+    // A scroll changes viewport-relative coordinates without changing the
+    // document position. Reusing that snapshot avoids forcing layout for
+    // every pending block while a user is scrolling. Callers invalidate it
+    // when a DOM or viewport-size change can move the source.
+    const {height, width} = viewportSize(this.document, viewport);
+    const scrollX = numeric(viewport?.scrollX, numeric(viewport?.pageXOffset));
+    const scrollY = numeric(viewport?.scrollY, numeric(viewport?.pageYOffset));
+    const cached = this.priorityRectCache.get(block);
+    if (cached && cached.viewportWidth === width && cached.viewportHeight === height) {
+      return {
+        top: cached.documentTop - scrollY,
+        bottom: cached.documentBottom - scrollY,
+        left: cached.documentLeft - scrollX,
+        right: cached.documentRight - scrollX
+      };
+    }
+
+    const rect = rectFor(block);
+    if (!rect) {
+      this.priorityRectCache.delete(block);
+      return null;
+    }
+    this.priorityRectCache.set(block, {
+      documentTop: rect.top + scrollY,
+      documentBottom: rect.bottom + scrollY,
+      documentLeft: rect.left + scrollX,
+      documentRight: rect.right + scrollX,
+      viewportWidth: width,
+      viewportHeight: height
+    });
+    return rect;
+  }
+
+  invalidateLayout() {
+    this.priorityRectCache.clear();
   }
 
   reprioritize() {
@@ -206,6 +268,17 @@ export class TranslationQueue {
     // Scrolling only needs to update the viewport snapshot. The next pump
     // applies it when selecting work, avoiding a full pending-queue sort for
     // every scroll event while the provider is busy.
+  }
+
+  pause() {
+    if (this.cancelled) return;
+    this.paused = true;
+  }
+
+  resume() {
+    if (this.cancelled || !this.paused) return;
+    this.paused = false;
+    this.pump();
   }
 
   sortPending() {
@@ -224,23 +297,38 @@ export class TranslationQueue {
   }
 
   cancel() {
-    if (this.cancelled) return;
+    if (this.cancelled) {
+      this.detachAbortListener();
+      return;
+    }
     this.cancelled = true;
+    this.paused = false;
+    this.detachAbortListener();
     this.pending.length = 0;
+    this.seen.clear();
+    this.seenOrder.length = 0;
+    this.inFlight.clear();
+    this.priorityRectCache.clear();
     for (const resolve of this.idleResolvers.splice(0)) resolve();
+    if (this.active === 0) {
+      for (const resolve of this.settledResolvers.splice(0)) resolve();
+    }
   }
 
   destroy() {
     this.cancel();
+    this.batchChain = Promise.resolve();
+  }
+
+  detachAbortListener() {
+    if (!this.abortListenerAttached) return;
     this.signal?.removeEventListener?.('abort', this.abortListener);
-    this.cache.clear();
-    this.seen.clear();
-    this.seenOrder.length = 0;
-    this.inFlight.clear();
+    this.abortListenerAttached = false;
   }
 
   pump() {
-    while (!this.cancelled && this.isCurrent() && this.active < this.concurrency && this.pending.length) {
+    while (!this.cancelled && !this.paused && this.isCurrent() &&
+        this.active < this.concurrency && this.pending.length) {
       this.sortPending();
       const block = this.pending.shift();
       this.active += 1;
@@ -248,6 +336,9 @@ export class TranslationQueue {
         this.active -= 1;
         if (this.isIdle()) {
           for (const resolve of this.idleResolvers.splice(0)) resolve();
+        }
+        if (this.active === 0) {
+          for (const resolve of this.settledResolvers.splice(0)) resolve();
         }
         this.pump();
       });
@@ -272,7 +363,10 @@ export class TranslationQueue {
       }
       let translationPromise = this.inFlight.get(cacheKey);
       if (!translationPromise) {
-        translationPromise = Promise.resolve(this.translate(text, {signal: this.signal}));
+        translationPromise = Promise.resolve(this.translate(text, {
+          signal: this.signal,
+          queue: this
+        }));
         this.inFlight.set(cacheKey, translationPromise);
       }
       let translatedText;
