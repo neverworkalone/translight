@@ -44,6 +44,8 @@ const MAX_RECOVERY_ATTEMPTS = 1;
 const STABLE_LIST_SIBLING_PLACEMENT = 'stable-list-sibling';
 const GRID_LAYOUT_ANCHORED_PLACEMENT = 'grid-layout-anchored';
 const GRID_LAYOUT_ANCHORED_HIDDEN_PLACEMENT = 'anchored';
+const GRID_LAYOUT_EXTERNAL_PLACEMENT = 'grid-layout-external';
+const GRID_LAYOUT_EXTERNAL_HIDDEN_PLACEMENT = 'grid-external';
 const COLLAPSED_REVIEW_CARD_PLACEMENT = 'collapsed-review-card-sibling';
 const COLLAPSED_REVIEW_TRANSLATION_AFTER_CARD = 'after-card';
 const COLLAPSED_REVIEW_TRANSLATION_BEFORE_CARD = 'before-card';
@@ -51,6 +53,19 @@ const AMAZON_REVIEW_CONTENT_SELECTOR = '[data-hook="reviewRichContentContainer"]
 const AMAZON_REVIEW_CARD_SELECTOR = '[data-a-card-type="basic"]';
 const DOCUMENT_POSITION_FOLLOWING = 4;
 const gridLayoutReservations = new WeakMap();
+const gridLayoutSafetyCache = new WeakMap();
+const GRID_LAYOUT_SAFETY_STYLE_PROPERTIES = [
+  'grid-template-columns',
+  'grid-template-rows',
+  'grid-template-areas',
+  'grid-auto-flow',
+  'grid-auto-columns',
+  'grid-auto-rows',
+  'grid-column-gap',
+  'grid-row-gap',
+  'column-gap',
+  'row-gap'
+];
 const ATTRIBUTE_NAMES = [
   SOURCE_ATTRIBUTE,
   SOURCE_HASH_ATTRIBUTE,
@@ -67,6 +82,11 @@ const ATTRIBUTE_NAMES = [
   SEGMENT_ID_ATTRIBUTE
 ];
 const MIXED_CONTENT_AFTER_DIRECT_TEXT_PLACEMENT = 'inside-after-direct-text';
+
+function isGridLayoutPlacement(placement) {
+  return placement?.kind === GRID_LAYOUT_ANCHORED_PLACEMENT ||
+    placement?.kind === GRID_LAYOUT_EXTERNAL_PLACEMENT;
+}
 
 function escapeAttribute(value) {
   return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
@@ -189,7 +209,7 @@ function syncSourceLayout(record, {
 } = {}) {
   const {element, translation, placement} = record ?? {};
   if (!element || !translation?.style) return;
-  let isGridOwnedLayout = placement?.kind === GRID_LAYOUT_ANCHORED_PLACEMENT;
+  let isGridOwnedLayout = isGridLayoutPlacement(placement);
   let sourceIsLayout = null;
   if (!isGridOwnedLayout && placement === 'inside') {
     const parentDisplay = getDisplay(element.parentElement);
@@ -207,6 +227,10 @@ function syncSourceLayout(record, {
   if (placement?.kind === GRID_LAYOUT_ANCHORED_PLACEMENT) {
     const parent = syncGridLayoutReservation(record, {defer: deferGridReservation});
     if (deferGridReservation && parent) reservationParents?.add(parent);
+    return;
+  }
+  if (placement?.kind === GRID_LAYOUT_EXTERNAL_PLACEMENT) {
+    clearSourceLayout(translation);
     return;
   }
   // A sibling translation does not receive the source block's width and
@@ -409,24 +433,57 @@ function visualGridRowCount(parent, children) {
   return rects.every((rect) => Math.abs(Number(rect.top) - firstTop) <= 1) ? 1 : 2;
 }
 
+function gridLayoutSafetySignature(parent, style) {
+  const childCount = Number.isFinite(Number(parent?.childElementCount))
+    ? Number(parent.childElementCount)
+    : parent?.children?.length ?? 0;
+  const styleValues = GRID_LAYOUT_SAFETY_STYLE_PROPERTIES.map((property) =>
+    getStyleValue(style, property)
+  );
+  return `${childCount}\u0000${styleValues.join('\u0001')}`;
+}
+
+function invalidateGridLayoutSafety(parent) {
+  if (parent) gridLayoutSafetyCache.delete(parent);
+}
+
 function gridHasSingleRow(parent) {
-  const children = Array.from(parent?.children ?? [])
-    .filter((child) => !child.matches?.(GENERATED_SELECTOR));
   const view = parent?.ownerDocument?.defaultView;
   const style = view?.getComputedStyle?.(parent);
   const rowCount = countGridTracks(getStyleValue(style, 'grid-template-rows'));
+  // An explicit multi-row template is enough to reject anchoring. Keep this
+  // before any child enumeration because long grids take this path often.
   if (rowCount != null && rowCount > 1) return false;
-  if (children.some((child) => !gridChildIsInFirstRow(child))) return false;
+
+  const signature = gridLayoutSafetySignature(parent, style);
+  const cached = gridLayoutSafetyCache.get(parent);
+  if (cached?.signature === signature) return cached.result;
+
+  const children = Array.from(parent?.children ?? [])
+    .filter((child) => !child.matches?.(GENERATED_SELECTOR));
+  let result;
+  if (children.some((child) => !gridChildIsInFirstRow(child))) {
+    result = false;
+    gridLayoutSafetyCache.set(parent, {signature, result});
+    return result;
+  }
 
   const visualRows = visualGridRowCount(parent, children);
-  if (visualRows != null) return visualRows === 1;
-  if (children.length <= 1) return true;
-
-  const columnCount = countGridTracks(getStyleValue(style, 'grid-template-columns'));
-  if (columnCount == null) return false;
-  const autoFlow = getStyleValue(style, 'grid-auto-flow');
-  if (/\bcolumn\b/iu.test(autoFlow)) return true;
-  return children.length <= columnCount;
+  if (visualRows != null) {
+    result = visualRows === 1;
+  } else if (children.length <= 1) {
+    result = true;
+  } else {
+    const columnCount = countGridTracks(getStyleValue(style, 'grid-template-columns'));
+    if (columnCount == null) {
+      result = false;
+    } else {
+      const autoFlow = getStyleValue(style, 'grid-auto-flow');
+      result = /\bcolumn\b/iu.test(autoFlow) || children.length <= columnCount;
+    }
+  }
+  gridLayoutSafetyCache.set(parent, {signature, result});
+  return result;
 }
 
 function isGridLayoutSource(element) {
@@ -469,6 +526,51 @@ function placeGridLayoutTranslation(element, translation) {
     reservationParent: element.parentElement,
     sourcePositionChanged,
     inlinePosition
+  };
+}
+
+function resetGridLayoutTranslationStyles(translation) {
+  if (!translation?.style) return;
+  for (const property of [
+    'position',
+    'top',
+    'right',
+    'bottom',
+    'left',
+    'width',
+    'max-width',
+    'white-space'
+  ]) {
+    translation.style.removeProperty(property);
+  }
+}
+
+function getGridExternalInsertionPoint(gridParent) {
+  let container = gridParent;
+  let host = container?.parentNode;
+  while (host && LAYOUT_DISPLAYS.has(getDisplay(host))) {
+    container = host;
+    host = container.parentNode;
+  }
+  if (!container?.parentNode || !host) return null;
+  return {container, host};
+}
+
+function placeGridLayoutExternalTranslation(element, translation) {
+  const gridParent = element?.parentElement;
+  const insertionPoint = getGridExternalInsertionPoint(gridParent);
+  if (!gridParent || !insertionPoint) {
+    element?.parentNode?.insertBefore(translation, element.nextSibling);
+    return 'sibling';
+  }
+
+  resetGridLayoutTranslationStyles(translation);
+  const {container, host} = insertionPoint;
+  host.insertBefore(translation, container.nextSibling);
+  return {
+    kind: GRID_LAYOUT_EXTERNAL_PLACEMENT,
+    gridParent,
+    anchor: container
   };
 }
 
@@ -572,8 +674,11 @@ function insertAtSafeLocation(element, translation, mixedContent = false, source
     return placeMixedContentTranslation(element, translation, sourceTextNodes);
   }
 
-  if (shouldAnchorGridLayoutSource(element)) {
-    return placeGridLayoutTranslation(element, translation);
+  if (isGridLayoutSource(element)) {
+    if (shouldAnchorGridLayoutSource(element)) {
+      return placeGridLayoutTranslation(element, translation);
+    }
+    return placeGridLayoutExternalTranslation(element, translation);
   }
 
   if (!shouldInsertInside(element)) {
@@ -616,6 +721,11 @@ function restorePlacement(record) {
   if (placement?.kind === GRID_LAYOUT_ANCHORED_PLACEMENT) {
     const anchor = placement.anchor ?? element;
     if (anchor?.parentNode && translation.parentNode !== anchor) anchor.appendChild(translation);
+    return;
+  }
+  if (placement?.kind === GRID_LAYOUT_EXTERNAL_PLACEMENT) {
+    const anchor = placement.anchor;
+    if (anchor?.parentNode) anchor.parentNode.insertBefore(translation, anchor.nextSibling);
     return;
   }
   if (!element?.parentNode) return;
@@ -726,22 +836,25 @@ function flushGridLayoutReservations(parents) {
   }
 }
 
-function cleanupGridLayoutAnchor(record) {
-  if (record?.placement?.kind !== GRID_LAYOUT_ANCHORED_PLACEMENT) return;
+function cleanupGridLayoutPlacement(record) {
+  if (!isGridLayoutPlacement(record?.placement)) return;
   const {element, translation} = record;
   translation?.parentNode?.removeChild(translation);
-  syncGridLayoutReservation(record);
-  restoreAnchoredFallbackDisplay(record);
-  if (!record.placement.sourcePositionChanged || !element?.style) return;
+  if (record.placement.kind === GRID_LAYOUT_ANCHORED_PLACEMENT) {
+    syncGridLayoutReservation(record);
+  }
+  restoreGridLayoutFallbackDisplay(record);
+  if (record.placement.kind !== GRID_LAYOUT_ANCHORED_PLACEMENT ||
+      !record.placement.sourcePositionChanged || !element?.style) return;
   const {value, priority} = record.placement.inlinePosition ?? {};
   if (value) element.style.setProperty('position', value, priority);
   else element.style.removeProperty('position');
 }
 
-function preserveAnchoredFallbackDisplay(record) {
+function preserveGridLayoutFallbackDisplay(record) {
   const placement = record?.placement;
   const element = record?.element;
-  if (placement?.kind !== GRID_LAYOUT_ANCHORED_PLACEMENT || !element?.style ||
+  if (!isGridLayoutPlacement(placement) || !element?.style ||
       placement.fallbackDisplay) return;
   const display = getDisplay(element);
   if (!display || display === 'none') return;
@@ -753,7 +866,7 @@ function preserveAnchoredFallbackDisplay(record) {
   element.style.setProperty('display', display, 'important');
 }
 
-function restoreAnchoredFallbackDisplay(record) {
+function restoreGridLayoutFallbackDisplay(record) {
   const placement = record?.placement;
   const element = record?.element;
   const fallbackDisplay = placement?.fallbackDisplay;
@@ -1121,7 +1234,27 @@ function styleText(sessionId, presentation) {
     ${hiddenSelector}[${HIDDEN_PLACEMENT_ATTRIBUTE}="${GRID_LAYOUT_ANCHORED_HIDDEN_PLACEMENT}"] > ${TRANSLATION_TAG} {
       visibility: visible !important;
     }
+    ${hiddenSelector}[${HIDDEN_PLACEMENT_ATTRIBUTE}="${GRID_LAYOUT_EXTERNAL_HIDDEN_PLACEMENT}"] {
+      visibility: hidden !important;
+    }
   `;
+}
+
+function desiredGridLayoutPlacementKind(element) {
+  if (!isGridLayoutSource(element)) return null;
+  return shouldAnchorGridLayoutSource(element)
+    ? GRID_LAYOUT_ANCHORED_PLACEMENT
+    : GRID_LAYOUT_EXTERNAL_PLACEMENT;
+}
+
+function gridLayoutPlacementMatches(record, kind) {
+  const placement = record?.placement;
+  const element = record?.element;
+  if (!placement || placement.kind !== kind || !element) return false;
+  if (kind === GRID_LAYOUT_ANCHORED_PLACEMENT) {
+    return placement.anchor === element && placement.reservationParent === element.parentElement;
+  }
+  return placement.gridParent === element.parentElement && placement.anchor?.parentNode;
 }
 
 export class TranslationRenderer {
@@ -1158,6 +1291,35 @@ export class TranslationRenderer {
     for (const record of this.records.values()) this.applyRecordPresentation(record);
   }
 
+  reconcileGridLayoutPlacement(record) {
+    if (!isGridLayoutPlacement(record?.placement)) return false;
+    const desiredKind = desiredGridLayoutPlacementKind(record.element);
+    if (desiredKind && gridLayoutPlacementMatches(record, desiredKind)) return false;
+
+    const fallbackMode = record.fallbackMode;
+    cleanupGridLayoutPlacement(record);
+    record.placement = desiredKind === GRID_LAYOUT_ANCHORED_PLACEMENT
+      ? placeGridLayoutTranslation(record.element, record.translation)
+      : desiredKind === GRID_LAYOUT_EXTERNAL_PLACEMENT
+        ? placeGridLayoutExternalTranslation(record.element, record.translation)
+        : insertAtSafeLocation(
+          record.element,
+          record.translation,
+          record.mixedContent,
+          record.sourceTextNodes
+        );
+
+    const translationOnlyReplacement = record.replaced &&
+      this.presentation.translationMode === TRANSLATION_MODES.TRANSLATION_ONLY;
+    if (translationOnlyReplacement) record.translation.parentNode?.removeChild(record.translation);
+    if (fallbackMode) {
+      this.applyFallbackPresentation(record, fallbackMode);
+    } else if (!translationOnlyReplacement) {
+      restorePlacement(record);
+    }
+    return true;
+  }
+
   handleLayoutResize(entries) {
     const affectedRecords = new Set();
     for (const entry of entries ?? []) {
@@ -1166,12 +1328,21 @@ export class TranslationRenderer {
       const currentWidth = getResizeObserverInlineSize(entry);
       const previousWidth = this.layoutTargetWidths.get(entry.target);
       this.layoutTargetWidths.set(entry.target, currentWidth);
-      if (currentWidth != null && previousWidth != null && currentWidth === previousWidth) continue;
+      if (currentWidth != null && previousWidth != null && currentWidth === previousWidth &&
+          ![...records].some((record) => isGridLayoutPlacement(record.placement))) continue;
       for (const record of records) affectedRecords.add(record);
     }
     const reservationParents = new Set();
+    const safetyParents = new Set();
+    for (const record of affectedRecords) {
+      const parent = record.element?.parentElement;
+      if (isGridLayoutSource(record.element) && parent) safetyParents.add(parent);
+    }
+    for (const parent of safetyParents) invalidateGridLayoutSafety(parent);
     for (const record of affectedRecords) {
       if (this.records.get(record.sourceId) !== record) continue;
+      this.reconcileGridLayoutPlacement(record);
+      this.observeSourceLayout(record);
       syncSourceLayout(record, {deferGridReservation: true, reservationParents});
     }
     flushGridLayoutReservations(reservationParents);
@@ -1202,8 +1373,9 @@ export class TranslationRenderer {
 
   observeSourceLayout(record) {
     if (!this.layoutObserver || !record?.element) return;
-    const nextTargets = record.placement?.kind === GRID_LAYOUT_ANCHORED_PLACEMENT
-      ? [record.element, record.placement.reservationParent].filter(Boolean)
+    const nextTargets = isGridLayoutPlacement(record.placement)
+      ? [...new Set([record.element, record.placement.reservationParent,
+        record.placement.gridParent, record.placement.anchor].filter(Boolean))]
       : record.placement === 'sibling' && !LAYOUT_DISPLAYS.has(getDisplay(record.element))
         ? [record.element, record.element.parentElement].filter(Boolean)
         : [];
@@ -1224,7 +1396,14 @@ export class TranslationRenderer {
 
   syncLayouts() {
     const reservationParents = new Set();
+    const safetyParents = new Set();
     for (const record of this.records.values()) {
+      const parent = record.element?.parentElement;
+      if (isGridLayoutSource(record.element) && parent) safetyParents.add(parent);
+    }
+    for (const parent of safetyParents) invalidateGridLayoutSafety(parent);
+    for (const record of this.records.values()) {
+      this.reconcileGridLayoutPlacement(record);
       this.observeSourceLayout(record);
       syncSourceLayout(record, {deferGridReservation: true, reservationParents});
     }
@@ -1373,7 +1552,7 @@ export class TranslationRenderer {
     if (record.fallbackMode === TRANSLATION_MODES.TRANSLATION_ORIGINAL) {
       restorePlacement(record);
     }
-    restoreAnchoredFallbackDisplay(record);
+    restoreGridLayoutFallbackDisplay(record);
     record.fallbackMode = null;
     this.clearReplacementAttributes(record);
   }
@@ -1383,6 +1562,11 @@ export class TranslationRenderer {
     if (!element?.parentNode || !translation) return;
     if (record.placement?.kind === GRID_LAYOUT_ANCHORED_PLACEMENT) {
       if (translation.parentNode !== element) element.appendChild(translation);
+      return;
+    }
+    if (record.placement?.kind === GRID_LAYOUT_EXTERNAL_PLACEMENT) {
+      const anchor = record.placement.anchor;
+      if (anchor?.parentNode) anchor.parentNode.insertBefore(translation, anchor);
       return;
     }
     if (record.placement === 'sibling') {
@@ -1412,20 +1596,23 @@ export class TranslationRenderer {
     this.clearReplacementAttributes(record);
     if (mode === TRANSLATION_MODES.TRANSLATION_ONLY) {
       restorePlacement(record);
-      if (record.placement?.kind === GRID_LAYOUT_ANCHORED_PLACEMENT) {
-        preserveAnchoredFallbackDisplay(record);
+      if (isGridLayoutPlacement(record.placement)) {
+        preserveGridLayoutFallbackDisplay(record);
       }
       element.setAttribute(HIDDEN_ATTRIBUTE, GENERATED_VALUE);
       const hasExternalPlacement = record.placement === 'sibling' ||
         record.placement?.kind === COLLAPSED_REVIEW_CARD_PLACEMENT ||
-        record.placement?.kind === GRID_LAYOUT_ANCHORED_PLACEMENT;
+        isGridLayoutPlacement(record.placement);
       if (!hasExternalPlacement) {
         element.setAttribute(
           HIDDEN_PLACEMENT_ATTRIBUTE,
           record.mixedContent ? 'mixed' : 'inside'
         );
-      } else if (record.placement?.kind === GRID_LAYOUT_ANCHORED_PLACEMENT) {
-        element.setAttribute(HIDDEN_PLACEMENT_ATTRIBUTE, GRID_LAYOUT_ANCHORED_HIDDEN_PLACEMENT);
+      } else if (isGridLayoutPlacement(record.placement)) {
+        const hiddenPlacement = record.placement.kind === GRID_LAYOUT_ANCHORED_PLACEMENT
+          ? GRID_LAYOUT_ANCHORED_HIDDEN_PLACEMENT
+          : GRID_LAYOUT_EXTERNAL_HIDDEN_PLACEMENT;
+        element.setAttribute(HIDDEN_PLACEMENT_ATTRIBUTE, hiddenPlacement);
       }
     } else if (mode === TRANSLATION_MODES.TRANSLATION_ORIGINAL) {
       this.placeTranslationBeforeSource(record);
@@ -1511,6 +1698,7 @@ export class TranslationRenderer {
     const {element, translation} = record;
     if (!element || !translation) return;
     const mode = this.presentation.translationMode;
+    this.reconcileGridLayoutPlacement(record);
     this.observeSourceLayout(record);
     syncSourceLayout(record);
     syncSourceTypography(record);
@@ -1689,7 +1877,7 @@ export class TranslationRenderer {
       const sourceChanged = Boolean(sourceHash && sourceHash !== existing.sourceHash) || Boolean(pendingHash);
       const structureChanged = existing.mixedContent !== nextMixedContent;
       if (existing.mixedContent !== nextMixedContent) {
-        cleanupGridLayoutAnchor(existing);
+        cleanupGridLayoutPlacement(existing);
         existing.translation.parentNode?.removeChild(existing.translation);
         existing.mixedContent = nextMixedContent;
         existing.placement = insertAtSafeLocation(element, existing.translation, nextMixedContent);
@@ -1769,7 +1957,7 @@ export class TranslationRenderer {
       this.restoreSourceText(record);
       for (const name of ATTRIBUTE_NAMES) restoreAttribute(element, name, record.originalAttributes[name]);
     }
-    cleanupGridLayoutAnchor(record);
+    cleanupGridLayoutPlacement(record);
     this.unwrapSegment(record);
     this.recordsByElement.delete(element);
     this.records.delete(record.sourceId);
@@ -1785,7 +1973,7 @@ export class TranslationRenderer {
       if (record.element?.getAttribute(SESSION_ATTRIBUTE) === this.sessionId) {
         for (const name of ATTRIBUTE_NAMES) restoreAttribute(record.element, name, record.originalAttributes[name]);
       }
-      cleanupGridLayoutAnchor(record);
+      cleanupGridLayoutPlacement(record);
       this.recordsByElement.delete(record.element);
       this.records.delete(sourceId);
     }
@@ -1796,7 +1984,7 @@ export class TranslationRenderer {
       const {element, translation, originalAttributes} = record;
       this.unobserveSourceLayout(record);
       translation?.parentNode?.removeChild(translation);
-      cleanupGridLayoutAnchor(record);
+      cleanupGridLayoutPlacement(record);
       if (element?.getAttribute(SESSION_ATTRIBUTE) !== this.sessionId) continue;
       this.restoreSourceText(record);
       for (const name of ATTRIBUTE_NAMES) restoreAttribute(element, name, originalAttributes[name]);

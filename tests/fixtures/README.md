@@ -281,9 +281,12 @@ http://127.0.0.1:5173/tests/fixtures/grid-layout-safety-repro.html
 
 This fixture covers the generic cases that must not use the AP single-row
 anchored placement: a two-row grid and a flex source with `overflow:hidden`.
-It also covers the translation-only fallback for a safe single-row grid source.
-The repaired case must report sibling placement without overlap/clipping for
-the unsafe cases, visible anchored fallback text with the source hidden, and
+Unsafe translations are placed outside the grid so existing host items keep
+their positions. It also covers the translation-only fallback for a safe
+single-row grid source and a one-row-to-two-row responsive transition. The
+repaired case must report external placement without overlap/clipping or host
+layout movement for the unsafe cases, visible anchored fallback text with the
+source hidden, a safe re-evaluation after the responsive transition, and
 `restoredAfterStop: true` with `testPassed: true`.
 
 ## YouTube long description paragraph placement
