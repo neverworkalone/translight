@@ -406,6 +406,24 @@ describe('collectTranslationBlocks', () => {
       .toBe(true);
   });
 
+  it('keeps inline labels and trailing text around a partially split nested text node', () => {
+    document.body.innerHTML = '<p id="description">Opening hotel description has enough English words. <span><b>Facilities: </b>Guests can use the hotel swimming pool.\n\nGuests can also use the hotel spa. <b>Rooms: </b>Each room has a balcony with sea views.</span> Final cancellation policy has enough English words.</p>';
+
+    const description = document.querySelector('#description');
+    const expectedTexts = [
+      'Opening hotel description has enough English words.',
+      'Facilities: Guests can use the hotel swimming pool.',
+      'Guests can also use the hotel spa. Rooms: Each room has a balcony with sea views.',
+      'Final cancellation policy has enough English words.'
+    ];
+    const blocks = collectTranslationBlocks(description);
+
+    expect(blocks.map((block) => block.text)).toEqual(expectedTexts);
+    expect(new Set(blocks.map((block) => block.text)).size).toBe(expectedTexts.length);
+    expect(blocks.every(({element}) => element.matches('[data-translight-segment="true"]')))
+      .toBe(true);
+  });
+
   it('keeps inline paragraph segmentation within a linear query budget', () => {
     const measure = (paragraphCount) => {
       document.body.innerHTML = `
@@ -489,6 +507,33 @@ describe('collectTranslationBlocks', () => {
     expect(larger.blocks).toHaveLength(16 * 3 + 1);
     expect(larger.queryCalls).toBeLessThanOrEqual(smaller.queryCalls * 2);
     expect(larger.querySelectorCalls).toBeLessThanOrEqual(smaller.querySelectorCalls * 2);
+    expect(larger.containsCalls).toBeLessThanOrEqual(smaller.containsCalls * 2);
+  });
+
+  it('keeps nested residual boundary checks within a linear operation budget', () => {
+    const measure = (containerCount) => {
+      document.body.innerHTML = `<p id="description">Opening note has enough English words.${Array.from({length: containerCount}, (_, index) => `<span>Outer introduction ${index} has enough English words. <span><b>First:</b>First paragraph has enough English words.\n\n<b>Second:</b>Second paragraph has enough English words.</span> Outer conclusion ${index} has enough English words.</span>`).join('')}Final closing note has enough English words.</p>`;
+
+      const originalContains = Element.prototype.contains;
+      let containsCalls = 0;
+      Element.prototype.contains = function (...args) {
+        containsCalls += 1;
+        return originalContains.apply(this, args);
+      };
+
+      try {
+        const blocks = collectTranslationBlocks(document.body);
+        return {blocks, containsCalls};
+      } finally {
+        Element.prototype.contains = originalContains;
+      }
+    };
+
+    const smaller = measure(8);
+    const larger = measure(16);
+
+    expect(smaller.blocks).toHaveLength(8 * 4 + 2);
+    expect(larger.blocks).toHaveLength(16 * 4 + 2);
     expect(larger.containsCalls).toBeLessThanOrEqual(smaller.containsCalls * 2);
   });
 
