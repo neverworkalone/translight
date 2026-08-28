@@ -589,6 +589,76 @@ describe('TranslationRenderer', () => {
     expect(source.textContent).toBe('LIVE');
   });
 
+  it('keeps external grid translations in source order across async insertion and updates', () => {
+    document.body.innerHTML = `
+      <div id="layout" style="display:grid;grid-template-columns:100px;grid-template-rows:20px 20px 20px">
+        <div id="source-0" style="display:flex">One</div>
+        <div id="source-1" style="display:flex">Two</div>
+        <div id="source-2" style="display:flex">Three</div>
+      </div>
+    `;
+    const layout = document.querySelector('#layout');
+    const renderer = new TranslationRenderer({document, sessionId: 'external-grid-order-session'});
+    const sources = [0, 1, 2].map((index) => document.querySelector(`#source-${index}`));
+    const insert = (index, text) => renderer.insert({
+      element: sources[index],
+      sourceId: `external-grid-order-${index}`,
+      translatedText: text
+    });
+    const translationOrder = () => Array.from(document.body.children)
+      .filter((child) => child.matches('translight-translation'))
+      .map((child) => child.textContent);
+
+    insert(2, 'T2');
+    insert(0, 'T0');
+    insert(1, 'T1');
+
+    expect(translationOrder()).toEqual(['T0', 'T1', 'T2']);
+    expect(Array.from(layout.children).map((child) => child.id)).toEqual([
+      'source-0',
+      'source-1',
+      'source-2'
+    ]);
+
+    insert(0, 'T0 updated');
+    expect(translationOrder()).toEqual(['T0 updated', 'T1', 'T2']);
+
+    renderer.removeAll();
+  });
+
+  it('clears anchored translation styles when a grid source becomes a normal sibling', () => {
+    document.body.innerHTML = `
+      <div id="layout" style="display:grid;grid-template-columns:60px 1fr">
+        <div id="source" style="display:flex">LIVE</div>
+        <div id="tabs">ALL</div>
+      </div>
+    `;
+    const source = document.querySelector('#source');
+    const layout = document.querySelector('#layout');
+    const renderer = new TranslationRenderer({document, sessionId: 'grid-to-block-session'});
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'grid-to-block-source',
+      translatedText: '라이브'
+    });
+    const record = renderer.records.get('grid-to-block-source');
+
+    expect(record.placement.kind).toBe('grid-layout-anchored');
+    expect(translation.style.getPropertyValue('position')).toBe('absolute');
+
+    layout.style.display = 'block';
+    renderer.syncLayouts();
+
+    expect(record.placement).toBe('sibling');
+    expect(translation.parentElement).toBe(layout);
+    for (const property of ['position', 'top', 'right', 'bottom', 'left', 'width',
+      'max-width', 'white-space', 'margin']) {
+      expect(translation.style.getPropertyValue(property)).toBe('');
+    }
+
+    renderer.removeAll();
+  });
+
   it('keeps an unsafe grid translation-only fallback visible outside the grid', () => {
     document.head.innerHTML = '<style>.grid-source { display:flex; }</style>';
     document.body.innerHTML = `
@@ -727,6 +797,64 @@ describe('TranslationRenderer', () => {
       .toBe(0);
     expect(measureChildEnumeration(createGrid({explicitRows: false}), 120, 'implicit-grid-cache'))
       .toBe(1);
+  });
+
+  it('bounds long explicit row-track analysis across N and 2N insertions', () => {
+    const measureLongRowWork = (sourceCount, sessionId) => {
+      document.body.innerHTML = '';
+      const layout = document.createElement('div');
+      layout.style.display = 'grid';
+      layout.style.gridTemplateColumns = '100px 100px';
+      layout.style.gridTemplateRows = Array(Math.ceil(sourceCount / 2)).fill('20px').join(' ');
+      for (let index = 0; index < sourceCount; index += 1) {
+        const source = document.createElement('div');
+        source.id = `long-source-${index}`;
+        source.style.display = 'flex';
+        source.textContent = `Item ${index}`;
+        layout.appendChild(source);
+      }
+      document.body.appendChild(layout);
+
+      const children = layout.children;
+      let childEnumerations = 0;
+      const originalIterator = children[Symbol.iterator].bind(children);
+      Object.defineProperty(children, Symbol.iterator, {
+        configurable: true,
+        value() {
+          childEnumerations += 1;
+          return originalIterator();
+        }
+      });
+      const originalTest = RegExp.prototype.test;
+      let whitespaceScans = 0;
+      RegExp.prototype.test = function(value) {
+        if (this.source === '\\s' && this.flags === 'u') whitespaceScans += 1;
+        return originalTest.call(this, value);
+      };
+
+      const renderer = new TranslationRenderer({document, sessionId});
+      try {
+        for (let index = 0; index < sourceCount; index += 1) {
+          renderer.insert({
+            element: layout.querySelector(`#long-source-${index}`),
+            sourceId: `${sessionId}-${index}`,
+            translatedText: `번역 ${index}`
+          });
+        }
+      } finally {
+        RegExp.prototype.test = originalTest;
+        renderer.removeAll();
+      }
+      return {childEnumerations, whitespaceScans};
+    };
+
+    const small = measureLongRowWork(120, 'long-row-small');
+    const large = measureLongRowWork(240, 'long-row-large');
+
+    expect(small.childEnumerations).toBe(0);
+    expect(large.childEnumerations).toBe(0);
+    expect(small.whitespaceScans).toBeLessThanOrEqual(32);
+    expect(large.whitespaceScans).toBeLessThanOrEqual(32);
   });
 
   it('flushes shared grid reservations once and skips unchanged margin writes', () => {

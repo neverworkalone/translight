@@ -54,6 +54,7 @@ const AMAZON_REVIEW_CARD_SELECTOR = '[data-a-card-type="basic"]';
 const DOCUMENT_POSITION_FOLLOWING = 4;
 const gridLayoutReservations = new WeakMap();
 const gridLayoutSafetyCache = new WeakMap();
+const gridLayoutExternalSources = new WeakMap();
 const GRID_LAYOUT_SAFETY_STYLE_PROPERTIES = [
   'grid-template-columns',
   'grid-template-rows',
@@ -437,34 +438,78 @@ function gridLayoutSafetySignature(parent, style) {
   const childCount = Number.isFinite(Number(parent?.childElementCount))
     ? Number(parent.childElementCount)
     : parent?.children?.length ?? 0;
-  const styleValues = GRID_LAYOUT_SAFETY_STYLE_PROPERTIES.map((property) =>
-    getStyleValue(style, property)
-  );
-  return `${childCount}\u0000${styleValues.join('\u0001')}`;
+  return {
+    childCount,
+    styleValues: GRID_LAYOUT_SAFETY_STYLE_PROPERTIES.map((property) =>
+      getStyleValue(style, property)
+    )
+  };
+}
+
+function gridLayoutSafetySignatureMatches(cached, signature) {
+  return cached?.childCount === signature.childCount &&
+    cached.styleValues?.length === signature.styleValues.length &&
+    signature.styleValues.every((value, index) => value === cached.styleValues[index]);
 }
 
 function invalidateGridLayoutSafety(parent) {
   if (parent) gridLayoutSafetyCache.delete(parent);
 }
 
+function gridTemplateHasMultipleTracks(value) {
+  const source = String(value ?? '').trim();
+  if (!source || source === 'none') return false;
+  let depth = 0;
+  let start = 0;
+  let tokenCount = 0;
+  const inspectToken = (end) => {
+    if (end <= start) return false;
+    tokenCount += 1;
+    const token = source.slice(start, end);
+    const repeat = token.match(/^repeat\(\s*(\d+)\s*,/iu);
+    return tokenCount > 1 || (repeat && Number(repeat[1]) > 1);
+  };
+
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (character === '(') {
+      depth += 1;
+    } else if (character === ')') {
+      depth = Math.max(0, depth - 1);
+    } else if (/\s/u.test(character) && depth === 0) {
+      if (inspectToken(index)) return true;
+      start = index + 1;
+    }
+  }
+  return inspectToken(source.length);
+}
+
 function gridHasSingleRow(parent) {
   const view = parent?.ownerDocument?.defaultView;
   const style = view?.getComputedStyle?.(parent);
-  const rowCount = countGridTracks(getStyleValue(style, 'grid-template-rows'));
-  // An explicit multi-row template is enough to reject anchoring. Keep this
-  // before any child enumeration because long grids take this path often.
-  if (rowCount != null && rowCount > 1) return false;
-
   const signature = gridLayoutSafetySignature(parent, style);
   const cached = gridLayoutSafetyCache.get(parent);
-  if (cached?.signature === signature) return cached.result;
+  if (gridLayoutSafetySignatureMatches(cached, signature)) return cached.result;
+
+  const rowTemplate = getStyleValue(style, 'grid-template-rows');
+  // An explicit multi-row template is enough to reject anchoring. Keep this
+  // before any child enumeration because long grids take this path often.
+  if (gridTemplateHasMultipleTracks(rowTemplate)) {
+    gridLayoutSafetyCache.set(parent, {...signature, result: false});
+    return false;
+  }
+  const rowCount = countGridTracks(rowTemplate);
+  if (rowCount != null && rowCount > 1) {
+    gridLayoutSafetyCache.set(parent, {...signature, result: false});
+    return false;
+  }
 
   const children = Array.from(parent?.children ?? [])
     .filter((child) => !child.matches?.(GENERATED_SELECTOR));
   let result;
   if (children.some((child) => !gridChildIsInFirstRow(child))) {
     result = false;
-    gridLayoutSafetyCache.set(parent, {signature, result});
+    gridLayoutSafetyCache.set(parent, {...signature, result});
     return result;
   }
 
@@ -482,7 +527,7 @@ function gridHasSingleRow(parent) {
       result = /\bcolumn\b/iu.test(autoFlow) || children.length <= columnCount;
     }
   }
-  gridLayoutSafetyCache.set(parent, {signature, result});
+  gridLayoutSafetyCache.set(parent, {...signature, result});
   return result;
 }
 
@@ -539,7 +584,8 @@ function resetGridLayoutTranslationStyles(translation) {
     'left',
     'width',
     'max-width',
-    'white-space'
+    'white-space',
+    'margin'
   ]) {
     translation.style.removeProperty(property);
   }
@@ -556,6 +602,44 @@ function getGridExternalInsertionPoint(gridParent) {
   return {container, host};
 }
 
+function getGridExternalTranslations(host, gridParent, anchor, beforeAnchor, currentTranslation) {
+  return Array.from(host?.children ?? []).filter((candidate) => {
+    if (candidate === currentTranslation || !candidate.matches?.(TRANSLATION_TAG)) return false;
+    const metadata = gridLayoutExternalSources.get(candidate);
+    return metadata?.gridParent === gridParent && metadata.anchor === anchor &&
+      metadata.beforeAnchor === beforeAnchor && metadata.source?.parentNode === gridParent;
+  });
+}
+
+function insertGridLayoutExternalTranslation({
+  source,
+  translation,
+  gridParent,
+  anchor,
+  beforeAnchor = false
+}) {
+  const host = anchor?.parentNode;
+  if (!host || !source || !translation) return false;
+  const translations = getGridExternalTranslations(
+    host,
+    gridParent,
+    anchor,
+    beforeAnchor,
+    translation
+  );
+  const nextTranslation = translations.find((candidate) => {
+    const candidateSource = gridLayoutExternalSources.get(candidate)?.source;
+    return Boolean(candidateSource &&
+      (source.compareDocumentPosition(candidateSource) & DOCUMENT_POSITION_FOLLOWING));
+  });
+  const insertionReference = beforeAnchor
+    ? nextTranslation ?? anchor
+    : nextTranslation ?? translations.at(-1)?.nextSibling ?? anchor.nextSibling;
+  if (insertionReference !== translation) host.insertBefore(translation, insertionReference ?? null);
+  gridLayoutExternalSources.set(translation, {source, gridParent, anchor, beforeAnchor});
+  return true;
+}
+
 function placeGridLayoutExternalTranslation(element, translation) {
   const gridParent = element?.parentElement;
   const insertionPoint = getGridExternalInsertionPoint(gridParent);
@@ -566,7 +650,12 @@ function placeGridLayoutExternalTranslation(element, translation) {
 
   resetGridLayoutTranslationStyles(translation);
   const {container, host} = insertionPoint;
-  host.insertBefore(translation, container.nextSibling);
+  insertGridLayoutExternalTranslation({
+    source: element,
+    translation,
+    gridParent,
+    anchor: container
+  });
   return {
     kind: GRID_LAYOUT_EXTERNAL_PLACEMENT,
     gridParent,
@@ -725,7 +814,12 @@ function restorePlacement(record) {
   }
   if (placement?.kind === GRID_LAYOUT_EXTERNAL_PLACEMENT) {
     const anchor = placement.anchor;
-    if (anchor?.parentNode) anchor.parentNode.insertBefore(translation, anchor.nextSibling);
+    insertGridLayoutExternalTranslation({
+      source: element,
+      translation,
+      gridParent: placement.gridParent,
+      anchor
+    });
     return;
   }
   if (!element?.parentNode) return;
@@ -839,6 +933,11 @@ function flushGridLayoutReservations(parents) {
 function cleanupGridLayoutPlacement(record) {
   if (!isGridLayoutPlacement(record?.placement)) return;
   const {element, translation} = record;
+  if (record.placement.kind === GRID_LAYOUT_EXTERNAL_PLACEMENT) {
+    gridLayoutExternalSources.delete(translation);
+  } else {
+    resetGridLayoutTranslationStyles(translation);
+  }
   translation?.parentNode?.removeChild(translation);
   if (record.placement.kind === GRID_LAYOUT_ANCHORED_PLACEMENT) {
     syncGridLayoutReservation(record);
@@ -1566,7 +1665,13 @@ export class TranslationRenderer {
     }
     if (record.placement?.kind === GRID_LAYOUT_EXTERNAL_PLACEMENT) {
       const anchor = record.placement.anchor;
-      if (anchor?.parentNode) anchor.parentNode.insertBefore(translation, anchor);
+      insertGridLayoutExternalTranslation({
+        source: element,
+        translation,
+        gridParent: record.placement.gridParent,
+        anchor,
+        beforeAnchor: true
+      });
       return;
     }
     if (record.placement === 'sibling') {
