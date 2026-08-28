@@ -33,6 +33,46 @@ function placementOf(renderer, sourceId) {
   return record?.placement?.kind ?? record?.placement ?? null;
 }
 
+function runTailOrderCase(insertionOrder, sessionId, update = false) {
+  const host = document.createElement('div');
+  const layout = document.createElement('div');
+  layout.style.display = 'grid';
+  layout.style.gridTemplateColumns = '100px';
+  layout.style.gridTemplateRows = '20px 20px 20px';
+  const sources = [0, 1, 2].map((index) => {
+    const source = document.createElement('div');
+    source.style.display = 'flex';
+    source.textContent = `Item ${index}`;
+    layout.appendChild(source);
+    return source;
+  });
+  host.appendChild(layout);
+  document.body.appendChild(host);
+
+  const renderer = new TranslationRenderer({document, sessionId});
+  for (const index of insertionOrder) {
+    renderer.insert({
+      element: sources[index],
+      sourceId: `${sessionId}-${index}`,
+      translatedText: `T${index}`
+    });
+  }
+  if (update) {
+    renderer.insert({
+      element: sources[0],
+      sourceId: `${sessionId}-0`,
+      translatedText: 'T0 updated'
+    });
+  }
+  const order = [...host.children]
+    .filter((child) => child.matches('translight-translation'))
+    .map((child) => child.textContent);
+  renderer.removeAll();
+  const restored = host.children.length === 1 && !host.querySelector('translight-translation');
+  host.remove();
+  return {order, restored};
+}
+
 function run() {
   const multiRenderer = new TranslationRenderer({document, sessionId: 'grid-safety-multi'});
   const multiSource = document.querySelector('#multi-row-source');
@@ -92,6 +132,11 @@ function run() {
     source: rect(transitionSource),
     control: rect(transitionControl)
   };
+  const tailOrder = {
+    forward: runTailOrderCase([0, 1, 2], 'grid-safety-tail-forward'),
+    reverse: runTailOrderCase([2, 1, 0], 'grid-safety-tail-reverse'),
+    asyncUpdate: runTailOrderCase([2, 0, 1], 'grid-safety-tail-async-update', true)
+  };
 
   const multiSourceRect = rect(multiSource);
   const multiTranslationRect = rect(multiTranslation);
@@ -147,7 +192,8 @@ function run() {
       translationRect: transitionAfterTranslation,
       hostLayoutSafe: !overlaps(transitionAfterTranslation, transitionAfter.source) &&
         !overlaps(transitionAfterTranslation, transitionAfter.control)
-    }
+    },
+    tailOrder
   };
 
   const passed = result.twoRowGrid.placement === 'grid-layout-external' &&
@@ -170,7 +216,11 @@ function run() {
     result.responsiveTransition.initialPlacement === 'grid-layout-anchored' &&
     result.responsiveTransition.placement === 'grid-layout-external' &&
     result.responsiveTransition.outsideGrid &&
-    result.responsiveTransition.hostLayoutSafe;
+    result.responsiveTransition.hostLayoutSafe &&
+    Object.entries(result.tailOrder).every(([name, {order, restored}]) => {
+      const expected = name === 'asyncUpdate' ? 'T0 updated|T1|T2' : 'T0|T1|T2';
+      return restored && order.join('|') === expected;
+    });
 
   multiRenderer.removeAll();
   clippedRenderer.removeAll();

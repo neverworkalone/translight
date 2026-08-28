@@ -626,6 +626,126 @@ describe('TranslationRenderer', () => {
     renderer.removeAll();
   });
 
+  it('keeps external grid translations ordered when the grid is the host tail', () => {
+    const run = (insertionOrder, sessionId, update = false) => {
+      document.body.innerHTML = '';
+      const host = document.createElement('div');
+      const layout = document.createElement('div');
+      layout.style.display = 'grid';
+      layout.style.gridTemplateColumns = '100px';
+      layout.style.gridTemplateRows = '20px 20px 20px';
+      const sources = [0, 1, 2].map((index) => {
+        const source = document.createElement('div');
+        source.id = `tail-source-${index}`;
+        source.style.display = 'flex';
+        source.textContent = `Item ${index}`;
+        layout.appendChild(source);
+        return source;
+      });
+      host.appendChild(layout);
+      document.body.appendChild(host);
+
+      const renderer = new TranslationRenderer({document, sessionId});
+      for (const index of insertionOrder) {
+        renderer.insert({
+          element: sources[index],
+          sourceId: `tail-source-${index}`,
+          translatedText: `T${index}`
+        });
+      }
+      if (update) {
+        renderer.insert({
+          element: sources[0],
+          sourceId: 'tail-source-0',
+          translatedText: 'T0 updated'
+        });
+      }
+      const translations = () => Array.from(host.children)
+        .filter((child) => child.matches('translight-translation'))
+        .map((child) => child.textContent);
+      const result = translations();
+      renderer.removeAll();
+      return {host, layout, result};
+    };
+
+    expect(run([0, 1, 2], 'grid-tail-forward').result).toEqual(['T0', 'T1', 'T2']);
+    expect(run([2, 1, 0], 'grid-tail-reverse').result).toEqual(['T0', 'T1', 'T2']);
+    expect(run([2, 0, 1], 'grid-tail-async-update', true).result)
+      .toEqual(['T0 updated', 'T1', 'T2']);
+  });
+
+  it('bounds external grid ordering work without scanning the host children', () => {
+    const measureExternalOrderWork = (sourceCount, sessionId) => {
+      document.body.innerHTML = '';
+      const host = document.createElement('div');
+      const layout = document.createElement('div');
+      layout.style.display = 'grid';
+      layout.style.gridTemplateColumns = '100px 100px';
+      layout.style.gridTemplateRows = Array(Math.ceil(sourceCount / 2)).fill('20px').join(' ');
+      const sources = [];
+      for (let index = 0; index < sourceCount; index += 1) {
+        const source = document.createElement('div');
+        source.style.display = 'flex';
+        source.textContent = `Item ${index}`;
+        layout.appendChild(source);
+        sources.push(source);
+      }
+      host.appendChild(layout);
+      document.body.appendChild(host);
+
+      let hostChildIterations = 0;
+      const hostChildren = host.children;
+      const originalHostIterator = hostChildren[Symbol.iterator].bind(hostChildren);
+      Object.defineProperty(hostChildren, Symbol.iterator, {
+        configurable: true,
+        value() {
+          const iterator = originalHostIterator();
+          return {
+            next() {
+              const result = iterator.next();
+              if (!result.done) hostChildIterations += 1;
+              return result;
+            },
+            [Symbol.iterator]() {
+              return this;
+            }
+          };
+        }
+      });
+
+      let sourceComparisons = 0;
+      const nodePrototype = document.defaultView.Node.prototype;
+      const originalCompareDocumentPosition = nodePrototype.compareDocumentPosition;
+      nodePrototype.compareDocumentPosition = function(other) {
+        if (this.parentNode === layout && other?.parentNode === layout) sourceComparisons += 1;
+        return originalCompareDocumentPosition.call(this, other);
+      };
+
+      const renderer = new TranslationRenderer({document, sessionId});
+      try {
+        for (let index = 0; index < sourceCount; index += 1) {
+          renderer.insert({
+            element: sources[index],
+            sourceId: `${sessionId}-${index}`,
+            translatedText: `번역 ${index}`
+          });
+        }
+      } finally {
+        nodePrototype.compareDocumentPosition = originalCompareDocumentPosition;
+        renderer.removeAll();
+      }
+      return {hostChildIterations, sourceComparisons};
+    };
+
+    const small = measureExternalOrderWork(500, 'external-order-small');
+    const large = measureExternalOrderWork(1000, 'external-order-large');
+
+    expect(small.hostChildIterations).toBe(0);
+    expect(large.hostChildIterations).toBe(0);
+    expect(small.sourceComparisons).toBeGreaterThan(0);
+    expect(large.sourceComparisons).toBeLessThanOrEqual(small.sourceComparisons * 3);
+  });
+
   it('clears anchored translation styles when a grid source becomes a normal sibling', () => {
     document.body.innerHTML = `
       <div id="layout" style="display:grid;grid-template-columns:60px 1fr">

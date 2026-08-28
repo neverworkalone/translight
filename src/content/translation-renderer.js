@@ -51,10 +51,12 @@ const COLLAPSED_REVIEW_TRANSLATION_AFTER_CARD = 'after-card';
 const COLLAPSED_REVIEW_TRANSLATION_BEFORE_CARD = 'before-card';
 const AMAZON_REVIEW_CONTENT_SELECTOR = '[data-hook="reviewRichContentContainer"]';
 const AMAZON_REVIEW_CARD_SELECTOR = '[data-a-card-type="basic"]';
+const DOCUMENT_POSITION_PRECEDING = 2;
 const DOCUMENT_POSITION_FOLLOWING = 4;
 const gridLayoutReservations = new WeakMap();
 const gridLayoutSafetyCache = new WeakMap();
 const gridLayoutExternalSources = new WeakMap();
+const gridLayoutExternalGroups = new WeakMap();
 const GRID_LAYOUT_SAFETY_STYLE_PROPERTIES = [
   'grid-template-columns',
   'grid-template-rows',
@@ -602,13 +604,204 @@ function getGridExternalInsertionPoint(gridParent) {
   return {container, host};
 }
 
-function getGridExternalTranslations(host, gridParent, anchor, beforeAnchor, currentTranslation) {
-  return Array.from(host?.children ?? []).filter((candidate) => {
-    if (candidate === currentTranslation || !candidate.matches?.(TRANSLATION_TAG)) return false;
-    const metadata = gridLayoutExternalSources.get(candidate);
-    return metadata?.gridParent === gridParent && metadata.anchor === anchor &&
-      metadata.beforeAnchor === beforeAnchor && metadata.source?.parentNode === gridParent;
-  });
+function createGridExternalGroup(host, gridParent, anchor, beforeAnchor) {
+  return {
+    host,
+    gridParent,
+    anchor,
+    beforeAnchor,
+    root: null,
+    nodes: new Map()
+  };
+}
+
+function getGridExternalGroup(host, gridParent, anchor, beforeAnchor, {create = true} = {}) {
+  if (!host || !gridParent || !anchor) return null;
+  let groupsByAnchor = gridLayoutExternalGroups.get(host);
+  if (!groupsByAnchor) {
+    if (!create) return null;
+    groupsByAnchor = new WeakMap();
+    gridLayoutExternalGroups.set(host, groupsByAnchor);
+  }
+  let groupsByGridParent = groupsByAnchor.get(anchor);
+  if (!groupsByGridParent) {
+    if (!create) return null;
+    groupsByGridParent = new WeakMap();
+    groupsByAnchor.set(anchor, groupsByGridParent);
+  }
+  let groupPair = groupsByGridParent.get(gridParent);
+  if (!groupPair) {
+    if (!create) return null;
+    groupPair = {before: null, after: null};
+    groupsByGridParent.set(gridParent, groupPair);
+  }
+  const key = beforeAnchor ? 'before' : 'after';
+  if (!groupPair[key] && create) {
+    groupPair[key] = createGridExternalGroup(host, gridParent, anchor, beforeAnchor);
+  }
+  return groupPair[key] ?? null;
+}
+
+function releaseGridExternalGroup(group) {
+  if (!group?.host || group.nodes.size) return;
+  const groupsByAnchor = gridLayoutExternalGroups.get(group.host);
+  const groupsByGridParent = groupsByAnchor?.get(group.anchor);
+  const groupPair = groupsByGridParent?.get(group.gridParent);
+  if (!groupPair) return;
+  const key = group.beforeAnchor ? 'before' : 'after';
+  if (groupPair[key] === group) groupPair[key] = null;
+  if (!groupPair.before && !groupPair.after) groupsByGridParent.delete(group.gridParent);
+}
+
+function compareGridExternalSources(first, second) {
+  if (first === second) return 0;
+  const position = first?.compareDocumentPosition?.(second) ?? 0;
+  if (position & DOCUMENT_POSITION_FOLLOWING) return -1;
+  if (position & DOCUMENT_POSITION_PRECEDING) return 1;
+  return 0;
+}
+
+// Keep source order in a per-anchor index instead of rediscovering generated
+// siblings from the outer host. A translation may arrive out of order, so the
+// index provides its nearest translated neighbors without touching unrelated
+// host children.
+function gridExternalNodeHeight(node) {
+  return node?.height ?? 0;
+}
+
+function updateGridExternalNodeHeight(node) {
+  if (node) {
+    node.height = 1 + Math.max(
+      gridExternalNodeHeight(node.left),
+      gridExternalNodeHeight(node.right)
+    );
+  }
+  return node;
+}
+
+function rotateGridExternalLeft(node) {
+  const pivot = node.right;
+  node.right = pivot.left;
+  pivot.left = updateGridExternalNodeHeight(node);
+  return updateGridExternalNodeHeight(pivot);
+}
+
+function rotateGridExternalRight(node) {
+  const pivot = node.left;
+  node.left = pivot.right;
+  pivot.right = updateGridExternalNodeHeight(node);
+  return updateGridExternalNodeHeight(pivot);
+}
+
+function rebalanceGridExternalNode(node) {
+  updateGridExternalNodeHeight(node);
+  const balance = gridExternalNodeHeight(node.left) - gridExternalNodeHeight(node.right);
+  if (balance > 1) {
+    if (gridExternalNodeHeight(node.left.left) < gridExternalNodeHeight(node.left.right)) {
+      node.left = rotateGridExternalLeft(node.left);
+    }
+    return rotateGridExternalRight(node);
+  }
+  if (balance < -1) {
+    if (gridExternalNodeHeight(node.right.right) < gridExternalNodeHeight(node.right.left)) {
+      node.right = rotateGridExternalRight(node.right);
+    }
+    return rotateGridExternalLeft(node);
+  }
+  return node;
+}
+
+function insertGridExternalNode(root, node) {
+  if (!root) return node;
+  const comparison = compareGridExternalSources(node.source, root.source);
+  if (comparison < 0) root.left = insertGridExternalNode(root.left, node);
+  else if (comparison > 0) root.right = insertGridExternalNode(root.right, node);
+  else return root;
+  return rebalanceGridExternalNode(root);
+}
+
+function getMinimumGridExternalNode(root) {
+  let node = root;
+  while (node?.left) node = node.left;
+  return node;
+}
+
+function getMaximumGridExternalNode(root) {
+  let node = root;
+  while (node?.right) node = node.right;
+  return node;
+}
+
+function removeGridExternalRoot(root) {
+  if (!root.left) return root.right;
+  if (!root.right) return root.left;
+  const successor = getMinimumGridExternalNode(root.right);
+  successor.right = removeGridExternalNode(root.right, successor.source);
+  successor.left = root.left;
+  return rebalanceGridExternalNode(successor);
+}
+
+function removeGridExternalNode(root, source) {
+  if (!root) return null;
+  const comparison = compareGridExternalSources(source, root.source);
+  if (comparison < 0) {
+    root.left = removeGridExternalNode(root.left, source);
+    return rebalanceGridExternalNode(root);
+  }
+  if (comparison > 0) {
+    root.right = removeGridExternalNode(root.right, source);
+    return rebalanceGridExternalNode(root);
+  }
+  return removeGridExternalRoot(root);
+}
+
+function removeGridExternalNodeByIdentity(root, target) {
+  if (!root) return null;
+  if (root === target) return removeGridExternalRoot(root);
+  const previousLeft = root.left;
+  root.left = removeGridExternalNodeByIdentity(root.left, target);
+  if (root.left !== previousLeft) return rebalanceGridExternalNode(root);
+  const previousRight = root.right;
+  root.right = removeGridExternalNodeByIdentity(root.right, target);
+  if (root.right !== previousRight) return rebalanceGridExternalNode(root);
+  return root;
+}
+
+function getGridExternalNeighbors(root, source) {
+  let predecessor = null;
+  let successor = null;
+  let node = root;
+  while (node) {
+    const comparison = compareGridExternalSources(source, node.source);
+    if (comparison < 0) {
+      successor = node;
+      node = node.left;
+    } else if (comparison > 0) {
+      predecessor = node;
+      node = node.right;
+    } else {
+      predecessor = getMaximumGridExternalNode(node.left) ?? predecessor;
+      successor = getMinimumGridExternalNode(node.right) ?? successor;
+      break;
+    }
+  }
+  return {predecessor, successor};
+}
+
+function removeGridLayoutExternalTranslation(translation) {
+  const metadata = gridLayoutExternalSources.get(translation);
+  if (!metadata) return false;
+  const {group, source} = metadata;
+  const node = group?.nodes.get(source);
+  if (node) {
+    group.root = source.parentNode === group.gridParent
+      ? removeGridExternalNode(group.root, source)
+      : removeGridExternalNodeByIdentity(group.root, node);
+    group.nodes.delete(source);
+    releaseGridExternalGroup(group);
+  }
+  gridLayoutExternalSources.delete(translation);
+  return true;
 }
 
 function insertGridLayoutExternalTranslation({
@@ -620,23 +813,24 @@ function insertGridLayoutExternalTranslation({
 }) {
   const host = anchor?.parentNode;
   if (!host || !source || !translation) return false;
-  const translations = getGridExternalTranslations(
-    host,
-    gridParent,
-    anchor,
-    beforeAnchor,
-    translation
-  );
-  const nextTranslation = translations.find((candidate) => {
-    const candidateSource = gridLayoutExternalSources.get(candidate)?.source;
-    return Boolean(candidateSource &&
-      (source.compareDocumentPosition(candidateSource) & DOCUMENT_POSITION_FOLLOWING));
-  });
+  removeGridLayoutExternalTranslation(translation);
+  const group = getGridExternalGroup(host, gridParent, anchor, beforeAnchor);
+  if (!group) return false;
+  const {predecessor, successor} = getGridExternalNeighbors(group.root, source);
   const insertionReference = beforeAnchor
-    ? nextTranslation ?? anchor
-    : nextTranslation ?? translations.at(-1)?.nextSibling ?? anchor.nextSibling;
+    ? successor?.translation ?? anchor
+    : successor?.translation ?? (predecessor ? predecessor.translation.nextSibling : anchor.nextSibling);
   if (insertionReference !== translation) host.insertBefore(translation, insertionReference ?? null);
-  gridLayoutExternalSources.set(translation, {source, gridParent, anchor, beforeAnchor});
+  const node = {
+    source,
+    translation,
+    height: 1,
+    left: null,
+    right: null
+  };
+  group.root = insertGridExternalNode(group.root, node);
+  group.nodes.set(source, node);
+  gridLayoutExternalSources.set(translation, {source, gridParent, anchor, beforeAnchor, group});
   return true;
 }
 
@@ -934,7 +1128,7 @@ function cleanupGridLayoutPlacement(record) {
   if (!isGridLayoutPlacement(record?.placement)) return;
   const {element, translation} = record;
   if (record.placement.kind === GRID_LAYOUT_EXTERNAL_PLACEMENT) {
-    gridLayoutExternalSources.delete(translation);
+    removeGridLayoutExternalTranslation(translation);
   } else {
     resetGridLayoutTranslationStyles(translation);
   }
