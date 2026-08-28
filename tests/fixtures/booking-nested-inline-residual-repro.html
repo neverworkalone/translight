@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Translight Booking nested inline residual reproduction</title>
+    <style>
+      html { scroll-behavior: auto; }
+      body {
+        margin: 0;
+        color: #262626;
+        background: #fff;
+        font: 14px/1.5 Arial, sans-serif;
+      }
+      #report {
+        position: fixed;
+        z-index: 10;
+        top: 12px;
+        right: 12px;
+        width: 390px;
+        max-height: 90vh;
+        overflow: auto;
+        box-sizing: border-box;
+        padding: 12px;
+        background: #111827;
+        color: white;
+        font: 12px/1.4 monospace;
+        white-space: pre-wrap;
+      }
+      #property-page {
+        width: min(960px, calc(100% - 48px));
+        margin: 48px auto 120px;
+      }
+      #description-column {
+        width: min(700px, calc(100% - 320px));
+      }
+      h1, h2, h3 { color: #1f1f1f; }
+      h3 { margin: 0 0 18px; }
+      [data-testid="property-description"] {
+        margin: 0 0 28px;
+        white-space: pre-wrap;
+        font-size: 15px;
+        line-height: 1.55;
+      }
+      [data-testid="property-description"] span {
+        white-space: inherit;
+      }
+    </style>
+  </head>
+  <body>
+    <pre id="report">starting…</pre>
+    <main id="property-page">
+      <section id="description-column" data-capla-component-boundary="b-property-web-property-page/PropertyDescriptionDesktop">
+        <h3>About this property</h3>
+        <p id="nested-description" data-testid="property-description">This introduction explains the hotel location.<span><b>Facilities: </b>Guests can use the hotel swimming pool.
+
+<b>Rooms: </b>Each room has a balcony with sea views.</span> This final note explains the cancellation policy.</p>
+        <p id="sibling-description" data-testid="property-description">Opening note has enough English words.<span><b>First: </b>First inline paragraph has enough English words.
+
+<b>Second: </b>Second inline paragraph has enough English words.</span>Middle note has enough English words.<span><b>Third: </b>Third inline paragraph has enough English words.
+
+<b>Fourth: </b>Fourth inline paragraph has enough English words.</span>Closing note has enough English words.</p>
+      </section>
+    </main>
+    <script type="module" src="/tests/fixtures/booking-nested-inline-residual-repro.js"></script>
+  </body>
+</html>

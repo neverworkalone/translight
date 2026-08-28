@@ -48,6 +48,30 @@ The repaired case must report `segmentCount: 4`, `translationCount: 4`,
 `translationsInsideDescription: true`, `interleaved: true`,
 `testPassed: true`, and `restoredAfterStop: true`.
 
+## Booking nested inline residual paragraphs
+
+Fixture: `booking-nested-inline-residual-repro.html` and
+`booking-nested-inline-residual-repro.js`
+
+Open this URL in Chrome while the Vite development server is running:
+
+```text
+http://127.0.0.1:5173/tests/fixtures/booking-nested-inline-residual-repro.html
+```
+
+This fixture models the post-review Booking case where paragraph labels and
+blank-line text are nested inside inline containers, while introduction,
+interstitial, and concluding prose remains outside those containers. It also
+includes two sibling inline containers to verify source coverage and order.
+The runner checks the rendered source/translation pairs for vertical overlap,
+stops and restarts the same session, and verifies that cleanup restores the
+original markup without duplicate segments.
+
+The repaired case must report `segmentCount: 11`, `translationCount: 11`,
+`interleaved: true`, `restoredAfterStop: true`,
+`restoredAfterRestart: true`, `restartHasNoDuplicates: true`, and
+`testPassed: true`.
+
 ## IMDb native scroll-anchor observation
 
 Fixture: `imdb-jitter-repro.html` and `imdb-jitter-repro.js`
