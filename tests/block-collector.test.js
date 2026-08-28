@@ -424,6 +424,51 @@ describe('collectTranslationBlocks', () => {
       .toBe(true);
   });
 
+  it('does not create nested segments when ancestor and descendant text both contain breaks', () => {
+    document.body.innerHTML = '<p id="description">Opening hotel description has enough English words.\n\n<b>Facilities: </b><span>Guests can use the hotel swimming pool.\n\nGuests can also use the hotel spa.</span> Final cancellation policy has enough English words.</p>';
+
+    const description = document.querySelector('#description');
+    const expectedTexts = [
+      'Opening hotel description has enough English words.',
+      'Facilities:',
+      'Guests can use the hotel swimming pool.',
+      'Guests can also use the hotel spa.',
+      'Final cancellation policy has enough English words.'
+    ];
+    const blocks = collectTranslationBlocks(description);
+    const secondPass = collectTranslationBlocks(description);
+    const segments = Array.from(description.querySelectorAll('[data-translight-segment="true"]'));
+
+    expect(blocks.map((block) => block.text)).toEqual(expectedTexts);
+    expect(secondPass.map((block) => block.text)).toEqual(expectedTexts);
+    expect(segments).toHaveLength(expectedTexts.length);
+    expect(segments.every((segment) =>
+      segment.querySelector('[data-translight-segment="true"]') === null
+    )).toBe(true);
+  });
+
+  it('keeps ancestor and descendant br paragraphs as non-overlapping segments', () => {
+    document.body.innerHTML = '<div id="description"><span><span>Guests can use the hotel swimming pool.<br><br>Guests can also use the hotel spa.</span> Outer facilities note has enough English words.<br><br>Final outer note has enough English words.</span></div>';
+
+    const description = document.querySelector('#description');
+    const expectedTexts = [
+      'Guests can use the hotel swimming pool.',
+      'Guests can also use the hotel spa.',
+      'Outer facilities note has enough English words.',
+      'Final outer note has enough English words.'
+    ];
+    const blocks = collectTranslationBlocks(description);
+    const secondPass = collectTranslationBlocks(description);
+    const segments = Array.from(description.querySelectorAll('[data-translight-segment="true"]'));
+
+    expect(blocks.map((block) => block.text)).toEqual(expectedTexts);
+    expect(secondPass.map((block) => block.text)).toEqual(expectedTexts);
+    expect(segments).toHaveLength(expectedTexts.length);
+    expect(segments.every((segment) =>
+      segment.querySelector('[data-translight-segment="true"]') === null
+    )).toBe(true);
+  });
+
   it('keeps inline paragraph segmentation within a linear query budget', () => {
     const measure = (paragraphCount) => {
       document.body.innerHTML = `
@@ -512,7 +557,7 @@ describe('collectTranslationBlocks', () => {
 
   it('keeps nested residual boundary checks within a linear operation budget', () => {
     const measure = (containerCount) => {
-      document.body.innerHTML = `<p id="description">Opening note has enough English words.${Array.from({length: containerCount}, (_, index) => `<span>Outer introduction ${index} has enough English words. <span><b>First:</b>First paragraph has enough English words.\n\n<b>Second:</b>Second paragraph has enough English words.</span> Outer conclusion ${index} has enough English words.</span>`).join('')}Final closing note has enough English words.</p>`;
+      document.body.innerHTML = `<p id="description">Opening note has enough English words.${Array.from({length: containerCount}, (_, index) => `<span>Outer introduction ${index} has enough English words. <span><b>First:</b>First paragraph has enough English words.\n\n<b>Second:</b>Second paragraph has enough English words.</span> Outer conclusion ${index} has enough English words.</span>`).join('')}</p>`;
 
       const originalContains = Element.prototype.contains;
       let containsCalls = 0;
@@ -532,8 +577,8 @@ describe('collectTranslationBlocks', () => {
     const smaller = measure(8);
     const larger = measure(16);
 
-    expect(smaller.blocks).toHaveLength(8 * 4 + 2);
-    expect(larger.blocks).toHaveLength(16 * 4 + 2);
+    expect(smaller.blocks).toHaveLength(8 * 4 + 1);
+    expect(larger.blocks).toHaveLength(16 * 4 + 1);
     expect(larger.containsCalls).toBeLessThanOrEqual(smaller.containsCalls * 2);
   });
 

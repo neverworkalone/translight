@@ -221,20 +221,25 @@ function getDoubleLineBreakParts(value) {
   return parts;
 }
 
-function getTextNodes(node, root, nodes = []) {
-  if (node?.nodeType === 3) {
-    nodes.push(node);
-    return nodes;
-  }
-  if (!isElement(node)) return nodes;
+function getNestedNewlineContainers(node, root, containers = []) {
+  if (!isElement(node)) return containers;
   if (node !== root && (
     isExcluded(node) ||
     node.matches(GENERATED_SELECTOR) ||
     node.matches(SEGMENT_SELECTOR) ||
     isHidden(node)
-  )) return nodes;
-  for (const child of Array.from(node.childNodes ?? [])) getTextNodes(child, root, nodes);
-  return nodes;
+  )) return containers;
+
+  const textNodes = [];
+  for (const child of Array.from(node.childNodes ?? [])) {
+    if (child.nodeType === 3) {
+      if (DOUBLE_LINE_BREAK_PATTERN.test(child.nodeValue ?? '')) textNodes.push(child);
+      continue;
+    }
+    getNestedNewlineContainers(child, root, containers);
+  }
+  if (textNodes.length) containers.push({container: node, textNodes});
+  return containers;
 }
 
 function splitTextNodeAtDoubleLineBreaks(textNode, targetLanguage) {
@@ -436,7 +441,7 @@ function splitUnsegmentedDirectChildrenIntoSegments(
   element,
   processedContainers,
   targetLanguage,
-  {boundaryNodes = getProcessedBoundaryNodes(element, processedContainers)} = {}
+  {boundaryNodes = new Set()} = {}
 ) {
   if (!processedContainers.length) return [];
 
@@ -541,22 +546,18 @@ function splitNestedBreaksIntoSegments(element, targetLanguage) {
 function splitNestedNewlineTextIntoSegments(element, targetLanguage) {
   const wrappers = [];
   const processedContainers = [];
-  const seenContainers = new Set();
-  for (const textNode of getTextNodes(element, element)) {
-    if (!DOUBLE_LINE_BREAK_PATTERN.test(textNode.nodeValue ?? '')) continue;
-    const container = textNode.parentElement;
-    if (!container || seenContainers.has(container)) continue;
+  for (const {container, textNodes} of getNestedNewlineContainers(element, element)) {
     const containerWrappers = splitPhrasingContainerAtDoubleBreaks(container, targetLanguage);
     if (containerWrappers.length) {
-      seenContainers.add(container);
       processedContainers.push(container);
       wrappers.push(...containerWrappers);
       continue;
     }
 
-    const textNodeWrappers = splitTextNodeAtDoubleLineBreaks(textNode, targetLanguage);
+    const textNodeWrappers = textNodes.flatMap((textNode) =>
+      textNode.parentNode ? splitTextNodeAtDoubleLineBreaks(textNode, targetLanguage) : []
+    );
     if (!textNodeWrappers.length) continue;
-    seenContainers.add(container);
     processedContainers.push(container);
     wrappers.push(...textNodeWrappers);
     wrappers.push(...splitUnsegmentedDirectChildrenIntoSegments(
