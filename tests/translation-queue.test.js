@@ -121,23 +121,67 @@ describe('TranslationQueue', () => {
     let viewport = {innerHeight: 800, innerWidth: 1000};
     const far = block('far', 'far', {top: 2200, bottom: 2250, left: 0, right: 100});
     const visibleAfterScroll = block('after-scroll', 'after-scroll', {top: 2200, bottom: 2250, left: 0, right: 100});
+    const stillFar = block('still-far', 'still-far', {top: 2400, bottom: 2450, left: 0, right: 100});
+    const results = [];
     const queue = new TranslationQueue({
       concurrency: 1,
       getViewport: () => viewport,
       translate: (text) => new Promise((resolve) => {
         if (text === 'far') resolveActive = resolve;
         else resolve(`ko:${text}`);
-      })
+      }),
+      onResult: (item) => results.push(item.sourceId)
     });
 
-    queue.enqueue([far, visibleAfterScroll]);
+    queue.enqueue([far, visibleAfterScroll, stillFar]);
     await Promise.resolve();
     visibleAfterScroll.element.getBoundingClientRect = () => ({top: 100, bottom: 120, left: 0, right: 100});
     viewport = {innerHeight: 800, innerWidth: 1000};
     queue.reprioritize();
-    expect(queue.pending[0].sourceId).toBe('after-scroll');
 
     resolveActive('ko:far');
     await queue.whenIdle();
+    expect(results.slice(0, 2)).toEqual(['far', 'after-scroll']);
+  });
+
+  it('does not rescan a long pending page for every scroll reprioritization', () => {
+    let resolveActive;
+    let rectCalls = 0;
+    const results = [];
+    const rectState = new Map();
+    const blocks = Array.from({length: 2050}, (_, index) => ({
+      sourceId: `scroll-source-${index}`,
+      text: `scroll-text-${index}`,
+      element: {
+        getBoundingClientRect: () => {
+          rectCalls += 1;
+          return rectState.get(index);
+        }
+      }
+    }));
+    for (let index = 0; index < blocks.length; index += 1) {
+      rectState.set(index, {top: 3000 + index, bottom: 3020 + index, left: 0, right: 100});
+    }
+    const queue = new TranslationQueue({
+      concurrency: 1,
+      pendingLimit: 2048,
+      viewport: {innerHeight: 800, innerWidth: 1000},
+      translate: (text) => text === 'scroll-text-0'
+        ? new Promise((resolve) => { resolveActive = resolve; })
+        : Promise.resolve(`ko:${text}`),
+      onResult: (item) => results.push(item.sourceId)
+    });
+
+    queue.enqueue(blocks);
+    const setupCalls = rectCalls;
+    rectState.set(2047, {top: 100, bottom: 120, left: 0, right: 100});
+    for (let index = 0; index < 8; index += 1) queue.reprioritize();
+
+    expect(rectCalls).toBe(setupCalls);
+    resolveActive?.('ko:scroll-text-0');
+    return queue.whenIdle().then(() => {
+      expect(results.slice(0, 2)).toEqual(['scroll-source-0', 'scroll-source-2047']);
+      queue.cancel();
+    });
   });
 });

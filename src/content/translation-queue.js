@@ -122,6 +122,7 @@ export class TranslationQueue {
     this.idleResolvers = [];
     this.batchChain = Promise.resolve();
     this.viewportVersion = 0;
+    this.priorityDirty = true;
     this.signal = signal;
     this.abortListener = () => this.cancel();
     signal?.addEventListener?.('abort', this.abortListener, {once: true});
@@ -153,6 +154,7 @@ export class TranslationQueue {
     }
 
     this.pending.push(...candidates);
+    this.priorityDirty = true;
     this.sortPending();
     if (this.pending.length > this.pendingLimit) {
       const dropped = this.pending.slice(this.pendingLimit);
@@ -200,12 +202,19 @@ export class TranslationQueue {
   reprioritize() {
     if (this.cancelled) return;
     this.viewportVersion += 1;
-    this.sortPending();
+    this.priorityDirty = true;
+    // Scrolling only needs to update the viewport snapshot. The next pump
+    // applies it when selecting work, avoiding a full pending-queue sort for
+    // every scroll event while the provider is busy.
   }
 
   sortPending() {
-    if (this.pending.length < 2) return;
+    if (!this.priorityDirty || this.pending.length < 2) {
+      this.priorityDirty = false;
+      return;
+    }
     this.pending = prioritizeBlocks(this.pending, this.currentPriorityOptions());
+    this.priorityDirty = false;
   }
 
   forgetSeen(key) {

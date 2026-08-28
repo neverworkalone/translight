@@ -437,6 +437,28 @@ same unchanged route repeatedly.
 The repaired case must report `testPassed: true`,
 `restoredAfterStop: true`, and `collectCalls <= 18`.
 
+## Metacritic scroll and repeated back/forward regression
+
+Fixture: `metacritic-scroll-navigation-repro.html` and
+`metacritic-scroll-navigation-repro.js`
+
+Open this URL in Chrome while the Vite development server is running:
+
+```text
+http://127.0.0.1:5173/tests/fixtures/metacritic-scroll-navigation-repro.html
+```
+
+This fixture follows the supplied live-site path: start translation, scroll to
+`Latest News` and wait for its items, return to the top, click the
+`New and Notable` `Star Wars Zero Company` link, scroll the detail route to the
+bottom, then repeat browser back/forward cycles. The page uses a long queue so
+scroll reprioritization exercises the same pending work as the Metacritic
+homepage. Each restored route must retain exactly one translation per source,
+and stopping the session must clean up every generated node.
+
+The repaired case must report `latestNewsTranslated >= 8`,
+`testPassed: true`, and `restoredAfterStop: true`.
+
 When adding another browser regression, use a descriptive `<bug-name>-repro`
 fixture name and document its reproducible URL and pass/fail signal in this
 file.
