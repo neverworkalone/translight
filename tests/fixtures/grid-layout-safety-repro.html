@@ -46,6 +46,11 @@
       .clipped-source { overflow: hidden; }
 
       .transition-grid { grid-template-columns: 120px 1fr; }
+
+      .suppressed-grid {
+        grid-template-columns: 120px;
+        grid-template-rows: 36px 36px;
+      }
     </style>
   </head>
   <body>
@@ -84,6 +89,14 @@
       <div id="transition-grid" class="grid transition-grid">
         <div id="transition-source" class="grid-source">LIVE</div>
         <div id="transition-control" class="grid-control">ALL</div>
+      </div>
+    </section>
+
+    <section class="case">
+      <h2>Suppressed external translation survives source mutations</h2>
+      <div id="suppressed-grid" class="grid suppressed-grid">
+        <div id="suppressed-source" class="grid-source">Original</div>
+        <div id="suppressed-control" class="grid-control">Control</div>
       </div>
     </section>
 

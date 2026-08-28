@@ -736,6 +736,119 @@ describe('TranslationRenderer', () => {
     });
   });
 
+  it('does not resurrect an external translation suppressed by translation-only replacement', async () => {
+    document.body.innerHTML = `
+      <div id="host">
+        <div id="layout" style="display:grid;grid-template-columns:100px;grid-template-rows:20px 20px">
+          <div id="source" style="display:flex">Original</div>
+          <div id="control">Control</div>
+        </div>
+      </div>
+    `;
+    const source = document.querySelector('#source');
+    const layout = document.querySelector('#layout');
+    const renderer = new TranslationRenderer({
+      document,
+      sessionId: 'suppressed-external-grid',
+      settings: {translationMode: TRANSLATION_MODES.TRANSLATION_ONLY}
+    });
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'suppressed-external-grid-source',
+      translatedText: 'Translated'
+    });
+
+    expect(translation.isConnected).toBe(false);
+
+    layout.appendChild(source);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(translation.isConnected).toBe(false);
+    expect(renderer.records.get('suppressed-external-grid-source')?.translationSuppressed)
+      .toBe(true);
+
+    renderer.updatePresentation({translationMode: TRANSLATION_MODES.ORIGINAL_TRANSLATION});
+    expect(translation.isConnected).toBe(true);
+    expect(renderer.records.get('suppressed-external-grid-source')?.translationSuppressed)
+      .toBe(false);
+
+    renderer.updatePresentation({translationMode: TRANSLATION_MODES.TRANSLATION_ONLY});
+    expect(translation.isConnected).toBe(false);
+    renderer.removeAll();
+  });
+
+  it('reconciles active external translations when sources move during layout sync', () => {
+    document.body.innerHTML = `
+      <div id="host">
+        <div id="layout" style="display:grid;grid-template-columns:100px;grid-template-rows:20px 20px 20px">
+          <div id="source-a" style="display:flex">A</div>
+          <div id="source-b" style="display:flex">B</div>
+          <div id="source-c" style="display:flex">C</div>
+        </div>
+      </div>
+    `;
+    const host = document.querySelector('#host');
+    const layout = document.querySelector('#layout');
+    const sourceA = document.querySelector('#source-a');
+    const renderer = new TranslationRenderer({document, sessionId: 'external-grid-sync-move'});
+    for (const id of ['a', 'b', 'c']) {
+      renderer.insert({
+        element: document.querySelector(`#source-${id}`),
+        sourceId: `external-grid-sync-${id}`,
+        translatedText: id.toUpperCase()
+      });
+    }
+
+    layout.appendChild(sourceA);
+    renderer.syncLayouts();
+
+    expect(Array.from(host.children)
+      .filter((child) => child.matches('translight-translation'))
+      .map((child) => child.textContent))
+      .toEqual(['B', 'C', 'A']);
+    renderer.removeAll();
+  });
+
+  it('does not rebuild external grid order for unrelated child mutations', async () => {
+    document.body.innerHTML = `
+      <div id="host">
+        <div id="layout" style="display:grid;grid-template-columns:100px;grid-template-rows:20px 20px 20px">
+          <div id="source-a" style="display:flex">A</div>
+          <div id="source-b" style="display:flex">B</div>
+          <div id="control">Control</div>
+        </div>
+      </div>
+    `;
+    const layout = document.querySelector('#layout');
+    const control = document.querySelector('#control');
+    const renderer = new TranslationRenderer({document, sessionId: 'external-grid-control-mutation'});
+    for (const id of ['a', 'b']) {
+      renderer.insert({
+        element: document.querySelector(`#source-${id}`),
+        sourceId: `external-grid-control-${id}`,
+        translatedText: id.toUpperCase()
+      });
+    }
+
+    let sourceComparisons = 0;
+    const nodePrototype = document.defaultView.Node.prototype;
+    const originalCompareDocumentPosition = nodePrototype.compareDocumentPosition;
+    nodePrototype.compareDocumentPosition = function(other) {
+      if (this.parentNode === layout && other?.parentNode === layout) sourceComparisons += 1;
+      return originalCompareDocumentPosition.call(this, other);
+    };
+    try {
+      layout.appendChild(control);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      renderer.syncLayouts();
+    } finally {
+      nodePrototype.compareDocumentPosition = originalCompareDocumentPosition;
+      renderer.removeAll();
+    }
+
+    expect(sourceComparisons).toBe(0);
+  });
+
   it('bounds external grid ordering work without scanning the host children', () => {
     const measureExternalOrderWork = (sourceCount, sessionId) => {
       document.body.innerHTML = '';

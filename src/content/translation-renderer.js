@@ -648,6 +648,29 @@ function getGridExternalGroup(host, gridParent, anchor, beforeAnchor, {create = 
   return groupPair[key] ?? null;
 }
 
+function mutationIncludesGridExternalSource(record, group) {
+  if (record?.type !== 'childList' || record.target !== group?.gridParent) return false;
+  for (const node of record.addedNodes ?? []) {
+    if (group.nodes.has(node)) return true;
+  }
+  for (const node of record.removedNodes ?? []) {
+    if (group.nodes.has(node)) return true;
+  }
+  return false;
+}
+
+function markGridExternalOrderChanges(entry, records) {
+  if (!entry || !records?.length) return;
+  for (const group of entry.groups) {
+    if (group.orderDirty || !group.nodes.size) continue;
+    for (const record of records) {
+      if (!mutationIncludesGridExternalSource(record, group)) continue;
+      group.orderDirty = true;
+      break;
+    }
+  }
+}
+
 function observeGridExternalGroup(group) {
   if (!group?.gridParent || group.observerEntry) return;
   const MutationObserverClass = group.gridParent.ownerDocument?.defaultView?.MutationObserver ??
@@ -656,11 +679,11 @@ function observeGridExternalGroup(group) {
   let entry = gridLayoutExternalObservers.get(group.gridParent);
   if (!entry) {
     entry = {groups: new Set(), observer: null};
-    entry.observer = new MutationObserverClass(() => {
-      for (const observedGroup of entry.groups) {
-        observedGroup.orderDirty = true;
-        reconcileGridExternalGroupOrder(observedGroup);
-      }
+    entry.observer = new MutationObserverClass((records) => {
+      // The observer only invalidates source order. Presentation and DOM
+      // placement are applied by the renderer on its normal reconciliation
+      // path, which also knows whether a translation is currently visible.
+      markGridExternalOrderChanges(entry, records);
     });
     entry.observer.observe(group.gridParent, {childList: true});
     gridLayoutExternalObservers.set(group.gridParent, entry);
@@ -725,7 +748,7 @@ function rebuildGridExternalGroupOrder(group) {
     node.left = null;
     node.right = null;
     node.height = 1;
-    if (source?.parentNode !== group.gridParent) continue;
+    if (source?.parentNode !== group.gridParent || node.translation?.parentNode !== group.host) continue;
     root = insertGridExternalNode(root, node);
   }
   group.root = root;
@@ -752,9 +775,8 @@ function reconcileGridExternalGroupOrder(group) {
 
 function consumeGridExternalOrderChanges(group) {
   const entry = group?.observerEntry;
-  if (entry?.observer?.takeRecords?.().length) {
-    for (const observedGroup of entry.groups) observedGroup.orderDirty = true;
-  }
+  const records = entry?.observer?.takeRecords?.() ?? [];
+  markGridExternalOrderChanges(entry, records);
   if (!group?.orderDirty) return;
   reconcileGridExternalGroupOrder(group);
 }
@@ -1067,9 +1089,25 @@ function hasNestedBlocks(element) {
   return hasVisibleBlockDescendant(element);
 }
 
+function markTranslationAttached(record) {
+  if (record) record.translationSuppressed = false;
+}
+
+function detachTranslationForPresentation(record) {
+  const translation = record?.translation;
+  if (!translation) return;
+  // A translation-only replacement is intentionally represented by the
+  // source text. Remove its external order entry along with the DOM node so a
+  // later grid mutation cannot infer that it should be visible again.
+  removeGridLayoutExternalTranslation(translation);
+  translation.parentNode?.removeChild(translation);
+  record.translationSuppressed = true;
+}
+
 function restorePlacement(record) {
   const {element, translation, placement} = record;
   if (!translation) return;
+  markTranslationAttached(record);
   if (placement?.kind === STABLE_LIST_SIBLING_PLACEMENT) {
     const anchor = placement.anchor;
     if (anchor?.parentNode) anchor.parentNode.insertBefore(translation, anchor.nextSibling);
@@ -1129,6 +1167,7 @@ function restorePlacement(record) {
 function placeTranslationAfterSource(record) {
   if (record?.placement === 'inside-before-first-block') {
     const {element, translation} = record;
+    markTranslationAttached(record);
     if (element?.parentNode && translation) element.appendChild(translation);
     return;
   }
@@ -1668,6 +1707,9 @@ export class TranslationRenderer {
 
   reconcileGridLayoutPlacement(record) {
     if (!isGridLayoutPlacement(record?.placement)) return false;
+    if (record.placement.kind === GRID_LAYOUT_EXTERNAL_PLACEMENT) {
+      consumeGridExternalOrderChanges(gridLayoutExternalSources.get(record.translation)?.group);
+    }
     const desiredKind = desiredGridLayoutPlacementKind(record.element);
     if (desiredKind && gridLayoutPlacementMatches(record, desiredKind)) return false;
 
@@ -1686,7 +1728,7 @@ export class TranslationRenderer {
 
     const translationOnlyReplacement = record.replaced &&
       this.presentation.translationMode === TRANSLATION_MODES.TRANSLATION_ONLY;
-    if (translationOnlyReplacement) record.translation.parentNode?.removeChild(record.translation);
+    if (translationOnlyReplacement) detachTranslationForPresentation(record);
     if (fallbackMode) {
       this.applyFallbackPresentation(record, fallbackMode);
     } else if (!translationOnlyReplacement) {
@@ -1935,6 +1977,7 @@ export class TranslationRenderer {
   placeTranslationBeforeSource(record) {
     const {element, translation} = record;
     if (!element?.parentNode || !translation) return;
+    markTranslationAttached(record);
     if (record.placement?.kind === GRID_LAYOUT_ANCHORED_PLACEMENT) {
       if (translation.parentNode !== element) element.appendChild(translation);
       return;
@@ -2006,7 +2049,7 @@ export class TranslationRenderer {
   restoreChangedSources() {
     for (const record of this.records.values()) {
       if (!record.replaced || !this.restoreSourceText(record, {onlyIfChanged: true})) continue;
-      record.translation.parentNode?.removeChild(record.translation);
+      detachTranslationForPresentation(record);
       this.clearReplacementAttributes(record);
     }
   }
@@ -2116,7 +2159,7 @@ export class TranslationRenderer {
       translation.setAttribute(ROLE_ATTRIBUTE, ROLE_TRANSLATION);
       translation.removeAttribute(STYLE_ATTRIBUTE);
       setTranslationText(translation, record.translatedText);
-      translation.parentNode?.removeChild(translation);
+      detachTranslationForPresentation(record);
     }
     this.applyReplacementAttributes(record, {styled: styledReplacement});
     syncGridLayoutReservation(record);
@@ -2312,6 +2355,7 @@ export class TranslationRenderer {
       replacementNodeIndices: [],
       fallbackMode: null,
       replacementWrappers: [],
+      translationSuppressed: false,
       recoveryAttempts: 0
     };
     record.placement = insertAtSafeLocation(element, translation, mixedContent, sourceTextNodes);

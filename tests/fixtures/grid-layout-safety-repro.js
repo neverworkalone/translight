@@ -119,7 +119,46 @@ function runMovedOrderCase(removeMovedSource, sessionId) {
   return {order, sourceOrder, restored};
 }
 
-function run() {
+async function runSuppressedExternalCase(sessionId) {
+  const layout = document.querySelector('#suppressed-grid');
+  const source = document.querySelector('#suppressed-source');
+  const control = document.querySelector('#suppressed-control');
+  const renderer = new TranslationRenderer({
+    document,
+    sessionId,
+    settings: {translationMode: TRANSLATION_MODES.TRANSLATION_ONLY}
+  });
+  const translation = renderer.insert({
+    element: source,
+    sourceId: `${sessionId}-source`,
+    translatedText: 'Translated'
+  });
+  const initiallySuppressed = !translation?.isConnected;
+
+  layout.appendChild(source);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const suppressedAfterSourceMove = !translation?.isConnected;
+
+  renderer.updatePresentation({translationMode: TRANSLATION_MODES.ORIGINAL_TRANSLATION});
+  const restoredAfterModeSwitch = translation?.isConnected === true;
+  renderer.updatePresentation({translationMode: TRANSLATION_MODES.TRANSLATION_ONLY});
+  const suppressedAfterSecondModeSwitch = !translation?.isConnected;
+  const placement = renderer.records.get(`${sessionId}-source`)?.placement?.kind ?? null;
+
+  layout.insertBefore(source, control);
+  renderer.removeAll();
+  return {
+    placement,
+    initiallySuppressed,
+    suppressedAfterSourceMove,
+    restoredAfterModeSwitch,
+    suppressedAfterSecondModeSwitch,
+    restoredAfterStop: source.textContent === 'Original' &&
+      layout.children[0] === source && layout.children[1] === control
+  };
+}
+
+async function run() {
   const multiRenderer = new TranslationRenderer({document, sessionId: 'grid-safety-multi'});
   const multiSource = document.querySelector('#multi-row-source');
   const multiTranslation = multiRenderer.insert({
@@ -187,6 +226,7 @@ function run() {
     update: runMovedOrderCase(false, 'grid-safety-moved-update'),
     remove: runMovedOrderCase(true, 'grid-safety-moved-remove')
   };
+  const suppressedExternal = await runSuppressedExternalCase('grid-safety-suppressed-external');
 
   const multiSourceRect = rect(multiSource);
   const multiTranslationRect = rect(multiTranslation);
@@ -244,7 +284,8 @@ function run() {
         !overlaps(transitionAfterTranslation, transitionAfter.control)
     },
     tailOrder,
-    movedOrder
+    movedOrder,
+    suppressedExternal
   };
 
   const passed = result.twoRowGrid.placement === 'grid-layout-external' &&
@@ -277,7 +318,13 @@ function run() {
     result.movedOrder.update.sourceOrder.join('|') === 'X|B|C|A' &&
     result.movedOrder.remove.restored &&
     result.movedOrder.remove.order.join('|') === 'X|B|C' &&
-    result.movedOrder.remove.sourceOrder.join('|') === 'X|B|C|A';
+    result.movedOrder.remove.sourceOrder.join('|') === 'X|B|C|A' &&
+    result.suppressedExternal.placement === 'grid-layout-external' &&
+    result.suppressedExternal.initiallySuppressed &&
+    result.suppressedExternal.suppressedAfterSourceMove &&
+    result.suppressedExternal.restoredAfterModeSwitch &&
+    result.suppressedExternal.suppressedAfterSecondModeSwitch &&
+    result.suppressedExternal.restoredAfterStop;
 
   multiRenderer.removeAll();
   clippedRenderer.removeAll();
@@ -292,8 +339,6 @@ function run() {
   report.textContent = JSON.stringify(result, null, 2);
 }
 
-try {
-  run();
-} catch (error) {
+run().catch((error) => {
   report.textContent = JSON.stringify({error: error.message, stack: error.stack}, null, 2);
-}
+});
