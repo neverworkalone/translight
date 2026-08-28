@@ -21,7 +21,7 @@ A Chrome extension for translating English webpages into Korean with Chrome's bu
 
 ## Install
 
-Install the extension from the [Chrome Web Store]().
+Install the extension from the [Chrome Web Store](https://chromewebstore.google.com/detail/translight-·-빛번역/jhlbnaobbadaagnonlaklpelbaakidll).
 
 ## Help
 
