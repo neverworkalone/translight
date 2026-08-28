@@ -177,6 +177,9 @@ Do not report results from an older PR head or older commit as validation of the
 ### PR Reviews
 
 * Always review the latest PR head.
+* Review the entire PR diff against the merge base, not only the latest commits.
+* Inspect every changed file and relevant surrounding code.
+* Report all substantiated blocking findings visible in the first pass whenever possible.
 * Check:
 
   * reproduction evidence
@@ -185,17 +188,24 @@ Do not report results from an older PR head or older commit as validation of the
   * performance regressions
   * cleanup and recovery behavior
   * validation coverage
+* **Fix causes, not symptoms.** If a change works around the reported failure without fixing the causal path, treat the approach as suspect.
+* When the approach is flawed, explain why, recommend a safer design direction, and define how that direction should be validated.
 * Clearly distinguish:
 
   * code-based expectations
   * mocked-environment results
   * actual browser observations
+* Read existing review threads and author replies before commenting.
+* DO NOT repeat resolved or convincingly rebutted findings without new evidence.
+* Keep findings proportional: DO NOT block on speculative edge cases that are not reachable under supported usage or a credible threat model.
 * DO NOT approve a fix as confirmed if the reported symptom was not revalidated.
 * DO NOT approve a performance-sensitive change when required performance regression coverage is missing.
 * Post confirmed blocking findings with supporting evidence and hold the merge.
 * Consolidate related findings and avoid duplicate comments.
 * When a new revision is pushed, review the latest head again.
+* DO NOT merge draft PRs or PRs explicitly marked do-not-merge, even when validation passes.
 * Unless the user has prohibited merging for the current task, merge only after all blockers are resolved and required validation is confirmed.
 * Before merging, verify that the PR head still matches the reviewed and validated commit.
 * For blocking findings, require regression coverage for the same class of failure when the case is automatable.
 * Keep site-specific rules in code and regression fixtures rather than accumulating them in this document.
+* 
