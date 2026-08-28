@@ -614,6 +614,7 @@ function createGridExternalGroup(host, gridParent, anchor, beforeAnchor) {
     root: null,
     nodes: new Map(),
     orderDirty: false,
+    owners: new Set(),
     observerEntry: null
   };
 }
@@ -660,15 +661,23 @@ function mutationIncludesGridExternalSource(record, group) {
 }
 
 function markGridExternalOrderChanges(entry, records) {
-  if (!entry || !records?.length) return;
+  if (!entry || !records?.length) return [];
+  const changedGroups = [];
   for (const group of entry.groups) {
     if (group.orderDirty || !group.nodes.size) continue;
     for (const record of records) {
       if (!mutationIncludesGridExternalSource(record, group)) continue;
       group.orderDirty = true;
+      changedGroups.push(group);
       break;
     }
   }
+  return changedGroups;
+}
+
+function bindGridExternalRecord(record, renderer) {
+  const group = gridLayoutExternalSources.get(record?.translation)?.group;
+  if (group && renderer) group.owners.add(renderer);
 }
 
 function observeGridExternalGroup(group) {
@@ -681,9 +690,12 @@ function observeGridExternalGroup(group) {
     entry = {groups: new Set(), observer: null};
     entry.observer = new MutationObserverClass((records) => {
       // The observer only invalidates source order. Presentation and DOM
-      // placement are applied by the renderer on its normal reconciliation
-      // path, which also knows whether a translation is currently visible.
-      markGridExternalOrderChanges(entry, records);
+      // placement are applied by the owning renderer on its scoped
+      // reconciliation path, which also knows whether a translation is
+      // currently visible.
+      for (const group of markGridExternalOrderChanges(entry, records)) {
+        for (const renderer of group.owners) renderer.scheduleGridExternalGroupSync(group);
+      }
     });
     entry.observer.observe(group.gridParent, {childList: true});
     gridLayoutExternalObservers.set(group.gridParent, entry);
@@ -706,6 +718,7 @@ function unobserveGridExternalGroup(group) {
 function releaseGridExternalGroup(group) {
   if (!group?.host || group.nodes.size) return;
   unobserveGridExternalGroup(group);
+  group.owners.clear();
   const groupsByAnchor = gridLayoutExternalGroups.get(group.host);
   const groupsByGridParent = groupsByAnchor?.get(group.anchor);
   const groupPair = groupsByGridParent?.get(group.gridParent);
@@ -1128,12 +1141,13 @@ function restorePlacement(record) {
   }
   if (placement?.kind === GRID_LAYOUT_EXTERNAL_PLACEMENT) {
     const anchor = placement.anchor;
-    insertGridLayoutExternalTranslation({
+    const inserted = insertGridLayoutExternalTranslation({
       source: element,
       translation,
       gridParent: placement.gridParent,
       anchor
     });
+    if (inserted) bindGridExternalRecord(record, record.renderer);
     return;
   }
   if (!element?.parentNode) return;
@@ -1683,6 +1697,8 @@ export class TranslationRenderer {
     this.layoutTargetWidths = new Map();
     this.layoutSyncHandle = null;
     this.layoutSyncUsesAnimationFrame = false;
+    this.pendingGridExternalGroups = new Set();
+    this.gridExternalSyncScheduled = false;
     this.layoutObserver = typeof ResizeObserverClass === 'function'
       ? new ResizeObserverClass((entries) => this.handleLayoutResize(entries))
       : null;
@@ -1709,6 +1725,7 @@ export class TranslationRenderer {
     if (!isGridLayoutPlacement(record?.placement)) return false;
     if (record.placement.kind === GRID_LAYOUT_EXTERNAL_PLACEMENT) {
       consumeGridExternalOrderChanges(gridLayoutExternalSources.get(record.translation)?.group);
+      bindGridExternalRecord(record, this);
     }
     const desiredKind = desiredGridLayoutPlacementKind(record.element);
     if (desiredKind && gridLayoutPlacementMatches(record, desiredKind)) return false;
@@ -1725,6 +1742,9 @@ export class TranslationRenderer {
           record.mixedContent,
           record.sourceTextNodes
         );
+    if (record.placement.kind === GRID_LAYOUT_EXTERNAL_PLACEMENT) {
+      bindGridExternalRecord(record, this);
+    }
 
     const translationOnlyReplacement = record.replaced &&
       this.presentation.translationMode === TRANSLATION_MODES.TRANSLATION_ONLY;
@@ -1825,6 +1845,31 @@ export class TranslationRenderer {
       syncSourceLayout(record, {deferGridReservation: true, reservationParents});
     }
     flushGridLayoutReservations(reservationParents);
+  }
+
+  scheduleGridExternalGroupSync(group) {
+    if (!group?.owners?.has(this) || !this.records.size) return;
+    this.pendingGridExternalGroups.add(group);
+    if (this.gridExternalSyncScheduled) return;
+    this.gridExternalSyncScheduled = true;
+    const sync = () => {
+      this.gridExternalSyncScheduled = false;
+      const groups = [...this.pendingGridExternalGroups];
+      this.pendingGridExternalGroups.clear();
+      if (!this.records.size) return;
+      for (const pendingGroup of groups) {
+        if (!pendingGroup?.owners?.has(this)) continue;
+        consumeGridExternalOrderChanges(pendingGroup);
+      }
+    };
+    const view = this.document.defaultView ?? globalThis.window;
+    const queue = view?.queueMicrotask ?? globalThis.queueMicrotask;
+    if (typeof queue === 'function') queue(sync);
+    else Promise.resolve().then(sync);
+  }
+
+  cancelScheduledGridExternalGroupSync() {
+    this.pendingGridExternalGroups.clear();
   }
 
   scheduleLayoutSync() {
@@ -1984,13 +2029,14 @@ export class TranslationRenderer {
     }
     if (record.placement?.kind === GRID_LAYOUT_EXTERNAL_PLACEMENT) {
       const anchor = record.placement.anchor;
-      insertGridLayoutExternalTranslation({
+      const inserted = insertGridLayoutExternalTranslation({
         source: element,
         translation,
         gridParent: record.placement.gridParent,
         anchor,
         beforeAnchor: true
       });
+      if (inserted) bindGridExternalRecord(record, this);
       return;
     }
     if (record.placement === 'sibling') {
@@ -2356,6 +2402,7 @@ export class TranslationRenderer {
       fallbackMode: null,
       replacementWrappers: [],
       translationSuppressed: false,
+      renderer: this,
       recoveryAttempts: 0
     };
     record.placement = insertAtSafeLocation(element, translation, mixedContent, sourceTextNodes);
@@ -2417,6 +2464,7 @@ export class TranslationRenderer {
       this.recordsByElement.delete(element);
     }
 
+    this.cancelScheduledGridExternalGroupSync();
     this.cancelScheduledLayoutSync();
     this.layoutObserver?.disconnect?.();
     this.layoutObserver = null;

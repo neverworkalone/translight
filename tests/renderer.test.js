@@ -809,6 +809,157 @@ describe('TranslationRenderer', () => {
     renderer.removeAll();
   });
 
+  it('reconciles active external translations from source mutations without manual layout sync', async () => {
+    document.body.innerHTML = `
+      <div id="host">
+        <div id="layout" style="display:grid;grid-template-columns:100px;grid-template-rows:20px 20px 20px">
+          <div id="source-a" style="display:flex">A</div>
+          <div id="source-b" style="display:flex">B</div>
+          <div id="source-c" style="display:flex">C</div>
+        </div>
+      </div>
+    `;
+    const host = document.querySelector('#host');
+    const layout = document.querySelector('#layout');
+    const sourceA = document.querySelector('#source-a');
+    const renderer = new TranslationRenderer({document, sessionId: 'external-grid-observer-sync'});
+    for (const id of ['a', 'b', 'c']) {
+      renderer.insert({
+        element: document.querySelector(`#source-${id}`),
+        sourceId: `external-grid-observer-${id}`,
+        translatedText: id.toUpperCase()
+      });
+    }
+
+    layout.appendChild(sourceA);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(Array.from(host.children)
+      .filter((child) => child.matches('translight-translation'))
+      .map((child) => child.textContent))
+      .toEqual(['B', 'C', 'A']);
+    renderer.removeAll();
+  });
+
+  it('does not resurrect external translations when presentation changes before a queued sync', async () => {
+    document.body.innerHTML = `
+      <div id="host">
+        <div id="layout" style="display:grid;grid-template-columns:100px;grid-template-rows:20px 20px 20px">
+          <div id="source-a" style="display:flex">A</div>
+          <div id="source-b" style="display:flex">B</div>
+          <div id="source-c" style="display:flex">C</div>
+        </div>
+      </div>
+    `;
+    const host = document.querySelector('#host');
+    const layout = document.querySelector('#layout');
+    const sourceA = document.querySelector('#source-a');
+    const renderer = new TranslationRenderer({document, sessionId: 'external-grid-pending-mode'});
+    for (const id of ['a', 'b', 'c']) {
+      renderer.insert({
+        element: document.querySelector(`#source-${id}`),
+        sourceId: `external-grid-pending-${id}`,
+        translatedText: id.toUpperCase()
+      });
+    }
+
+    const queuedSyncs = [];
+    const view = document.defaultView;
+    const originalQueueMicrotask = view.queueMicrotask;
+    view.queueMicrotask = (callback) => queuedSyncs.push(callback);
+    try {
+      layout.appendChild(sourceA);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(queuedSyncs).toHaveLength(1);
+
+      renderer.updatePresentation({translationMode: TRANSLATION_MODES.TRANSLATION_ONLY});
+      queuedSyncs.shift()();
+
+      expect(host.querySelectorAll('translight-translation')).toHaveLength(0);
+      expect(renderer.records.get('external-grid-pending-a')?.translationSuppressed)
+        .toBe(true);
+    } finally {
+      view.queueMicrotask = originalQueueMicrotask;
+      renderer.removeAll();
+    }
+  });
+
+  it('ignores a queued external sync after renderer teardown', async () => {
+    document.body.innerHTML = `
+      <div id="host">
+        <div id="layout" style="display:grid;grid-template-columns:100px;grid-template-rows:20px 20px 20px">
+          <div id="source-a" style="display:flex">A</div>
+          <div id="source-b" style="display:flex">B</div>
+          <div id="source-c" style="display:flex">C</div>
+        </div>
+      </div>
+    `;
+    const layout = document.querySelector('#layout');
+    const sourceA = document.querySelector('#source-a');
+    const renderer = new TranslationRenderer({document, sessionId: 'external-grid-pending-teardown'});
+    for (const id of ['a', 'b', 'c']) {
+      renderer.insert({
+        element: document.querySelector(`#source-${id}`),
+        sourceId: `external-grid-teardown-${id}`,
+        translatedText: id.toUpperCase()
+      });
+    }
+
+    const queuedSyncs = [];
+    const view = document.defaultView;
+    const originalQueueMicrotask = view.queueMicrotask;
+    view.queueMicrotask = (callback) => queuedSyncs.push(callback);
+    try {
+      layout.appendChild(sourceA);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(queuedSyncs).toHaveLength(1);
+
+      renderer.removeAll();
+      queuedSyncs.shift()();
+
+      expect(document.querySelectorAll('translight-translation')).toHaveLength(0);
+      expect(renderer.records.size).toBe(0);
+    } finally {
+      view.queueMicrotask = originalQueueMicrotask;
+      renderer.removeAll();
+    }
+  });
+
+  it('batches a burst of external source moves into one group sync', async () => {
+    document.body.innerHTML = `
+      <div id="host">
+        <div id="layout" style="display:grid;grid-template-columns:100px;grid-template-rows:20px 20px 20px">
+          <div id="source-a" style="display:flex">A</div>
+          <div id="source-b" style="display:flex">B</div>
+          <div id="source-c" style="display:flex">C</div>
+        </div>
+      </div>
+    `;
+    const host = document.querySelector('#host');
+    const layout = document.querySelector('#layout');
+    const renderer = new TranslationRenderer({document, sessionId: 'external-grid-burst'});
+    for (const id of ['a', 'b', 'c']) {
+      renderer.insert({
+        element: document.querySelector(`#source-${id}`),
+        sourceId: `external-grid-burst-${id}`,
+        translatedText: id.toUpperCase()
+      });
+    }
+
+    const schedule = vi.spyOn(renderer, 'scheduleGridExternalGroupSync');
+    layout.appendChild(document.querySelector('#source-a'));
+    layout.appendChild(document.querySelector('#source-b'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(schedule).toHaveBeenCalledTimes(1);
+    expect(Array.from(host.children)
+      .filter((child) => child.matches('translight-translation'))
+      .map((child) => child.textContent))
+      .toEqual(['C', 'A', 'B']);
+    schedule.mockRestore();
+    renderer.removeAll();
+  });
+
   it('does not rebuild external grid order for unrelated child mutations', async () => {
     document.body.innerHTML = `
       <div id="host">

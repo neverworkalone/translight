@@ -119,6 +119,40 @@ function runMovedOrderCase(removeMovedSource, sessionId) {
   return {order, sourceOrder, restored};
 }
 
+async function runObserverMoveCase(sessionId) {
+  const host = document.createElement('div');
+  const layout = document.createElement('div');
+  layout.style.display = 'grid';
+  layout.style.gridTemplateColumns = '100px';
+  layout.style.gridTemplateRows = '20px 20px 20px';
+  const sources = {};
+  for (const id of ['A', 'B', 'C']) {
+    const source = document.createElement('div');
+    source.style.display = 'flex';
+    source.textContent = id;
+    layout.appendChild(source);
+    sources[id] = source;
+  }
+  host.appendChild(layout);
+  document.body.appendChild(host);
+
+  const renderer = new TranslationRenderer({document, sessionId});
+  for (const id of ['A', 'B', 'C']) {
+    renderer.insert({element: sources[id], sourceId: `${sessionId}-${id}`, translatedText: id});
+  }
+
+  layout.appendChild(sources.A);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const order = [...host.children]
+    .filter((child) => child.matches('translight-translation'))
+    .map((child) => child.textContent);
+  const sourceOrder = [...layout.children].map((child) => child.textContent);
+  renderer.removeAll();
+  const restored = host.children.length === 1 && !host.querySelector('translight-translation');
+  host.remove();
+  return {order, sourceOrder, restored};
+}
+
 async function runSuppressedExternalCase(sessionId) {
   const layout = document.querySelector('#suppressed-grid');
   const source = document.querySelector('#suppressed-source');
@@ -226,6 +260,7 @@ async function run() {
     update: runMovedOrderCase(false, 'grid-safety-moved-update'),
     remove: runMovedOrderCase(true, 'grid-safety-moved-remove')
   };
+  const observerMove = await runObserverMoveCase('grid-safety-observer-move');
   const suppressedExternal = await runSuppressedExternalCase('grid-safety-suppressed-external');
 
   const multiSourceRect = rect(multiSource);
@@ -285,6 +320,7 @@ async function run() {
     },
     tailOrder,
     movedOrder,
+    observerMove,
     suppressedExternal
   };
 
@@ -319,6 +355,9 @@ async function run() {
     result.movedOrder.remove.restored &&
     result.movedOrder.remove.order.join('|') === 'X|B|C' &&
     result.movedOrder.remove.sourceOrder.join('|') === 'X|B|C|A' &&
+    result.observerMove.restored &&
+    result.observerMove.order.join('|') === 'B|C|A' &&
+    result.observerMove.sourceOrder.join('|') === 'B|C|A' &&
     result.suppressedExternal.placement === 'grid-layout-external' &&
     result.suppressedExternal.initiallySuppressed &&
     result.suppressedExternal.suppressedAfterSourceMove &&
