@@ -423,6 +423,1037 @@ describe('TranslationRenderer', () => {
     );
   });
 
+  it.each(['flex', 'grid'])('places a translation beside a %s source container', (display) => {
+    document.body.innerHTML = `
+      <div id="layout" style="display:flex">
+        <div id="source" style="display:${display};width:50px;white-space:nowrap">LIVE</div>
+      </div>
+    `;
+    const source = document.querySelector('#source');
+    const layout = document.querySelector('#layout');
+    const renderer = new TranslationRenderer({ document, sessionId: `${display}-source-session` });
+
+    const translation = renderer.insert({
+      element: source,
+      sourceId: `${display}-source-container`,
+      translatedText: '라이브'
+    });
+
+    expect(translation.parentElement).toBe(layout);
+    expect(translation.previousElementSibling).toBe(source);
+    expect(source.querySelector('translight-translation')).toBeNull();
+    expect(translation.style.getPropertyValue('width')).toBe('');
+    renderer.removeAll();
+    expect(document.body.innerHTML).toBe(`
+      <div id="layout" style="display:flex">
+        <div id="source" style="display:${display};width:50px;white-space:nowrap">LIVE</div>
+      </div>
+    `);
+  });
+
+  it('keeps a flex source inside its grid cell while anchoring the translation below it', () => {
+    document.body.innerHTML = `
+      <div id="layout" style="display:grid;grid-template-columns:60px 1fr">
+        <div id="source" style="display:flex;width:50px;white-space:nowrap">LIVE</div>
+        <div id="tabs">ALL</div>
+      </div>
+    `;
+    const source = document.querySelector('#source');
+    const layout = document.querySelector('#layout');
+    const renderer = new TranslationRenderer({document, sessionId: 'grid-source-session'});
+
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'grid-source-container',
+      translatedText: '라이브'
+    });
+
+    expect(translation.parentElement).toBe(source);
+    expect(source.parentElement).toBe(layout);
+    expect(source.style.getPropertyValue('position')).toBe('relative');
+    expect(source.style.getPropertyPriority('position')).toBe('important');
+    expect(translation.style.getPropertyValue('position')).toBe('absolute');
+    expect(translation.style.getPropertyValue('top')).toBe('100%');
+    expect(translation.style.getPropertyValue('left')).toBe('0px');
+    expect(translation.style.getPropertyValue('width')).toBe('max-content');
+    expect(translation.style.getPropertyValue('white-space')).toBe('nowrap');
+    expect(translation.style.getPropertyValue('margin')).toBe('0px');
+    expect(renderer.style.textContent).toContain('flex: 0 0 auto !important');
+    vi.spyOn(translation, 'getBoundingClientRect').mockReturnValue({height: 29.7});
+    renderer.syncLayouts();
+    expect(layout.style.getPropertyValue('margin-bottom')).toBe('30px');
+    renderer.removeAll();
+    expect(layout.style.getPropertyValue('margin-bottom')).toBe('');
+    expect(source.style.getPropertyValue('position')).toBe('');
+    expect(source.style.getPropertyValue('display')).toBe('flex');
+    expect(source.style.getPropertyValue('width')).toBe('50px');
+    expect(source.style.getPropertyValue('white-space')).toBe('nowrap');
+    expect(layout.querySelector('#tabs')?.textContent).toBe('ALL');
+  });
+
+  it('keeps an anchored translation visible when translation-only cannot replace flex text nodes', () => {
+    document.head.innerHTML = '<style>.grid-source { display:flex; }</style>';
+    document.body.innerHTML = `
+      <div id="layout" style="display:grid;grid-template-columns:60px 1fr">
+        <div id="source" class="grid-source"><span>L</span><span>I</span><span>V</span><span>E</span></div>
+        <div id="tabs">ALL</div>
+      </div>
+    `;
+    const source = document.querySelector('#source');
+    const renderer = new TranslationRenderer({
+      document,
+      sessionId: 'grid-fallback-session',
+      settings: {translationMode: TRANSLATION_MODES.TRANSLATION_ONLY}
+    });
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'grid-fallback-source',
+      translatedText: '번역'
+    });
+
+    expect(translation.parentElement).toBe(source);
+    expect(source.getAttribute(HIDDEN_ATTRIBUTE)).toBe('true');
+    expect(source.getAttribute(HIDDEN_PLACEMENT_ATTRIBUTE)).toBe('anchored');
+    expect(source.style.getPropertyValue('display')).toBe('flex');
+    expect(source.style.getPropertyPriority('display')).toBe('important');
+    expect(window.getComputedStyle(source).display).toBe('flex');
+    expect(renderer.style.textContent).toContain(
+      '[data-translight-hidden-placement="anchored"] {\n      visibility: hidden !important;'
+    );
+    expect(renderer.style.textContent).toContain(
+      '[data-translight-hidden-placement="anchored"] > translight-translation {\n      visibility: visible !important;'
+    );
+
+    renderer.removeAll();
+    expect(source.style.getPropertyValue('display')).toBe('');
+    expect(source.textContent).toBe('LIVE');
+  });
+
+  it('places an unsafe multi-row grid translation outside the grid', () => {
+    document.body.innerHTML = `
+      <div id="layout" style="display:grid;grid-template-columns:100px 100px;grid-auto-rows:20px">
+        <div id="source" style="display:flex">One</div>
+        <div style="display:flex">Two</div>
+        <div style="display:flex">Three</div>
+        <div style="display:flex">Four</div>
+      </div>
+    `;
+    const source = document.querySelector('#source');
+    const layout = document.querySelector('#layout');
+    const renderer = new TranslationRenderer({document, sessionId: 'multi-row-grid-session'});
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'multi-row-grid-source',
+      translatedText: '첫 번째'
+    });
+
+    expect(translation.parentElement).toBe(layout.parentElement);
+    expect(translation.parentElement).not.toBe(layout);
+    expect(translation.style.getPropertyValue('position')).toBe('');
+    expect(source.querySelector('translight-translation')).toBeNull();
+    expect(renderer.records.get('multi-row-grid-source')?.placement?.kind)
+      .toBe('grid-layout-external');
+
+    renderer.removeAll();
+    expect(layout.children).toHaveLength(4);
+    expect(source.textContent).toBe('One');
+  });
+
+  it('places a clipped grid translation outside the grid without adding a host item', () => {
+    document.body.innerHTML = `
+      <div id="layout" style="display:grid;grid-template-columns:60px 1fr">
+        <div id="source" style="display:flex;overflow:hidden">LIVE</div>
+        <div id="tabs">ALL</div>
+      </div>
+    `;
+    const source = document.querySelector('#source');
+    const layout = document.querySelector('#layout');
+    const renderer = new TranslationRenderer({document, sessionId: 'clipped-grid-session'});
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'clipped-grid-source',
+      translatedText: '라이브'
+    });
+
+    expect(translation.parentElement).toBe(layout.parentElement);
+    expect(translation.parentElement).not.toBe(layout);
+    expect(translation.style.getPropertyValue('position')).toBe('');
+    expect(source.querySelector('translight-translation')).toBeNull();
+    expect(Array.from(layout.children).map((child) => child.id || child.textContent))
+      .toEqual(['source', 'tabs']);
+    expect(renderer.records.get('clipped-grid-source')?.placement?.kind)
+      .toBe('grid-layout-external');
+
+    renderer.removeAll();
+    expect(layout.children).toHaveLength(2);
+    expect(source.textContent).toBe('LIVE');
+  });
+
+  it('keeps external grid translations in source order across async insertion and updates', () => {
+    document.body.innerHTML = `
+      <div id="layout" style="display:grid;grid-template-columns:100px;grid-template-rows:20px 20px 20px">
+        <div id="source-0" style="display:flex">One</div>
+        <div id="source-1" style="display:flex">Two</div>
+        <div id="source-2" style="display:flex">Three</div>
+      </div>
+    `;
+    const layout = document.querySelector('#layout');
+    const renderer = new TranslationRenderer({document, sessionId: 'external-grid-order-session'});
+    const sources = [0, 1, 2].map((index) => document.querySelector(`#source-${index}`));
+    const insert = (index, text) => renderer.insert({
+      element: sources[index],
+      sourceId: `external-grid-order-${index}`,
+      translatedText: text
+    });
+    const translationOrder = () => Array.from(document.body.children)
+      .filter((child) => child.matches('translight-translation'))
+      .map((child) => child.textContent);
+
+    insert(2, 'T2');
+    insert(0, 'T0');
+    insert(1, 'T1');
+
+    expect(translationOrder()).toEqual(['T0', 'T1', 'T2']);
+    expect(Array.from(layout.children).map((child) => child.id)).toEqual([
+      'source-0',
+      'source-1',
+      'source-2'
+    ]);
+
+    insert(0, 'T0 updated');
+    expect(translationOrder()).toEqual(['T0 updated', 'T1', 'T2']);
+
+    renderer.removeAll();
+  });
+
+  it('keeps external grid translations ordered when the grid is the host tail', () => {
+    const run = (insertionOrder, sessionId, update = false) => {
+      document.body.innerHTML = '';
+      const host = document.createElement('div');
+      const layout = document.createElement('div');
+      layout.style.display = 'grid';
+      layout.style.gridTemplateColumns = '100px';
+      layout.style.gridTemplateRows = '20px 20px 20px';
+      const sources = [0, 1, 2].map((index) => {
+        const source = document.createElement('div');
+        source.id = `tail-source-${index}`;
+        source.style.display = 'flex';
+        source.textContent = `Item ${index}`;
+        layout.appendChild(source);
+        return source;
+      });
+      host.appendChild(layout);
+      document.body.appendChild(host);
+
+      const renderer = new TranslationRenderer({document, sessionId});
+      for (const index of insertionOrder) {
+        renderer.insert({
+          element: sources[index],
+          sourceId: `tail-source-${index}`,
+          translatedText: `T${index}`
+        });
+      }
+      if (update) {
+        renderer.insert({
+          element: sources[0],
+          sourceId: 'tail-source-0',
+          translatedText: 'T0 updated'
+        });
+      }
+      const translations = () => Array.from(host.children)
+        .filter((child) => child.matches('translight-translation'))
+        .map((child) => child.textContent);
+      const result = translations();
+      renderer.removeAll();
+      return {host, layout, result};
+    };
+
+    expect(run([0, 1, 2], 'grid-tail-forward').result).toEqual(['T0', 'T1', 'T2']);
+    expect(run([2, 1, 0], 'grid-tail-reverse').result).toEqual(['T0', 'T1', 'T2']);
+    expect(run([2, 0, 1], 'grid-tail-async-update', true).result)
+      .toEqual(['T0 updated', 'T1', 'T2']);
+  });
+
+  it('rebuilds external grid order after source moves and updates', () => {
+    const run = ({removeMovedSource = false, sessionId}) => {
+      document.body.innerHTML = '';
+      const host = document.createElement('div');
+      const layout = document.createElement('div');
+      layout.style.display = 'grid';
+      layout.style.gridTemplateColumns = '100px';
+      layout.style.gridTemplateRows = '20px 20px 20px 20px';
+      const sources = {};
+      for (const id of ['A', 'B', 'C']) {
+        const source = document.createElement('div');
+        source.id = `moved-source-${id}`;
+        source.style.display = 'flex';
+        source.textContent = id;
+        layout.appendChild(source);
+        sources[id] = source;
+      }
+      host.appendChild(layout);
+      const following = document.createElement('p');
+      following.textContent = 'Following content';
+      host.appendChild(following);
+      document.body.appendChild(host);
+
+      const renderer = new TranslationRenderer({document, sessionId});
+      for (const id of ['A', 'B', 'C']) {
+        renderer.insert({element: sources[id], sourceId: id, translatedText: id});
+      }
+
+      layout.appendChild(sources.A);
+      if (removeMovedSource) {
+        renderer.remove(sources.A);
+      } else {
+        renderer.insert({element: sources.A, sourceId: 'A', translatedText: 'A updated'});
+      }
+
+      const sourceX = document.createElement('div');
+      sourceX.style.display = 'flex';
+      sourceX.textContent = 'X';
+      layout.insertBefore(sourceX, sources.B);
+      expect(() => renderer.insert({element: sourceX, sourceId: 'X', translatedText: 'X'}))
+        .not.toThrow();
+
+      const translationOrder = Array.from(host.children)
+        .filter((child) => child.matches('translight-translation'))
+        .map((child) => child.textContent);
+      const sourceOrder = Array.from(layout.children).map((child) => child.textContent);
+      renderer.removeAll();
+      return {translationOrder, sourceOrder, hostChildCount: host.children.length};
+    };
+
+    expect(run({sessionId: 'moved-grid-update'})).toEqual({
+      translationOrder: ['X', 'B', 'C', 'A updated'],
+      sourceOrder: ['X', 'B', 'C', 'A'],
+      hostChildCount: 2
+    });
+    expect(run({removeMovedSource: true, sessionId: 'moved-grid-remove'})).toEqual({
+      translationOrder: ['X', 'B', 'C'],
+      sourceOrder: ['X', 'B', 'C', 'A'],
+      hostChildCount: 2
+    });
+  });
+
+  it('does not resurrect an external translation suppressed by translation-only replacement', async () => {
+    document.body.innerHTML = `
+      <div id="host">
+        <div id="layout" style="display:grid;grid-template-columns:100px;grid-template-rows:20px 20px">
+          <div id="source" style="display:flex">Original</div>
+          <div id="control">Control</div>
+        </div>
+      </div>
+    `;
+    const source = document.querySelector('#source');
+    const layout = document.querySelector('#layout');
+    const renderer = new TranslationRenderer({
+      document,
+      sessionId: 'suppressed-external-grid',
+      settings: {translationMode: TRANSLATION_MODES.TRANSLATION_ONLY}
+    });
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'suppressed-external-grid-source',
+      translatedText: 'Translated'
+    });
+
+    expect(translation.isConnected).toBe(false);
+
+    layout.appendChild(source);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(translation.isConnected).toBe(false);
+    expect(renderer.records.get('suppressed-external-grid-source')?.translationSuppressed)
+      .toBe(true);
+
+    renderer.updatePresentation({translationMode: TRANSLATION_MODES.ORIGINAL_TRANSLATION});
+    expect(translation.isConnected).toBe(true);
+    expect(renderer.records.get('suppressed-external-grid-source')?.translationSuppressed)
+      .toBe(false);
+
+    renderer.updatePresentation({translationMode: TRANSLATION_MODES.TRANSLATION_ONLY});
+    expect(translation.isConnected).toBe(false);
+    renderer.removeAll();
+  });
+
+  it('reconciles active external translations when sources move during layout sync', () => {
+    document.body.innerHTML = `
+      <div id="host">
+        <div id="layout" style="display:grid;grid-template-columns:100px;grid-template-rows:20px 20px 20px">
+          <div id="source-a" style="display:flex">A</div>
+          <div id="source-b" style="display:flex">B</div>
+          <div id="source-c" style="display:flex">C</div>
+        </div>
+      </div>
+    `;
+    const host = document.querySelector('#host');
+    const layout = document.querySelector('#layout');
+    const sourceA = document.querySelector('#source-a');
+    const renderer = new TranslationRenderer({document, sessionId: 'external-grid-sync-move'});
+    for (const id of ['a', 'b', 'c']) {
+      renderer.insert({
+        element: document.querySelector(`#source-${id}`),
+        sourceId: `external-grid-sync-${id}`,
+        translatedText: id.toUpperCase()
+      });
+    }
+
+    layout.appendChild(sourceA);
+    renderer.syncLayouts();
+
+    expect(Array.from(host.children)
+      .filter((child) => child.matches('translight-translation'))
+      .map((child) => child.textContent))
+      .toEqual(['B', 'C', 'A']);
+    renderer.removeAll();
+  });
+
+  it('reconciles active external translations from source mutations without manual layout sync', async () => {
+    document.body.innerHTML = `
+      <div id="host">
+        <div id="layout" style="display:grid;grid-template-columns:100px;grid-template-rows:20px 20px 20px">
+          <div id="source-a" style="display:flex">A</div>
+          <div id="source-b" style="display:flex">B</div>
+          <div id="source-c" style="display:flex">C</div>
+        </div>
+      </div>
+    `;
+    const host = document.querySelector('#host');
+    const layout = document.querySelector('#layout');
+    const sourceA = document.querySelector('#source-a');
+    const renderer = new TranslationRenderer({document, sessionId: 'external-grid-observer-sync'});
+    for (const id of ['a', 'b', 'c']) {
+      renderer.insert({
+        element: document.querySelector(`#source-${id}`),
+        sourceId: `external-grid-observer-${id}`,
+        translatedText: id.toUpperCase()
+      });
+    }
+
+    layout.appendChild(sourceA);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(Array.from(host.children)
+      .filter((child) => child.matches('translight-translation'))
+      .map((child) => child.textContent))
+      .toEqual(['B', 'C', 'A']);
+    renderer.removeAll();
+  });
+
+  it('does not resurrect external translations when presentation changes before a queued sync', async () => {
+    document.body.innerHTML = `
+      <div id="host">
+        <div id="layout" style="display:grid;grid-template-columns:100px;grid-template-rows:20px 20px 20px">
+          <div id="source-a" style="display:flex">A</div>
+          <div id="source-b" style="display:flex">B</div>
+          <div id="source-c" style="display:flex">C</div>
+        </div>
+      </div>
+    `;
+    const host = document.querySelector('#host');
+    const layout = document.querySelector('#layout');
+    const sourceA = document.querySelector('#source-a');
+    const renderer = new TranslationRenderer({document, sessionId: 'external-grid-pending-mode'});
+    for (const id of ['a', 'b', 'c']) {
+      renderer.insert({
+        element: document.querySelector(`#source-${id}`),
+        sourceId: `external-grid-pending-${id}`,
+        translatedText: id.toUpperCase()
+      });
+    }
+
+    const queuedSyncs = [];
+    const view = document.defaultView;
+    const originalQueueMicrotask = view.queueMicrotask;
+    view.queueMicrotask = (callback) => queuedSyncs.push(callback);
+    try {
+      layout.appendChild(sourceA);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(queuedSyncs).toHaveLength(1);
+
+      renderer.updatePresentation({translationMode: TRANSLATION_MODES.TRANSLATION_ONLY});
+      queuedSyncs.shift()();
+
+      expect(host.querySelectorAll('translight-translation')).toHaveLength(0);
+      expect(renderer.records.get('external-grid-pending-a')?.translationSuppressed)
+        .toBe(true);
+    } finally {
+      view.queueMicrotask = originalQueueMicrotask;
+      renderer.removeAll();
+    }
+  });
+
+  it('ignores a queued external sync after renderer teardown', async () => {
+    document.body.innerHTML = `
+      <div id="host">
+        <div id="layout" style="display:grid;grid-template-columns:100px;grid-template-rows:20px 20px 20px">
+          <div id="source-a" style="display:flex">A</div>
+          <div id="source-b" style="display:flex">B</div>
+          <div id="source-c" style="display:flex">C</div>
+        </div>
+      </div>
+    `;
+    const layout = document.querySelector('#layout');
+    const sourceA = document.querySelector('#source-a');
+    const renderer = new TranslationRenderer({document, sessionId: 'external-grid-pending-teardown'});
+    for (const id of ['a', 'b', 'c']) {
+      renderer.insert({
+        element: document.querySelector(`#source-${id}`),
+        sourceId: `external-grid-teardown-${id}`,
+        translatedText: id.toUpperCase()
+      });
+    }
+
+    const queuedSyncs = [];
+    const view = document.defaultView;
+    const originalQueueMicrotask = view.queueMicrotask;
+    view.queueMicrotask = (callback) => queuedSyncs.push(callback);
+    try {
+      layout.appendChild(sourceA);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(queuedSyncs).toHaveLength(1);
+
+      renderer.removeAll();
+      queuedSyncs.shift()();
+
+      expect(document.querySelectorAll('translight-translation')).toHaveLength(0);
+      expect(renderer.records.size).toBe(0);
+    } finally {
+      view.queueMicrotask = originalQueueMicrotask;
+      renderer.removeAll();
+    }
+  });
+
+  it('batches a burst of external source moves into one group sync', async () => {
+    document.body.innerHTML = `
+      <div id="host">
+        <div id="layout" style="display:grid;grid-template-columns:100px;grid-template-rows:20px 20px 20px">
+          <div id="source-a" style="display:flex">A</div>
+          <div id="source-b" style="display:flex">B</div>
+          <div id="source-c" style="display:flex">C</div>
+        </div>
+      </div>
+    `;
+    const host = document.querySelector('#host');
+    const layout = document.querySelector('#layout');
+    const renderer = new TranslationRenderer({document, sessionId: 'external-grid-burst'});
+    for (const id of ['a', 'b', 'c']) {
+      renderer.insert({
+        element: document.querySelector(`#source-${id}`),
+        sourceId: `external-grid-burst-${id}`,
+        translatedText: id.toUpperCase()
+      });
+    }
+
+    const schedule = vi.spyOn(renderer, 'scheduleGridExternalGroupSync');
+    layout.appendChild(document.querySelector('#source-a'));
+    layout.appendChild(document.querySelector('#source-b'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(schedule).toHaveBeenCalledTimes(1);
+    expect(Array.from(host.children)
+      .filter((child) => child.matches('translight-translation'))
+      .map((child) => child.textContent))
+      .toEqual(['C', 'A', 'B']);
+    schedule.mockRestore();
+    renderer.removeAll();
+  });
+
+  it('does not rebuild external grid order for unrelated child mutations', async () => {
+    document.body.innerHTML = `
+      <div id="host">
+        <div id="layout" style="display:grid;grid-template-columns:100px;grid-template-rows:20px 20px 20px">
+          <div id="source-a" style="display:flex">A</div>
+          <div id="source-b" style="display:flex">B</div>
+          <div id="control">Control</div>
+        </div>
+      </div>
+    `;
+    const layout = document.querySelector('#layout');
+    const control = document.querySelector('#control');
+    const renderer = new TranslationRenderer({document, sessionId: 'external-grid-control-mutation'});
+    for (const id of ['a', 'b']) {
+      renderer.insert({
+        element: document.querySelector(`#source-${id}`),
+        sourceId: `external-grid-control-${id}`,
+        translatedText: id.toUpperCase()
+      });
+    }
+
+    let sourceComparisons = 0;
+    const nodePrototype = document.defaultView.Node.prototype;
+    const originalCompareDocumentPosition = nodePrototype.compareDocumentPosition;
+    nodePrototype.compareDocumentPosition = function(other) {
+      if (this.parentNode === layout && other?.parentNode === layout) sourceComparisons += 1;
+      return originalCompareDocumentPosition.call(this, other);
+    };
+    try {
+      layout.appendChild(control);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      renderer.syncLayouts();
+    } finally {
+      nodePrototype.compareDocumentPosition = originalCompareDocumentPosition;
+      renderer.removeAll();
+    }
+
+    expect(sourceComparisons).toBe(0);
+  });
+
+  it('keeps incremental external grid insertion within the order-index budget', () => {
+    const measureIncrementalOrderWork = (sourceCount, sessionId) => {
+      document.body.innerHTML = '';
+      const host = document.createElement('div');
+      const layout = document.createElement('div');
+      layout.style.display = 'grid';
+      layout.style.gridTemplateColumns = '100px 100px';
+      layout.style.gridTemplateRows = Array(Math.ceil(sourceCount / 2)).fill('20px').join(' ');
+      host.appendChild(layout);
+      document.body.appendChild(host);
+
+      let sourceComparisons = 0;
+      const nodePrototype = document.defaultView.Node.prototype;
+      const originalCompareDocumentPosition = nodePrototype.compareDocumentPosition;
+      nodePrototype.compareDocumentPosition = function(other) {
+        if (this.parentNode === layout && other?.parentNode === layout) sourceComparisons += 1;
+        return originalCompareDocumentPosition.call(this, other);
+      };
+      const renderer = new TranslationRenderer({document, sessionId});
+      try {
+        for (let index = 0; index < sourceCount; index += 1) {
+          const source = document.createElement('div');
+          source.style.display = 'flex';
+          source.textContent = `Item ${index}`;
+          layout.appendChild(source);
+          renderer.insert({
+            element: source,
+            sourceId: `${sessionId}-${index}`,
+            translatedText: `T${index}`
+          });
+        }
+      } finally {
+        nodePrototype.compareDocumentPosition = originalCompareDocumentPosition;
+        renderer.removeAll();
+      }
+      return sourceComparisons;
+    };
+    const budget = (sourceCount) => sourceCount * Math.ceil(Math.log2(sourceCount + 1)) * 5;
+    const small = measureIncrementalOrderWork(250, 'incremental-grid-order-250');
+    const large = measureIncrementalOrderWork(500, 'incremental-grid-order-500');
+
+    expect(small).toBeLessThan(budget(250));
+    expect(large).toBeLessThan(budget(500));
+  });
+
+  it('bounds external grid ordering work without scanning the host children', () => {
+    const measureExternalOrderWork = (sourceCount, sessionId) => {
+      document.body.innerHTML = '';
+      const host = document.createElement('div');
+      const layout = document.createElement('div');
+      layout.style.display = 'grid';
+      layout.style.gridTemplateColumns = '100px 100px';
+      layout.style.gridTemplateRows = Array(Math.ceil(sourceCount / 2)).fill('20px').join(' ');
+      const sources = [];
+      for (let index = 0; index < sourceCount; index += 1) {
+        const source = document.createElement('div');
+        source.style.display = 'flex';
+        source.textContent = `Item ${index}`;
+        layout.appendChild(source);
+        sources.push(source);
+      }
+      host.appendChild(layout);
+      document.body.appendChild(host);
+
+      let hostChildIterations = 0;
+      const hostChildren = host.children;
+      const originalHostIterator = hostChildren[Symbol.iterator].bind(hostChildren);
+      Object.defineProperty(hostChildren, Symbol.iterator, {
+        configurable: true,
+        value() {
+          const iterator = originalHostIterator();
+          return {
+            next() {
+              const result = iterator.next();
+              if (!result.done) hostChildIterations += 1;
+              return result;
+            },
+            [Symbol.iterator]() {
+              return this;
+            }
+          };
+        }
+      });
+
+      let sourceComparisons = 0;
+      const nodePrototype = document.defaultView.Node.prototype;
+      const originalCompareDocumentPosition = nodePrototype.compareDocumentPosition;
+      nodePrototype.compareDocumentPosition = function(other) {
+        if (this.parentNode === layout && other?.parentNode === layout) sourceComparisons += 1;
+        return originalCompareDocumentPosition.call(this, other);
+      };
+
+      const renderer = new TranslationRenderer({document, sessionId});
+      try {
+        for (let index = 0; index < sourceCount; index += 1) {
+          renderer.insert({
+            element: sources[index],
+            sourceId: `${sessionId}-${index}`,
+            translatedText: `번역 ${index}`
+          });
+        }
+      } finally {
+        nodePrototype.compareDocumentPosition = originalCompareDocumentPosition;
+        renderer.removeAll();
+      }
+      return {hostChildIterations, sourceComparisons};
+    };
+
+    const small = measureExternalOrderWork(500, 'external-order-small');
+    const large = measureExternalOrderWork(1000, 'external-order-large');
+
+    expect(small.hostChildIterations).toBe(0);
+    expect(large.hostChildIterations).toBe(0);
+    expect(small.sourceComparisons).toBeGreaterThan(0);
+    expect(large.sourceComparisons).toBeLessThanOrEqual(small.sourceComparisons * 3);
+  });
+
+  it('clears anchored translation styles when a grid source becomes a normal sibling', () => {
+    document.body.innerHTML = `
+      <div id="layout" style="display:grid;grid-template-columns:60px 1fr">
+        <div id="source" style="display:flex">LIVE</div>
+        <div id="tabs">ALL</div>
+      </div>
+    `;
+    const source = document.querySelector('#source');
+    const layout = document.querySelector('#layout');
+    const renderer = new TranslationRenderer({document, sessionId: 'grid-to-block-session'});
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'grid-to-block-source',
+      translatedText: '라이브'
+    });
+    const record = renderer.records.get('grid-to-block-source');
+
+    expect(record.placement.kind).toBe('grid-layout-anchored');
+    expect(translation.style.getPropertyValue('position')).toBe('absolute');
+
+    layout.style.display = 'block';
+    renderer.syncLayouts();
+
+    expect(record.placement).toBe('sibling');
+    expect(translation.parentElement).toBe(layout);
+    for (const property of ['position', 'top', 'right', 'bottom', 'left', 'width',
+      'max-width', 'white-space', 'margin']) {
+      expect(translation.style.getPropertyValue(property)).toBe('');
+    }
+
+    renderer.removeAll();
+  });
+
+  it('keeps an unsafe grid translation-only fallback visible outside the grid', () => {
+    document.head.innerHTML = '<style>.grid-source { display:flex; }</style>';
+    document.body.innerHTML = `
+      <div id="layout" style="display:grid;grid-template-columns:60px 1fr">
+        <div id="source" class="grid-source" style="overflow:hidden">
+          <span>L</span><span>I</span><span>V</span><span>E</span>
+        </div>
+        <div id="tabs">ALL</div>
+      </div>
+    `;
+    const source = document.querySelector('#source');
+    const layout = document.querySelector('#layout');
+    const renderer = new TranslationRenderer({
+      document,
+      sessionId: 'external-grid-fallback-session',
+      settings: {translationMode: TRANSLATION_MODES.TRANSLATION_ONLY}
+    });
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'external-grid-fallback-source',
+      translatedText: '번역'
+    });
+
+    expect(renderer.records.get('external-grid-fallback-source')?.placement?.kind)
+      .toBe('grid-layout-external');
+    expect(translation.parentElement).toBe(layout.parentElement);
+    expect(source.getAttribute(HIDDEN_ATTRIBUTE)).toBe('true');
+    expect(source.getAttribute(HIDDEN_PLACEMENT_ATTRIBUTE)).toBe('grid-external');
+    expect(source.style.getPropertyValue('display')).toBe('flex');
+    expect(source.style.getPropertyPriority('display')).toBe('important');
+    expect(window.getComputedStyle(source).visibility).toBe('hidden');
+    expect(window.getComputedStyle(translation).visibility).toBe('visible');
+    expect(Array.from(layout.children).map((child) => child.id)).toEqual(['source', 'tabs']);
+
+    renderer.removeAll();
+    expect(source.style.getPropertyValue('display')).toBe('');
+    expect(source.textContent.replace(/\s+/gu, '')).toBe('LIVE');
+  });
+
+  it('re-evaluates an anchored grid placement after rows or overflow become unsafe', () => {
+    document.body.innerHTML = `
+      <div id="layout" style="display:grid;grid-template-columns:60px 1fr">
+        <div id="source" style="display:flex">LIVE</div>
+        <div id="tabs">ALL</div>
+      </div>
+    `;
+    const source = document.querySelector('#source');
+    const layout = document.querySelector('#layout');
+    const renderer = new TranslationRenderer({document, sessionId: 'grid-recheck-session'});
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'grid-recheck-source',
+      translatedText: '라이브'
+    });
+    const record = renderer.records.get('grid-recheck-source');
+
+    expect(record.placement.kind).toBe('grid-layout-anchored');
+    expect(translation.parentElement).toBe(source);
+
+    layout.style.gridTemplateColumns = '60px';
+    layout.style.gridTemplateRows = '20px 20px';
+    renderer.syncLayouts();
+
+    expect(record.placement.kind).toBe('grid-layout-external');
+    expect(translation.parentElement).toBe(layout.parentElement);
+    expect(source.parentElement).toBe(layout);
+    expect(source.style.getPropertyValue('position')).toBe('');
+    expect(Array.from(layout.children).map((child) => child.id)).toEqual(['source', 'tabs']);
+
+    layout.style.gridTemplateColumns = '60px 1fr';
+    layout.style.gridTemplateRows = '';
+    renderer.syncLayouts();
+    expect(record.placement.kind).toBe('grid-layout-anchored');
+    expect(translation.parentElement).toBe(source);
+
+    source.style.overflow = 'hidden';
+    renderer.syncLayouts();
+    expect(record.placement.kind).toBe('grid-layout-external');
+    expect(translation.parentElement).toBe(layout.parentElement);
+
+    source.style.overflow = '';
+    renderer.syncLayouts();
+    expect(record.placement.kind).toBe('grid-layout-anchored');
+    expect(translation.parentElement).toBe(source);
+
+    renderer.removeAll();
+  });
+
+  it('short-circuits explicit multi-row grids and caches implicit multi-row checks', () => {
+    const createGrid = ({explicitRows}) => {
+      document.body.innerHTML = '';
+      const layout = document.createElement('div');
+      layout.style.display = 'grid';
+      layout.style.gridTemplateColumns = '100px 100px';
+      layout.style.gridAutoRows = '20px';
+      if (explicitRows) layout.style.gridTemplateRows = '20px 20px';
+      for (let index = 0; index < 120; index += 1) {
+        const source = document.createElement('div');
+        source.id = `source-${index}`;
+        source.style.display = 'flex';
+        source.textContent = `Item ${index}`;
+        layout.appendChild(source);
+      }
+      const control = document.createElement('div');
+      control.id = 'control';
+      control.textContent = 'ALL';
+      layout.appendChild(control);
+      document.body.appendChild(layout);
+      return layout;
+    };
+
+    const measureChildEnumeration = (layout, sourceCount, sessionId) => {
+      const children = layout.children;
+      let iterations = 0;
+      const originalIterator = children[Symbol.iterator].bind(children);
+      Object.defineProperty(children, Symbol.iterator, {
+        configurable: true,
+        value() {
+          iterations += 1;
+          return originalIterator();
+        }
+      });
+      const renderer = new TranslationRenderer({document, sessionId});
+      for (let index = 0; index < sourceCount; index += 1) {
+        renderer.insert({
+          element: layout.querySelector(`#source-${index}`),
+          sourceId: `${sessionId}-${index}`,
+          translatedText: `번역 ${index}`
+        });
+      }
+      renderer.removeAll();
+      return iterations;
+    };
+
+    expect(measureChildEnumeration(createGrid({explicitRows: true}), 120, 'explicit-grid-cache'))
+      .toBe(0);
+    expect(measureChildEnumeration(createGrid({explicitRows: false}), 120, 'implicit-grid-cache'))
+      .toBe(1);
+  });
+
+  it('bounds long explicit row-track analysis across N and 2N insertions', () => {
+    const measureLongRowWork = (sourceCount, sessionId) => {
+      document.body.innerHTML = '';
+      const layout = document.createElement('div');
+      layout.style.display = 'grid';
+      layout.style.gridTemplateColumns = '100px 100px';
+      layout.style.gridTemplateRows = Array(Math.ceil(sourceCount / 2)).fill('20px').join(' ');
+      for (let index = 0; index < sourceCount; index += 1) {
+        const source = document.createElement('div');
+        source.id = `long-source-${index}`;
+        source.style.display = 'flex';
+        source.textContent = `Item ${index}`;
+        layout.appendChild(source);
+      }
+      document.body.appendChild(layout);
+
+      const children = layout.children;
+      let childEnumerations = 0;
+      const originalIterator = children[Symbol.iterator].bind(children);
+      Object.defineProperty(children, Symbol.iterator, {
+        configurable: true,
+        value() {
+          childEnumerations += 1;
+          return originalIterator();
+        }
+      });
+      const originalTest = RegExp.prototype.test;
+      let whitespaceScans = 0;
+      RegExp.prototype.test = function(value) {
+        if (this.source === '\\s' && this.flags === 'u') whitespaceScans += 1;
+        return originalTest.call(this, value);
+      };
+
+      const renderer = new TranslationRenderer({document, sessionId});
+      try {
+        for (let index = 0; index < sourceCount; index += 1) {
+          renderer.insert({
+            element: layout.querySelector(`#long-source-${index}`),
+            sourceId: `${sessionId}-${index}`,
+            translatedText: `번역 ${index}`
+          });
+        }
+      } finally {
+        RegExp.prototype.test = originalTest;
+        renderer.removeAll();
+      }
+      return {childEnumerations, whitespaceScans};
+    };
+
+    const small = measureLongRowWork(120, 'long-row-small');
+    const large = measureLongRowWork(240, 'long-row-large');
+
+    expect(small.childEnumerations).toBe(0);
+    expect(large.childEnumerations).toBe(0);
+    expect(small.whitespaceScans).toBeLessThanOrEqual(32);
+    expect(large.whitespaceScans).toBeLessThanOrEqual(32);
+  });
+
+  it('flushes shared grid reservations once and skips unchanged margin writes', () => {
+    document.body.innerHTML = `
+      <div id="layout" style="display:grid;grid-template-columns:repeat(3,1fr)">
+        <div id="source-one" style="display:flex">One</div>
+        <div id="source-two" style="display:flex">Two</div>
+        <div id="source-three" style="display:flex">Three</div>
+      </div>
+    `;
+    const layout = document.querySelector('#layout');
+    const renderer = new TranslationRenderer({document, sessionId: 'shared-grid-reservation-session'});
+    const translations = ['source-one', 'source-two', 'source-three'].map((id, index) => {
+      const source = document.querySelector(`#${id}`);
+      const translation = renderer.insert({
+        element: source,
+        sourceId: `shared-grid-source-${index}`,
+        translatedText: `번역 ${index + 1}`
+      });
+      vi.spyOn(translation, 'getBoundingClientRect').mockReturnValue({height: 20});
+      return translation;
+    });
+    const marginWriteSpy = vi.spyOn(layout.style, 'setProperty');
+
+    renderer.syncLayouts();
+
+    expect(translations).toHaveLength(3);
+    expect(marginWriteSpy.mock.calls.filter(([property]) => property === 'margin-bottom'))
+      .toHaveLength(1);
+    marginWriteSpy.mockClear();
+    renderer.syncLayouts();
+    expect(marginWriteSpy.mock.calls.filter(([property]) => property === 'margin-bottom'))
+      .toHaveLength(0);
+
+    renderer.removeAll();
+  });
+
+  it('leaves explicitly placed grid sources in their original outer layout', () => {
+    document.body.innerHTML = `
+      <div id="layout" style="display:grid;grid-template-columns:40px 60px 80px 1fr">
+        <div id="source" style="display:flex;grid-column:2 / span 2;grid-row:3;order:7">LIVE</div>
+        <div id="other">Other content</div>
+      </div>
+    `;
+    const source = document.querySelector('#source');
+    const layout = document.querySelector('#layout');
+    const originalStyle = source.getAttribute('style');
+    const renderer = new TranslationRenderer({document, sessionId: 'explicit-grid-source-session'});
+
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'explicit-grid-source',
+      translatedText: '라이브'
+    });
+
+    expect(source.parentElement).toBe(layout);
+    expect(source.style.getPropertyValue('grid-column')).toBe('2 / span 2');
+    expect(source.style.getPropertyValue('grid-row')).toBe('3');
+    expect(source.style.getPropertyValue('order')).toBe('7');
+    expect(translation.parentElement).toBe(source);
+
+    renderer.removeAll();
+    expect(source.style.getPropertyValue('position')).toBe('');
+    expect(source.style.getPropertyValue('grid-column')).toBe('2 / span 2');
+    expect(source.style.getPropertyValue('grid-row')).toBe('3');
+    expect(source.style.getPropertyValue('order')).toBe('7');
+    expect(source.textContent).toBe('LIVE');
+  });
+
+  it('removes an anchored grid translation when the host detaches its source', () => {
+    document.body.innerHTML = `
+      <div id="layout" style="display:grid;grid-template-columns:60px 1fr">
+        <div id="source" style="display:flex">LIVE</div>
+      </div>
+    `;
+    const source = document.querySelector('#source');
+    const renderer = new TranslationRenderer({document, sessionId: 'detached-grid-source-session'});
+    renderer.insert({element: source, sourceId: 'detached-grid-source', translatedText: '라이브'});
+    const translation = source.querySelector('translight-translation');
+
+    source.remove();
+    renderer.pruneDisconnected();
+
+    expect(renderer.hasRecord(source)).toBe(false);
+    expect(translation?.isConnected).toBe(false);
+    renderer.removeAll();
+  });
+
+  it('removes an anchored grid translation when the host reparents its source', () => {
+    document.body.innerHTML = `
+      <div id="layout" style="display:grid;grid-template-columns:60px 1fr">
+        <div id="source" style="display:flex">LIVE</div>
+      </div>
+      <div id="destination"></div>
+    `;
+    const source = document.querySelector('#source');
+    const destination = document.querySelector('#destination');
+    const renderer = new TranslationRenderer({document, sessionId: 'reparented-grid-source-session'});
+    const translation = renderer.insert({element: source, sourceId: 'reparented-grid-source', translatedText: '라이브'});
+
+    destination.appendChild(source);
+    renderer.removeAll();
+
+    expect(destination.firstElementChild).toBe(source);
+    expect(translation.isConnected).toBe(false);
+    expect(source.textContent).toBe('LIVE');
+  });
+
   it('matches the source block typography when its parent uses a smaller base size', () => {
     document.body.innerHTML = `
       <section id="article-body" style="font-size:10px;line-height:12.31px">

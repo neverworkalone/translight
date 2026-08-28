@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Translight AP News navigation reproduction</title>
+    <style>
+      html { scroll-behavior: auto; }
+      body {
+        margin: 0;
+        color: #111;
+        background: #fff;
+        font: 16px/1.5 Arial, sans-serif;
+      }
+      #report {
+        position: fixed;
+        z-index: 10;
+        top: 0;
+        right: 0;
+        width: 420px;
+        max-height: 90vh;
+        overflow: auto;
+        box-sizing: border-box;
+        padding: 12px;
+        background: #111827;
+        color: white;
+        font: 12px/1.4 monospace;
+        white-space: pre-wrap;
+      }
+      .Page-header {
+        height: 64px;
+        box-sizing: border-box;
+        padding: 12px 32px;
+        color: white;
+        background: #000;
+      }
+      .MainNavigation-items {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        height: 40px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .MainNavigationItem-text {
+        display: flex;
+        align-items: center;
+        min-width: 0;
+        height: 40px;
+        white-space: nowrap;
+      }
+      .MainNavigationItem-text a,
+      .MainNavigationItem-more {
+        color: white;
+        font-size: 14px;
+        line-height: 18px;
+      }
+      .article {
+        width: min(720px, calc(100% - 48px));
+        margin: 72px auto;
+      }
+      .article h1 { margin: 0 0 24px; font-size: 42px; line-height: 1.05; }
+      .article p { margin: 0; font-size: 18px; line-height: 28px; }
+    </style>
+  </head>
+  <body>
+    <pre id="report">starting…</pre>
+    <header class="Page-header">
+      <bsp-nav class="MainNavigation">
+        <ul class="MainNavigation-items">
+          <li class="MainNavigation-items-item" data-nav-items-item>
+            <div class="MainNavigationItem" data-mainnav-item>
+              <div class="MainNavigationItem-text" data-has-dropdown>
+                <a class="AnClick-MainNav" href="/science">SCIENCE</a>
+              </div>
+            </div>
+          </li>
+          <li class="MainNavigation-items-item" data-nav-items-item>
+            <div class="MainNavigationItem" data-mainnav-item>
+              <div class="MainNavigationItem-text" data-has-dropdown>
+                <span class="MainNavigationItem-more" data-nav-moretrigger>MORE</span>
+              </div>
+            </div>
+          </li>
+        </ul>
+      </bsp-nav>
+    </header>
+    <main class="article">
+      <h1>FACT FOCUS: Canada and the US power grid</h1>
+      <p>Experts explain why a change in electricity exports would not cause massive blackouts.</p>
+    </main>
+    <script type="module" src="/tests/fixtures/apnews-navigation-repro.js"></script>
+  </body>
+</html>

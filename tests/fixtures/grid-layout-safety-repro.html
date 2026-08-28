@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Translight grid layout safety reproduction</title>
+    <style>
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 24px;
+        color: #111827;
+        font: 16px/1.4 Arial, sans-serif;
+      }
+
+      #report {
+        margin-bottom: 24px;
+        padding: 12px;
+        color: #fff;
+        background: #111827;
+        font: 12px/1.4 monospace;
+        white-space: pre-wrap;
+      }
+
+      .case {
+        margin: 16px 0;
+        padding: 12px;
+        border: 1px solid #cbd5e1;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: 120px 120px;
+        gap: 0;
+      }
+
+      .multi-row-grid { grid-auto-rows: 36px; }
+
+      .grid-source,
+      .grid-control {
+        display: flex;
+        align-items: center;
+        min-width: 0;
+        white-space: nowrap;
+      }
+
+      .clipped-source { overflow: hidden; }
+
+      .transition-grid { grid-template-columns: 120px 1fr; }
+
+      .suppressed-grid {
+        grid-template-columns: 120px;
+        grid-template-rows: 36px 36px;
+      }
+    </style>
+  </head>
+  <body>
+    <pre id="report">Running…</pre>
+
+    <section class="case">
+      <h2>Two-row grid</h2>
+      <div id="multi-row" class="grid multi-row-grid">
+        <div id="multi-row-source" class="grid-source">One</div>
+        <div class="grid-source">Two</div>
+        <div class="grid-source">Three</div>
+        <div class="grid-source">Four</div>
+      </div>
+    </section>
+
+    <section class="case">
+      <h2>Clipped source</h2>
+      <div id="clipped" class="grid">
+        <div id="clipped-source" class="grid-source clipped-source">LIVE</div>
+        <div id="clipped-control" class="grid-control">ALL</div>
+      </div>
+    </section>
+
+    <section class="case">
+      <h2>Single-row translation-only fallback</h2>
+      <div id="fallback" class="grid">
+        <div id="fallback-source" class="grid-source">
+          <span>L</span><span>I</span><span>V</span><span>E</span>
+        </div>
+        <div class="grid-control">TABS</div>
+      </div>
+    </section>
+
+    <section class="case">
+      <h2>Responsive transition from one row to two</h2>
+      <div id="transition-grid" class="grid transition-grid">
+        <div id="transition-source" class="grid-source">LIVE</div>
+        <div id="transition-control" class="grid-control">ALL</div>
+      </div>
+    </section>
+
+    <section class="case">
+      <h2>Suppressed external translation survives source mutations</h2>
+      <div id="suppressed-grid" class="grid suppressed-grid">
+        <div id="suppressed-source" class="grid-source">Original</div>
+        <div id="suppressed-control" class="grid-control">Control</div>
+      </div>
+    </section>
+
+    <script type="module" src="./grid-layout-safety-repro.js"></script>
+  </body>
+</html>

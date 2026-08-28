@@ -37,6 +37,52 @@ describe('collectTranslationBlocks', () => {
     expect(new Set(blocks.map((block) => block.sourceId)).size).toBe(3);
   });
 
+  it('ignores custom navigation items while keeping nearby article text', () => {
+    document.body.innerHTML = `
+      <bsp-nav class="MainNavigation">
+        <ul class="MainNavigation-items">
+          <li data-nav-items-item>
+            <div class="MainNavigationItem" data-mainnav-item>
+              <div class="MainNavigationItem-text" data-has-dropdown>
+                <a href="/science">Science</a>
+              </div>
+            </div>
+          </li>
+          <li data-nav-items-item>
+            <div class="MainNavigationItem" data-mainnav-item>
+              <div class="MainNavigationItem-text" data-has-dropdown>
+                <span class="MainNavigationItem-more" data-nav-moretrigger>More</span>
+              </div>
+            </div>
+          </li>
+        </ul>
+      </bsp-nav>
+      <div class="MainNavigation"><div>Archive</div></div>
+      <p>Article text remains translatable.</p>
+    `;
+
+    expect(collectTranslationBlocks(document.body).map((block) => block.text)).toEqual([
+      'Article text remains translatable.'
+    ]);
+  });
+
+  it.each(['has-navigation', 'layout-with-navigation', 'AppWithNavigation'])
+    ('does not treat ordinary layout class %s as a navigation container', (className) => {
+      document.body.innerHTML = `
+        <div class="${className}">
+          <main>
+            <h1>Article heading remains translatable.</h1>
+            <p>Article paragraph remains translatable.</p>
+          </main>
+        </div>
+      `;
+
+      expect(collectTranslationBlocks(document.body).map((block) => block.text)).toEqual([
+        'Article heading remains translatable.',
+        'Article paragraph remains translatable.'
+      ]);
+    });
+
   it('collects linked figure captions but ignores image-replacement logos', () => {
     document.body.innerHTML = `
       <header>

@@ -227,6 +227,68 @@ The repaired case must report `captionTranslationCount: 1`,
 layouts before and after translation, `restoredAfterStop: true`, and
 `testPassed: true`.
 
+## AP News navigation
+
+Fixture: `apnews-navigation-repro.html` and
+`apnews-navigation-repro.js`
+
+Open this URL in Chrome while the Vite development server is running:
+
+```text
+http://127.0.0.1:5173/tests/fixtures/apnews-navigation-repro.html
+```
+
+This fixture models the supplied AP News header, whose top navigation is a
+custom `bsp-nav` element rather than a native `nav`. `SCIENCE` and `MORE` must
+remain original menu labels with no generated translation nodes, while the
+article title and paragraph continue to translate.
+
+The repaired case must report `translationCount: 2`,
+`navigationAfter.translationCount: 0`, `restoredAfterStop: true`, and
+`testPassed: true`.
+
+## AP News live-page compact layout
+
+Fixture: `apnews-live-layout-repro.html` and
+`apnews-live-layout-repro.js`
+
+Open this URL in Chrome while the Vite development server is running:
+
+```text
+http://127.0.0.1:5173/tests/fixtures/apnews-live-layout-repro.html
+```
+
+This fixture models the supplied AP News live page's trending links, live
+controls, article lead, and side rail using the saved page's nested
+`PageListTrending`/`bsp-custom-headline` and `LiveBlogPage` DOM/CSS. The upper
+panel keeps the legacy child-placement state from the attached snapshot so the
+vertical failure remains visible; the lower panel runs the current renderer on
+the same layout. The repaired case must report a vertical legacy probe, stable
+source rectangles, horizontal non-overlapping translations,
+`translationCount: 11`, a stable live/tabs grid relationship, and no overlap
+between the anchored label and the following article content,
+`restoredAfterStop: true`, and `testPassed: true`.
+
+## Generic grid layout safety
+
+Fixture: `grid-layout-safety-repro.html` and `grid-layout-safety-repro.js`
+
+Open this URL in Chrome while the Vite development server is running:
+
+```text
+http://127.0.0.1:5173/tests/fixtures/grid-layout-safety-repro.html
+```
+
+This fixture covers the generic cases that must not use the AP single-row
+anchored placement: a two-row grid and a flex source with `overflow:hidden`.
+Unsafe translations are placed outside the grid so existing host items keep
+their positions. It also covers the translation-only fallback for a safe
+single-row grid source and a one-row-to-two-row responsive transition. The
+repaired case must report external placement without overlap/clipping or host
+layout movement for the unsafe cases, visible anchored fallback text with the
+source hidden, a safe re-evaluation after the responsive transition, and
+`restoredAfterStop: true` with `testPassed: true`.
+
 ## YouTube long description paragraph placement
 
 Fixture: `youtube-description-paragraphs-repro.html` and
