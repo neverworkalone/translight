@@ -320,6 +320,77 @@ describe('collectTranslationBlocks', () => {
       .toEqual(blocks.map((block) => block.sourceId));
   });
 
+  it('splits Booking property paragraphs across inline labels', () => {
+    document.body.innerHTML = `
+      <div data-capla-component-boundary="b-property-web-property-page/PropertyDescriptionDesktop">
+        <p data-testid="property-description" class="booking-property-description"><b>Prime Location:</b> OUTRIGGER Waikiki Beachcomber Hotel in Honolulu offers easy access to Waikiki Beach, a 3-minute walk away. Nearby attractions include Royal Hawaiian Shopping Center (984 feet) and Royal Hawaiian Theater (4-minute walk). Honolulu International Airport is 9.3 mi from the property.
+
+<b>Exceptional Facilities:</b> Guests enjoy a swimming pool with stunning views, a sun terrace, and a family-friendly restaurant serving American cuisine. Additional amenities include a hot tub, fitness center, yoga classes, and film nights.
+
+<b>Comfortable Accommodations:</b> Rooms feature air-conditioning, balconies with sea or city views, private bathrooms, and modern amenities such as tea and coffee makers, hairdryers, and free toiletries. Family rooms and sofa beds cater to all travelers.
+
+<b>Dining Experience:</b> The on-site restaurant offers American cuisine with vegetarian and gluten-free options. Breakfast includes local specialties, warm dishes, and fresh fruits. A pool bar and coffee shop provide additional dining options.</p>
+      </div>
+    `;
+
+    const description = document.querySelector('[data-testid="property-description"]');
+    const blocks = collectTranslationBlocks(document.body);
+
+    expect(blocks.map((block) => block.text)).toEqual([
+      'Prime Location: OUTRIGGER Waikiki Beachcomber Hotel in Honolulu offers easy access to Waikiki Beach, a 3-minute walk away. Nearby attractions include Royal Hawaiian Shopping Center (984 feet) and Royal Hawaiian Theater (4-minute walk). Honolulu International Airport is 9.3 mi from the property.',
+      'Exceptional Facilities: Guests enjoy a swimming pool with stunning views, a sun terrace, and a family-friendly restaurant serving American cuisine. Additional amenities include a hot tub, fitness center, yoga classes, and film nights.',
+      'Comfortable Accommodations: Rooms feature air-conditioning, balconies with sea or city views, private bathrooms, and modern amenities such as tea and coffee makers, hairdryers, and free toiletries. Family rooms and sofa beds cater to all travelers.',
+      'Dining Experience: The on-site restaurant offers American cuisine with vegetarian and gluten-free options. Breakfast includes local specialties, warm dishes, and fresh fruits. A pool bar and coffee shop provide additional dining options.'
+    ]);
+    expect(blocks.every(({element}) => element.matches('[data-translight-segment="true"]')))
+      .toBe(true);
+    expect(blocks.every(({element}) => element.parentElement === description)).toBe(true);
+    expect(description.querySelectorAll('[data-translight-segment="true"]')).toHaveLength(4);
+  });
+
+  it('keeps inline paragraph segmentation within a linear query budget', () => {
+    const measure = (paragraphCount) => {
+      document.body.innerHTML = `
+        <div data-capla-component-boundary="b-property-web-property-page/PropertyDescriptionDesktop">
+          ${Array.from({length: paragraphCount}, (_, index) => `
+            <p data-testid="property-description-${index}"><b>Prime Location:</b> OUTRIGGER Waikiki Beachcomber Hotel offers easy access to Waikiki Beach.
+
+<b>Exceptional Facilities:</b> Guests enjoy a swimming pool with stunning views and a family-friendly restaurant.
+
+<b>Comfortable Accommodations:</b> Rooms feature air-conditioning, balconies, private bathrooms, and modern amenities.
+
+<b>Dining Experience:</b> The on-site restaurant offers American cuisine with vegetarian and gluten-free options.</p>
+          `).join('')}
+        </div>
+      `;
+
+      const originalQuerySelectorAll = Element.prototype.querySelectorAll;
+      let queryCalls = 0;
+      let returnedNodes = 0;
+      Element.prototype.querySelectorAll = function (...args) {
+        queryCalls += 1;
+        const result = originalQuerySelectorAll.apply(this, args);
+        returnedNodes += result.length;
+        return result;
+      };
+
+      try {
+        const blocks = collectTranslationBlocks(document.body);
+        return {blocks, queryCalls, returnedNodes};
+      } finally {
+        Element.prototype.querySelectorAll = originalQuerySelectorAll;
+      }
+    };
+
+    const smaller = measure(25);
+    const larger = measure(50);
+
+    expect(smaller.blocks).toHaveLength(100);
+    expect(larger.blocks).toHaveLength(200);
+    expect(larger.queryCalls).toBeLessThanOrEqual(smaller.queryCalls * 2);
+    expect(larger.returnedNodes).toBeLessThanOrEqual(smaller.returnedNodes * 2);
+  });
+
   it('splits blank-line paragraphs inside a nested YouTube attributed description', () => {
     document.body.innerHTML = `
       <div id="expanded">
