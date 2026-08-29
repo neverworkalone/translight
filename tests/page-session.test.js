@@ -918,6 +918,42 @@ describe('PageSession', () => {
     document.documentElement.removeAttribute('lang');
   });
 
+  it('reuses a real Dummy provider when the first English block arrives in watch-only mode', async () => {
+    document.documentElement.lang = 'ko-KR';
+    document.body.innerHTML = '<p>처음에는 한국어 콘텐츠만 있습니다.</p>';
+    const provider = new DummyTranslateProvider({delayMs: 0});
+    const prepare = vi.spyOn(provider, 'prepare');
+    const session = new PageSession({
+      generation: 1131,
+      document,
+      settings: {translatePageTitle: false},
+      provider
+    });
+
+    await session.start();
+    expect(session.watchOnly).toBe(true);
+
+    const added = document.createElement('p');
+    added.textContent = 'The first English block arrived after watch-only startup.';
+    document.body.appendChild(added);
+    await wait(180);
+
+    expect(added.nextElementSibling?.textContent)
+      .toBe('ko:The first English block arrived after watch-only startup.');
+    const second = document.createElement('p');
+    second.textContent = 'The second English block arrived without a restart.';
+    document.body.appendChild(second);
+    await wait(180);
+
+    expect(second.nextElementSibling?.textContent)
+      .toBe('ko:The second English block arrived without a restart.');
+    expect(prepare).toHaveBeenCalledTimes(1);
+    expect(await provider.getModelState()).toBe(MODEL_STATE.AVAILABLE);
+    session.stop({notify: false});
+    expect(await provider.getModelState()).toBe(MODEL_STATE.UNAVAILABLE);
+    document.documentElement.removeAttribute('lang');
+  });
+
   it('does not restart model preparation for consecutive watch-only renders', async () => {
     document.documentElement.lang = 'ko-KR';
     document.body.innerHTML = '<p>처음에는 한국어 콘텐츠만 있습니다.</p>';

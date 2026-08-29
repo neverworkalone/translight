@@ -26,11 +26,17 @@ npm run test:metacritic:chrome -- \
   --chrome=/path/to/Chrome\ for\ Testing
 ```
 
-The CFT runner records the provider type/profile/delay, extension manifest
-version and build identifier, the tested commit, and geometry-check results in
-`artifacts/metacritic-chrome/result.json`. It fails if dummy mode is requested
-against a production build. `--skip-build` is supported only when the already
-loaded extension is the intended build.
+The Vite build embeds the current git HEAD SHA in `BUILD_INFO`. The CFT runner
+records the provider type/profile/delay, extension manifest version and build
+identifier, the loaded build SHA, the tested commit, and geometry-check results
+in `artifacts/metacritic-chrome/result.json`. In local launch mode it fails
+before the scenario when the loaded bundle is stale or does not report a valid
+SHA; this also protects `--skip-build`. Attach mode preserves the real-provider
+path and reports the loaded SHA separately, without claiming it matches the
+current checkout when that cannot be verified.
+
+It also fails if dummy mode is requested against a production build. Dummy
+mode is therefore explicit both in the CLI and in the test-build marker.
 
 Known limitation: CFT and the real Translator API require a supported local
 browser binary/profile. If no extension-capable Chromium binary is installed,

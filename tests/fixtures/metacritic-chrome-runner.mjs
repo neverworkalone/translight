@@ -36,6 +36,7 @@ const TEST_HARNESS_KEY = '__translight_test_harness__';
 const DEFAULT_DUMMY_DELAY_MS = 69;
 const PROVIDER_TYPES = new Set(['real', 'dummy']);
 const DUMMY_PROFILES = new Set(['normal', 'expanded']);
+const COMMIT_SHA_PATTERN = /^[0-9a-f]{40}$/u;
 const TAB_STATUS_OFF = 'OFF';
 const TAB_STATUS_ERROR = 'ERROR';
 const MAX_CDP_PING_MS = 250;
@@ -1276,6 +1277,45 @@ async function readExtensionBuildInfo(worker) {
   })()`);
 }
 
+function normalizeCommitSha(value) {
+  return typeof value === 'string' && COMMIT_SHA_PATTERN.test(value) ? value : null;
+}
+
+function resolveTestedCommit({loadedBuild, checkoutCommit, attachMode = false} = {}) {
+  const loadedCommit = normalizeCommitSha(loadedBuild?.commit);
+  if (attachMode) {
+    return {
+      testedCommit: loadedCommit,
+      testedCommitSource: 'loaded-extension-build',
+      testedCommitVerified: false,
+      testedCommitAvailable: loadedCommit != null
+    };
+  }
+
+  const expectedCommit = normalizeCommitSha(checkoutCommit);
+  if (!loadedCommit) {
+    throw new Error(
+      'The loaded extension does not report a valid build commit. ' +
+      'Rebuild it with npm run build or npm run build:test before running the local CFT runner.'
+    );
+  }
+  if (!expectedCommit) {
+    throw new Error('The current checkout does not report a valid git HEAD commit.');
+  }
+  if (loadedCommit !== expectedCommit) {
+    throw new Error(
+      `Loaded extension build commit ${loadedCommit} does not match checkout HEAD ${expectedCommit}. ` +
+      'Rebuild the extension or remove --skip-build before running the local CFT runner.'
+    );
+  }
+  return {
+    testedCommit: loadedCommit,
+    testedCommitSource: 'loaded-extension-build',
+    testedCommitVerified: true,
+    testedCommitAvailable: true
+  };
+}
+
 async function configureDummyProvider(worker, options) {
   return evaluateExtension(worker, `(async () => {
     const harness = globalThis[${JSON.stringify(TEST_HARNESS_KEY)}];
@@ -1836,12 +1876,16 @@ async function main() {
   let settingsSnapshot = null;
   let tabId = null;
   let processResult = null;
-  const testedCommit = (await execFileAsync('git', ['rev-parse', 'HEAD'], {cwd: REPOSITORY_ROOT})).stdout.trim();
+  const checkoutCommit = (await execFileAsync('git', ['rev-parse', 'HEAD'], {cwd: REPOSITORY_ROOT})).stdout.trim();
   const result = {
     runner: 'metacritic-chrome-runner',
     startedAt,
-    commit: testedCommit,
-    testedCommit,
+    commit: checkoutCommit,
+    checkoutCommit,
+    testedCommit: null,
+    testedCommitSource: null,
+    testedCommitVerified: false,
+    testedCommitAvailable: false,
     provider: {
       type: options.provider,
       profile: options.provider === 'dummy' ? options.dummyProfile : null,
@@ -1875,6 +1919,11 @@ async function main() {
     result.extension.workerUrl = extensionTarget.url;
     result.extension.version = extension.manifest.version;
     result.extension.build = await readExtensionBuildInfo(worker);
+    Object.assign(result, resolveTestedCommit({
+      loadedBuild: result.extension.build,
+      checkoutCommit,
+      attachMode
+    }));
     if (options.provider === 'dummy') {
       if (result.extension.build?.testBuild !== true) {
         throw new Error(
@@ -2061,6 +2110,7 @@ export {
   evaluateResponsiveness,
   finalizeLayoutReport,
   parseArgs,
+  resolveTestedCommit,
   summarizePageSamples,
   summarizeRecoveryResponsiveness
 };

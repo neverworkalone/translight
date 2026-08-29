@@ -5,6 +5,7 @@ import {
   evaluateResponsiveness,
   finalizeLayoutReport,
   parseArgs,
+  resolveTestedCommit,
   summarizePageSamples,
   summarizeRecoveryResponsiveness
 } from './metacritic-chrome-runner.mjs';
@@ -49,6 +50,56 @@ describe('Metacritic Chrome runner', () => {
     expect(() => parseArgs(['--provider=mock'])).toThrow(/--provider must be real or dummy/u);
     expect(() => parseArgs(['--dummy-profile=short'])).toThrow(/--dummy-profile must be normal or expanded/u);
     expect(() => parseArgs(['--dummy-delay-ms=-1'])).toThrow(/--dummy-delay-ms must be an integer/u);
+  });
+
+  it('rejects a stale extension bundle in local launch mode', () => {
+    const checkoutCommit = 'b'.repeat(40);
+    const loadedCommit = 'a'.repeat(40);
+
+    expect(() => resolveTestedCommit({
+      loadedBuild: {commit: loadedCommit},
+      checkoutCommit,
+      attachMode: false
+    })).toThrow(new RegExp(`does not match checkout HEAD ${checkoutCommit}`, 'u'));
+  });
+
+  it('marks a matching local launch bundle commit as verified', () => {
+    const commit = 'a'.repeat(40);
+
+    expect(resolveTestedCommit({
+      loadedBuild: {commit},
+      checkoutCommit: commit,
+      attachMode: false
+    })).toEqual({
+      testedCommit: commit,
+      testedCommitSource: 'loaded-extension-build',
+      testedCommitVerified: true,
+      testedCommitAvailable: true
+    });
+  });
+
+  it('uses the loaded extension commit for attach mode without claiming checkout verification', () => {
+    const loadedCommit = 'a'.repeat(40);
+    const result = resolveTestedCommit({
+      loadedBuild: {commit: loadedCommit},
+      checkoutCommit: 'b'.repeat(40),
+      attachMode: true
+    });
+
+    expect(result).toEqual({
+      testedCommit: loadedCommit,
+      testedCommitSource: 'loaded-extension-build',
+      testedCommitVerified: false,
+      testedCommitAvailable: true
+    });
+  });
+
+  it('rejects a launch bundle that has no valid build commit', () => {
+    expect(() => resolveTestedCommit({
+      loadedBuild: {kind: 'test', testBuild: true, commit: 'unknown'},
+      checkoutCommit: 'b'.repeat(40),
+      attachMode: false
+    })).toThrow(/does not report a valid build commit/u);
   });
 
   it('parses persistent attach mode without changing the selected scenario URL', () => {
