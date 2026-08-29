@@ -564,10 +564,11 @@ class ProcessSampler {
     this.recoverySamples = [];
   }
 
-  start() {
+  async start() {
+    if (this.timer) return;
     this.timer = setInterval(() => void this.sample(), this.sampleIntervalMs);
     this.timer.unref?.();
-    void this.sample();
+    await this.sample();
   }
 
   async sample() {
@@ -596,10 +597,12 @@ class ProcessSampler {
     const startIndex = this.samples.length;
     const deadline = Date.now() + CPU_SAMPLE_WINDOW_TIMEOUT_MS;
     while (!this.error && this.samples.length - startIndex < sampleCount && Date.now() < deadline) {
-      const countBefore = this.samples.length;
-      await this.sample();
-      if (this.samples.length - startIndex >= sampleCount) break;
-      if (this.samples.length === countBefore) await wait(this.sampleIntervalMs);
+      if (!this.timer) {
+        this.error = 'CPU sampler was not started.';
+        break;
+      }
+      const remainingMs = deadline - Date.now();
+      await wait(Math.min(this.sampleIntervalMs, remainingMs));
     }
     const window = this.samples.slice(startIndex, startIndex + sampleCount);
     if (window.length < sampleCount && !this.error) {
@@ -1143,7 +1146,7 @@ function summarizeConsoleResult(result) {
   return summary;
 }
 
-async function runGalleryScenario({page, worker, options, result, tabId}) {
+async function runGalleryScenario({page, worker, options, result, tabId, captureCpuRecovery = null}) {
   const scenario = result.scenario;
   const toggles = [];
   let baseline = await readPageStats(page);
@@ -1181,6 +1184,7 @@ async function runGalleryScenario({page, worker, options, result, tabId}) {
   result.pageSamples = pageSamples;
   result.pageSummary = summarizePageSamples(pageSamples.samples, baseline.translationCount);
   result.beforeStop = await readPageStats(page);
+  if (captureCpuRecovery) await captureCpuRecovery();
   if (!options.skipTranslation) {
     const stop = await toggleTranslation({
       page,
@@ -1208,7 +1212,7 @@ async function runGalleryScenario({page, worker, options, result, tabId}) {
   scenario.completed = true;
 }
 
-async function runNavigationScenario({page, worker, options, result, tabId}) {
+async function runNavigationScenario({page, worker, options, result, tabId, captureCpuRecovery = null}) {
   const toggles = [];
   result.translationReadyByRoute = [];
   const homeUrl = await evaluate(page, 'location.href');
@@ -1307,6 +1311,7 @@ async function runNavigationScenario({page, worker, options, result, tabId}) {
   result.pageSamples = pageSamples;
   result.pageSummary = summarizePageSamples(pageSamples.samples);
   result.beforeStop = await readPageStats(page);
+  if (captureCpuRecovery) await captureCpuRecovery();
   if (!options.skipTranslation) {
     const stop = await toggleTranslation({
       page,
@@ -1459,19 +1464,21 @@ async function main() {
       await waitForTabState(worker, tabId, (state) => Boolean(state?.documentToken), 15_000);
     }
     if (processSampler) {
-      processSampler.start();
+      await processSampler.start();
       await processSampler.captureBaseline();
     }
     await startTracing(page);
     tracingStarted = true;
+    const captureCpuRecovery = processSampler
+      ? async () => {
+        await processSampler.captureRecovery();
+        processResult = await processSampler.stop();
+      }
+      : null;
     if (options.scenario === 'gallery') {
-      await runGalleryScenario({page, worker, options, result, tabId});
+      await runGalleryScenario({page, worker, options, result, tabId, captureCpuRecovery});
     } else {
-      await runNavigationScenario({page, worker, options, result, tabId});
-    }
-    if (processSampler) {
-      await processSampler.captureRecovery();
-      processResult = await processSampler.stop();
+      await runNavigationScenario({page, worker, options, result, tabId, captureCpuRecovery});
     }
   } catch (error) {
     result.error = {message: error.message, stack: error.stack};

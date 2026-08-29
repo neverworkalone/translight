@@ -53,10 +53,12 @@ navigation scenario and restores that setting afterward. Pass
 `--browser-pid=<pid>` when CPU sampling is required in attach mode.
 The attached browser must already have Translight loaded; use a
 Translator-capable Chrome profile when the run requires real translation.
-Performance validation records eight idle samples before the scenario and
-eight samples immediately after the scenario, before trace/file cleanup. If
-attach mode has no `--browser-pid`, the run is explicitly a browser-flow smoke
-test and reports `smokePassed` instead of claiming `testPassed`.
+Performance validation records eight timer-driven samples at the 250 ms
+interval before the scenario and another eight samples immediately after the
+scenario (about two seconds per window), before translation OFF, trace/file
+cleanup, or other runner teardown. If attach mode has no `--browser-pid`, the
+run is explicitly a browser-flow smoke test and reports `smokePassed` instead
+of claiming `testPassed`.
 
 ## Guardian card translation placement
 

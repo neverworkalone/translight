@@ -1,4 +1,4 @@
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 import {
   ProcessSampler,
   evaluateCpuRecovery,
@@ -83,29 +83,42 @@ describe('Metacritic Chrome runner', () => {
   });
 
   it('does not use cleanup samples in the scenario-immediate recovery window', async () => {
+    vi.useFakeTimers();
     const cpuValues = [
+      20,
       ...Array.from({length: 8}, () => 20),
       ...Array.from({length: 8}, () => 90),
       ...Array.from({length: 3}, () => 5)
     ];
-    const sampler = new ProcessSampler(123, {
-      sampleIntervalMs: 0,
-      readProcesses: async () => [{
-        pid: 123,
-        ppid: 1,
-        cpu: cpuValues.shift(),
-        rssKb: 1,
-        command: 'Chrome'
-      }]
-    });
+    try {
+      const sampler = new ProcessSampler(123, {
+        sampleIntervalMs: 250,
+        readProcesses: async () => [{
+          pid: 123,
+          ppid: 1,
+          cpu: cpuValues.shift(),
+          rssKb: 1,
+          command: 'Chrome'
+        }]
+      });
 
-    await sampler.captureBaseline();
-    await sampler.captureRecovery();
-    const result = await sampler.stop();
+      await sampler.start();
+      const baseline = sampler.captureBaseline();
+      await vi.advanceTimersByTimeAsync(250 * 8);
+      await baseline;
+      const recovery = sampler.captureRecovery();
+      await vi.advanceTimersByTimeAsync(250 * 8);
+      await recovery;
+      const result = await sampler.stop();
 
-    expect(result.sampleCount).toBe(16);
-    expect(result.recoveryAverageTotalCpu).toBe(90);
-    expect(result.cpuRecovered).toBe(false);
+      expect(result.sampleCount).toBe(17);
+      expect(result.baselineSampleCount).toBe(8);
+      expect(result.recoverySampleCount).toBe(8);
+      expect(result.recoveryAverageTotalCpu).toBe(90);
+      expect(result.cpuRecovered).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('marks failed process sampling unsupported for performance validation', async () => {
@@ -113,6 +126,7 @@ describe('Metacritic Chrome runner', () => {
       readProcesses: async () => []
     });
 
+    await sampler.start();
     await sampler.captureBaseline();
     await sampler.captureRecovery();
     const result = await sampler.stop();
