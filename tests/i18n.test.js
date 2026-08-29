@@ -13,12 +13,12 @@ describe('Chrome i18n messages', () => {
     const previousChrome = globalThis.chrome;
     globalThis.chrome = {
       i18n: {
-        getMessage: (key) => (key === 'optionsHeading' ? 'Localized heading' : '')
+        getMessage: (key) => (key === 'optionsPageTitle' ? 'Localized title' : '')
       }
     };
 
     try {
-      expect(t('optionsHeading')).toBe('Localized heading');
+      expect(t('optionsPageTitle')).toBe('Localized title');
     } finally {
       if (previousChrome === undefined) delete globalThis.chrome;
       else globalThis.chrome = previousChrome;
@@ -27,7 +27,7 @@ describe('Chrome i18n messages', () => {
 
   it('falls back to English and handles missing keys', () => {
     expect(FALLBACK_LANGUAGE).toBe('en');
-    expect(t('optionsHeading')).toBe(englishMessages.optionsHeading.message);
+    expect(t('optionsPageTitle')).toBe(englishMessages.optionsPageTitle.message);
     expect(t('actionErrorTitle', 'Example error')).toBe('Translight error: Example error');
     expect(t('missingMessageKey')).toBe('missingMessageKey');
   });
@@ -41,7 +41,7 @@ describe('Chrome i18n messages', () => {
     };
 
     try {
-      expect(t('optionsHeading')).toBe(englishMessages.optionsHeading.message);
+      expect(t('optionsPageTitle')).toBe(englishMessages.optionsPageTitle.message);
     } finally {
       if (previousChrome === undefined) delete globalThis.chrome;
       else globalThis.chrome = previousChrome;

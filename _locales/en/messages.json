@@ -49,35 +49,11 @@
   "optionsPageTitle": {
     "message": "Translight Settings"
   },
-  "optionsBrandLabel": {
-    "message": "TRANSLIGHT"
-  },
-  "optionsHeading": {
-    "message": "Settings"
-  },
-  "optionsCurrentServiceLabel": {
-    "message": "Current translation service"
-  },
-  "optionsTranslatorName": {
-    "message": "Chrome built-in Translator"
-  },
-  "optionsIntro": {
-    "message": "Translight keeps the original text and displays the translation below. Use the T icon in the toolbar to start or stop translation on the current page."
-  },
-  "optionsNoticeTitle": {
-    "message": "Settings page based on TASK 1–5"
-  },
-  "optionsNotice": {
-    "message": "Change the translation mode, display style, colors, and automatic-translation hostnames here. Updates are applied to open translated pages immediately."
-  },
   "settingsSave": {
     "message": "Save settings"
   },
   "settingsSaved": {
     "message": "Saved"
-  },
-  "settingsAppearance": {
-    "message": "Translation appearance"
   },
   "settingsTranslationMode": {
     "message": "Translation mode"
@@ -135,15 +111,6 @@
   },
   "settingsItalic": {
     "message": "Italic"
-  },
-  "settingsAutoTranslateSites": {
-    "message": "Automatic translation sites"
-  },
-  "settingsAutoTranslateSitesHint": {
-    "message": "One hostname per line. URLs are normalized and duplicate or invalid values are ignored."
-  },
-  "settingsAutoTranslateSitesPlaceholder": {
-    "message": "example.com\nnews.example.org"
   },
   "settingsPreviewOriginal": {
     "message": "Original page text"
