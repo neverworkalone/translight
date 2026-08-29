@@ -42,7 +42,8 @@ const MAX_CDP_PING_MS = 250;
 // unresponsive renderer.
 const MAX_LONG_TASK_MS = 500;
 const CPU_TAIL_SAMPLE_COUNT = 8;
-const CPU_TAIL_MARGIN = 75;
+const CPU_TAIL_MARGIN = 25;
+const CPU_SAMPLE_WINDOW_TIMEOUT_MS = 15_000;
 const SETTINGS_KEY = 'translight.settings.v1';
 
 function usage() {
@@ -524,27 +525,59 @@ async function readChromeProcesses(rootPid) {
   return [...selected.values()];
 }
 
+function averageCpu(samples) {
+  return samples.length
+    ? samples.reduce((sum, sample) => sum + sample.totalCpu, 0) / samples.length
+    : null;
+}
+
+function roundCpu(value) {
+  return value == null ? null : Math.round(value * 100) / 100;
+}
+
+function evaluateCpuRecovery({supported, baselineSamples, recoverySamples}) {
+  const baselineAverage = averageCpu(baselineSamples);
+  const recoveryAverage = averageCpu(recoverySamples);
+  const windowsComplete = baselineSamples.length >= CPU_TAIL_SAMPLE_COUNT &&
+    recoverySamples.length >= CPU_TAIL_SAMPLE_COUNT;
+  return {
+    baselineSampleCount: baselineSamples.length,
+    recoverySampleCount: recoverySamples.length,
+    baselineAverageTotalCpu: roundCpu(baselineAverage),
+    recoveryAverageTotalCpu: roundCpu(recoveryAverage),
+    cpuRecovered: supported === true && windowsComplete &&
+      baselineAverage != null && recoveryAverage != null &&
+      recoveryAverage <= baselineAverage + CPU_TAIL_MARGIN
+  };
+}
+
 class ProcessSampler {
-  constructor(rootPid) {
+  constructor(rootPid, {readProcesses = readChromeProcesses, sampleIntervalMs = PROCESS_SAMPLE_INTERVAL_MS} = {}) {
     this.rootPid = rootPid;
+    this.readProcesses = readProcesses;
+    this.sampleIntervalMs = sampleIntervalMs;
     this.samples = [];
     this.timer = null;
     this.inFlight = false;
     this.error = null;
-    this.baselineIndex = null;
+    this.baselineSamples = [];
+    this.recoverySamples = [];
   }
 
   start() {
-    this.timer = setInterval(() => void this.sample(), PROCESS_SAMPLE_INTERVAL_MS);
+    this.timer = setInterval(() => void this.sample(), this.sampleIntervalMs);
     this.timer.unref?.();
     void this.sample();
   }
 
   async sample() {
-    if (this.inFlight) return;
+    if (this.inFlight || this.error) return;
     this.inFlight = true;
     try {
-      const processes = await readChromeProcesses(this.rootPid);
+      const processes = await this.readProcesses(this.rootPid);
+      if (processes.length === 0) {
+        throw new Error(`No Chrome processes found for PID ${this.rootPid}.`);
+      }
       this.samples.push({
         elapsedMs: Math.round(performance.now() * 100) / 100,
         totalCpu: processes.reduce((sum, process) => sum + process.cpu, 0),
@@ -559,38 +592,56 @@ class ProcessSampler {
     }
   }
 
-  markBaseline() {
-    this.baselineIndex = this.samples.length;
+  async captureWindow(sampleCount) {
+    const startIndex = this.samples.length;
+    const deadline = Date.now() + CPU_SAMPLE_WINDOW_TIMEOUT_MS;
+    while (!this.error && this.samples.length - startIndex < sampleCount && Date.now() < deadline) {
+      const countBefore = this.samples.length;
+      await this.sample();
+      if (this.samples.length - startIndex >= sampleCount) break;
+      if (this.samples.length === countBefore) await wait(this.sampleIntervalMs);
+    }
+    const window = this.samples.slice(startIndex, startIndex + sampleCount);
+    if (window.length < sampleCount && !this.error) {
+      this.error = `Timed out waiting for ${sampleCount} CPU samples.`;
+    }
+    return window;
+  }
+
+  async captureBaseline() {
+    this.baselineSamples = await this.captureWindow(CPU_TAIL_SAMPLE_COUNT);
+    return this.baselineSamples;
+  }
+
+  async captureRecovery() {
+    this.recoverySamples = await this.captureWindow(CPU_TAIL_SAMPLE_COUNT);
+    return this.recoverySamples;
   }
 
   async stop() {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
-    await this.sample();
+    if (!this.error && (
+      this.baselineSamples.length < CPU_TAIL_SAMPLE_COUNT ||
+      this.recoverySamples.length < CPU_TAIL_SAMPLE_COUNT
+    )) {
+      this.error = 'CPU sampling windows were incomplete.';
+    }
     const maxTotalCpu = Math.max(...this.samples.map((sample) => sample.totalCpu), 0);
     const maxProcessCpu = Math.max(...this.samples.map((sample) => sample.maxProcessCpu), 0);
-    const baselineSamples = this.samples.slice(
-      this.baselineIndex ?? 0,
-      (this.baselineIndex ?? 0) + CPU_TAIL_SAMPLE_COUNT
-    );
-    const tailSamples = this.samples.slice(-CPU_TAIL_SAMPLE_COUNT);
-    const average = (samples) => samples.length
-      ? samples.reduce((sum, sample) => sum + sample.totalCpu, 0) / samples.length
-      : null;
-    const baselineAverage = average(baselineSamples);
-    const tailAverage = average(tailSamples);
-    const cpuRecovered = baselineAverage == null || tailAverage == null
-      ? null
-      : tailAverage <= baselineAverage + CPU_TAIL_MARGIN;
+    const cpu = evaluateCpuRecovery({
+      supported: !this.error,
+      baselineSamples: this.baselineSamples,
+      recoverySamples: this.recoverySamples
+    });
     return {
       supported: !this.error,
       error: this.error,
       sampleCount: this.samples.length,
       maxTotalCpu: Math.round(maxTotalCpu * 100) / 100,
       maxProcessCpu: Math.round(maxProcessCpu * 100) / 100,
-      baselineAverageTotalCpu: baselineAverage == null ? null : Math.round(baselineAverage * 100) / 100,
-      tailAverageTotalCpu: tailAverage == null ? null : Math.round(tailAverage * 100) / 100,
-      cpuRecovered,
+      ...cpu,
+      tailAverageTotalCpu: cpu.recoveryAverageTotalCpu,
       samples: this.samples
     };
   }
@@ -1304,10 +1355,17 @@ async function main() {
   const options = parseArgs(process.argv.slice(2));
   const startedAt = new Date().toISOString();
   const attachMode = options.debuggingPort != null;
+  const performanceValidationRequested = !(attachMode && options.browserPid == null);
   if (attachMode) {
     if (!options.profileDir) {
       throw new ValidationBlockedError(
         'Attach mode requires a dedicated persistent profile. Pass --profile-dir=/path/to/profile.'
+      );
+    }
+    if (!options.skipTranslation && options.browserPid == null) {
+      throw new ValidationBlockedError(
+        'Performance validation in attach mode requires --browser-pid=<pid>. ' +
+        'Use --skip-translation for a browser-flow smoke test without CPU sampling.'
       );
     }
   } else {
@@ -1329,13 +1387,13 @@ async function main() {
   const processSampler = chrome?.pid || options.browserPid
     ? new ProcessSampler(chrome?.pid ?? options.browserPid)
     : null;
-  processSampler?.start();
   let page;
   let worker;
   let trace = null;
   let tracingStarted = false;
   let settingsSnapshot = null;
   let tabId = null;
+  let processResult = null;
   const result = {
     runner: 'metacritic-chrome-runner',
     startedAt,
@@ -1354,6 +1412,7 @@ async function main() {
     },
     extension: {path: attachMode ? null : EXTENSION_PATH, loaded: false},
     outputDir: options.outputDir,
+    validationMode: performanceValidationRequested ? 'performance' : 'smoke',
     testPassed: false
   };
 
@@ -1392,10 +1451,6 @@ async function main() {
       options.url = attachedUrl || await evaluate(page, 'location.href');
       result.scenario.url = options.url;
     }
-    if (processSampler) {
-      await processSampler.sample();
-      processSampler.markBaseline();
-    }
     if (!options.skipTranslation && options.scenario === 'navigation') {
       settingsSnapshot = await enableSameSiteContinuation(worker);
       result.sameSiteContinuationTemporarilyEnabled = true;
@@ -1403,12 +1458,20 @@ async function main() {
     if (!options.skipTranslation) {
       await waitForTabState(worker, tabId, (state) => Boolean(state?.documentToken), 15_000);
     }
+    if (processSampler) {
+      processSampler.start();
+      await processSampler.captureBaseline();
+    }
     await startTracing(page);
     tracingStarted = true;
     if (options.scenario === 'gallery') {
       await runGalleryScenario({page, worker, options, result, tabId});
     } else {
       await runNavigationScenario({page, worker, options, result, tabId});
+    }
+    if (processSampler) {
+      await processSampler.captureRecovery();
+      processResult = await processSampler.stop();
     }
   } catch (error) {
     result.error = {message: error.message, stack: error.stack};
@@ -1427,12 +1490,22 @@ async function main() {
     }
     result.tracePath = resolve(options.outputDir, 'trace.json');
     if (trace != null) await writeFile(result.tracePath, trace);
-    result.process = processSampler
+    result.process = processResult ?? (processSampler
       ? await processSampler.stop()
       : {
         supported: false,
-        error: 'Attach mode did not receive --browser-pid; CPU sampling was skipped.'
-      };
+        error: 'No browser PID was available; CPU sampling was skipped.',
+        sampleCount: 0,
+        maxTotalCpu: 0,
+        maxProcessCpu: 0,
+        baselineSampleCount: 0,
+        recoverySampleCount: 0,
+        baselineAverageTotalCpu: null,
+        recoveryAverageTotalCpu: null,
+        tailAverageTotalCpu: null,
+        cpuRecovered: false,
+        samples: []
+      });
     if (settingsSnapshot && worker) await restoreSettings(worker, settingsSnapshot);
     worker?.close();
     page?.close();
@@ -1457,18 +1530,28 @@ async function main() {
       responsivenessPass: false
     };
     result.performance.cpuRecovered = result.process.cpuRecovered;
-    result.performance.cpuGateSkipped = result.process.supported !== true;
-    result.testPassed = result.scenarioPassed === true &&
+    result.performance.cpuGateSkipped = !performanceValidationRequested;
+    result.performance.cpuRecoveryPass = result.process.supported === true &&
+      result.process.cpuRecovered === true;
+    result.performance.validationPass = performanceValidationRequested &&
       result.performance.responsivenessPass === true &&
-      (result.process.supported !== true || result.process.cpuRecovered === true);
+      result.performance.cpuRecoveryPass;
+    result.validationBlocked = performanceValidationRequested && result.process.supported !== true;
+    result.testPassed = performanceValidationRequested && result.scenarioPassed === true &&
+      result.performance.responsivenessPass === true &&
+      result.performance.cpuRecoveryPass;
+    result.smokePassed = !performanceValidationRequested && result.scenarioPassed === true &&
+      result.performance.responsivenessPass === true;
     await writeFile(resolve(options.outputDir, 'result.json'), `${JSON.stringify(result, null, 2)}\n`);
   }
 
   console.log(JSON.stringify(summarizeConsoleResult(result), null, 2));
-  if (!result.testPassed) process.exitCode = 1;
+  if (!result.testPassed && !result.smokePassed) {
+    process.exitCode = result.validationBlocked ? 2 : 1;
+  }
 }
 
-export {evaluateResponsiveness, parseArgs, summarizePageSamples};
+export {ProcessSampler, evaluateCpuRecovery, evaluateResponsiveness, parseArgs, summarizePageSamples};
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().catch((error) => {

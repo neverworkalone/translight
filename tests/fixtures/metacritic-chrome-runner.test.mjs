@@ -1,5 +1,7 @@
 import {describe, expect, it} from 'vitest';
 import {
+  ProcessSampler,
+  evaluateCpuRecovery,
   evaluateResponsiveness,
   parseArgs,
   summarizePageSamples
@@ -47,6 +49,77 @@ describe('Metacritic Chrome runner', () => {
       longTaskSupported: true,
       maxLongTaskMs: 501
     }).responsivenessPass).toBe(false);
+  });
+
+  it('uses fixed idle and post-scenario CPU windows for the recovery gate', () => {
+    const samples = (totalCpu) => Array.from({length: 8}, () => ({totalCpu}));
+
+    expect(evaluateCpuRecovery({
+      supported: true,
+      baselineSamples: samples(20),
+      recoverySamples: samples(25)
+    })).toMatchObject({
+      baselineSampleCount: 8,
+      recoverySampleCount: 8,
+      baselineAverageTotalCpu: 20,
+      recoveryAverageTotalCpu: 25,
+      cpuRecovered: true
+    });
+    expect(evaluateCpuRecovery({
+      supported: true,
+      baselineSamples: samples(20),
+      recoverySamples: samples(90)
+    }).cpuRecovered).toBe(false);
+    expect(evaluateCpuRecovery({
+      supported: false,
+      baselineSamples: samples(20),
+      recoverySamples: samples(25)
+    }).cpuRecovered).toBe(false);
+    expect(evaluateCpuRecovery({
+      supported: true,
+      baselineSamples: samples(20).slice(0, 7),
+      recoverySamples: samples(25)
+    }).cpuRecovered).toBe(false);
+  });
+
+  it('does not use cleanup samples in the scenario-immediate recovery window', async () => {
+    const cpuValues = [
+      ...Array.from({length: 8}, () => 20),
+      ...Array.from({length: 8}, () => 90),
+      ...Array.from({length: 3}, () => 5)
+    ];
+    const sampler = new ProcessSampler(123, {
+      sampleIntervalMs: 0,
+      readProcesses: async () => [{
+        pid: 123,
+        ppid: 1,
+        cpu: cpuValues.shift(),
+        rssKb: 1,
+        command: 'Chrome'
+      }]
+    });
+
+    await sampler.captureBaseline();
+    await sampler.captureRecovery();
+    const result = await sampler.stop();
+
+    expect(result.sampleCount).toBe(16);
+    expect(result.recoveryAverageTotalCpu).toBe(90);
+    expect(result.cpuRecovered).toBe(false);
+  });
+
+  it('marks failed process sampling unsupported for performance validation', async () => {
+    const sampler = new ProcessSampler(123, {
+      readProcesses: async () => []
+    });
+
+    await sampler.captureBaseline();
+    await sampler.captureRecovery();
+    const result = await sampler.stop();
+
+    expect(result.supported).toBe(false);
+    expect(result.error).toContain('No Chrome processes found');
+    expect(result.cpuRecovered).toBe(false);
   });
 
   it('reports translation drops and route changes from sampled page state', () => {
