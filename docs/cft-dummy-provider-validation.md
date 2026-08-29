@@ -1,7 +1,7 @@
 # CFT dummy-provider validation report
 
-Date: 2026-08-29  
-Implementation commit: `4eb4a330fe5cc37b8aede3203998191a4013a595`  
+Date: 2026-08-29
+Implementation commit: `b4db52c39375d472b79eebf4ed8b8a9dc4005bee`
 Browser: Chrome for Testing 152.0.7977.64, mac-arm64
 
 ## Commands and results
@@ -11,20 +11,28 @@ Browser: Chrome for Testing 152.0.7977.64, mac-arm64
 | `npm run check` | PASS — 19 test files, 306 tests; production build completed |
 | `npm run build:test` | PASS — packaged test extension built |
 | `git diff --check` | PASS |
-| Packaged CFT `--provider=dummy --dummy-profile=normal --dummy-delay-ms=20 --scenario=navigation` | PASS — `testBuild:true`; home/detail/back translated 36/58/149 nodes; no duplicate source ids; OFF restored the page; all 11 geometry snapshots stayed within 1 px; responsiveness and CPU recovery passed |
-| Packaged CFT `--provider=dummy --dummy-profile=expanded --dummy-delay-ms=20 --scenario=navigation` | PASS — `testBuild:true`; expanded output was observed through the renderer; all geometry, lifecycle, responsiveness, and CPU gates passed |
+| Packaged CFT `--provider=dummy --dummy-profile=normal --scenario=navigation` (runner default delay) | PASS — `testBuild:true`, `delayMs:69`; home/detail/back translated 9/48/149 nodes; no duplicate source ids; OFF restored the page; all 27 geometry snapshots stayed within 1 px; max long task 0 ms, CPU recovery 1.87 s |
+| Packaged CFT `--provider=dummy --dummy-profile=expanded --scenario=navigation` (runner default delay) | PASS — `testBuild:true`, `delayMs:69`; expanded output was observed through the renderer; all 27 geometry snapshots stayed within 1 px; max long task 0 ms, CPU recovery 1.99 s |
 | Production-build guard with `--provider=dummy --skip-build` | PASS (expected rejection) — loaded build reported `kind:production`, `testBuild:false`, and the runner failed with the explicit `npm run build:test` message |
 
 The CFT artifacts were written to:
 
-- `/private/tmp/translight-cft/result-normal-final/result.json`
-- `/private/tmp/translight-cft/result-expanded-final/result.json`
-- `/private/tmp/translight-cft/result-production-guard/result.json`
+- `/private/tmp/translight-cft/result-normal-69/result.json`
+- `/private/tmp/translight-cft/result-expanded-69/result.json`
+- `/private/tmp/translight-cft/result-production-guard-69/result.json`
 
 Both successful artifacts record the provider type, profile, delay, extension
 version/build identifier, and tested commit. The scenario also reports that the
 page realm could not see the extension harness or runtime and had zero
 translations before the extension action was invoked.
+
+## Delay calibration
+
+The real Chrome Translator API was observed in Chrome with 78 successful
+`en:ko` requests. The measured average was `68.82 ms`, with a `39.6 ms`
+minimum and `95.4 ms` maximum. The Dummy provider and CFT runner therefore
+use the rounded integer default `69 ms`; `--dummy-delay-ms` remains available
+for controlled timing experiments.
 
 ## What this validates
 
