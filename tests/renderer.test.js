@@ -451,6 +451,43 @@ describe('TranslationRenderer', () => {
     `);
   });
 
+  it('keeps CSS table-cell sources inside their existing table layout', () => {
+    document.head.innerHTML = `
+      <style>
+        .arrange { display: table; }
+        .arrange > .arrange-unit { display: table-cell; }
+      </style>
+    `;
+    document.body.innerHTML = `
+      <div id="wrap" class="arrange">
+        <div id="icon" class="arrange-unit">icon</div>
+        <div id="source" class="arrange-unit">Offers delivery</div>
+      </div>
+    `;
+    const source = document.querySelector('#source');
+    const layout = document.querySelector('#wrap');
+    const renderer = new TranslationRenderer({document, sessionId: 'table-cell-session'});
+
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'table-cell-source',
+      translatedText: '배달 가능'
+    });
+
+    expect(translation.parentElement).toBe(source);
+    expect(layout.children).toHaveLength(2);
+    expect(source.querySelector('translight-translation')).toBe(translation);
+    expect(renderer.records.get('table-cell-source')?.placement).toBe('inside');
+
+    renderer.removeAll();
+    expect(document.body.innerHTML).toBe(`
+      <div id="wrap" class="arrange">
+        <div id="icon" class="arrange-unit">icon</div>
+        <div id="source" class="arrange-unit">Offers delivery</div>
+      </div>
+    `);
+  });
+
   it('keeps a flex source inside its grid cell while anchoring the translation below it', () => {
     document.body.innerHTML = `
       <div id="layout" style="display:grid;grid-template-columns:60px 1fr">

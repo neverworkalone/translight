@@ -988,6 +988,11 @@ function placeGridLayoutExternalTranslation(element, translation) {
 function shouldInsertInside(element) {
   const tagName = element.tagName?.toLowerCase();
   if (tagName === 'li' || TABLE_CELL_TAGS.has(tagName)) return true;
+  // CSS table-cell elements are layout children just like native table cells.
+  // Adding a block translation beside one inside the table creates an
+  // anonymous table cell and can change the host's column sizing. Keep the
+  // generated content in the existing cell instead.
+  if (getDisplay(element) === 'table-cell') return true;
   if (LAYOUT_DISPLAYS.has(getDisplay(element))) return false;
   return LAYOUT_DISPLAYS.has(getDisplay(element.parentElement));
 }

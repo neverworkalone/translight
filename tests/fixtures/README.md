@@ -183,6 +183,33 @@ The repaired case must report `cardHeight.distinctHeights: [49]`,
 scenario reported alternating card heights `[49, 95]` and kept the generated
 translation inside the replaceable card.
 
+## Yelp amenity table-cell layout
+
+Fixture: `yelp-amenity-layout-repro.html` and
+`yelp-amenity-layout-repro.js`
+
+Open this URL in Chrome while the Vite development server is running:
+
+```text
+http://127.0.0.1:5173/tests/fixtures/yelp-amenity-layout-repro.html
+```
+
+This fixture models the `Amenities and More` section from the supplied Yelp
+page at
+`https://www.yelp.com/biz/dandelion-chocolate-san-francisco-12`. Yelp uses
+`table`/`table-cell` arrange elements inside a wrapping two-column layout.
+Each amenity translation must remain inside its existing CSS table cell;
+inserting a block sibling creates an anonymous table cell, narrows the source,
+and causes the translated labels to reflow or appear vertically.
+
+The repaired case must report `placement: ["inside", "inside", "inside", "inside"]`,
+`amenityTranslationCount: 4`, `allAmenitiesInsideSource: true`,
+`layoutStableAcrossSnapshots: true`, `layoutStabilityFailures: []`,
+`restoredAfterStop: true`, and `testPassed: true`. The layout check captures
+the baseline before translation starts and compares each observed incremental
+and final snapshot within a 1px tolerance for the source, item, and wrapper
+positions/widths, plus the existing table child count.
+
 ## Goodreads review paragraph placement
 
 Fixture: `goodreads-review-paragraphs-repro.html` and
