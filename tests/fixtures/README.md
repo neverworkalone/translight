@@ -37,7 +37,7 @@ Metacritic-shaped fixture with the test-only provider:
 npm run test:metacritic:chrome -- \
   --provider=dummy \
   --dummy-profile=normal \
-  --dummy-delay-ms=20 \
+  --dummy-delay-ms=69 \
   --scenario=navigation \
   --url=http://127.0.0.1:5173/tests/fixtures/metacritic-cft.html \
   --chrome="/path/to/Google Chrome for Testing"

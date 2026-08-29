@@ -20,7 +20,7 @@ import {BUILD_INFO, IS_TEST_BUILD} from '../build-info.js';
 const STORAGE_KEY = 'translight.tabStates';
 const TEST_PROVIDER_STORAGE_KEY = 'translight.testProvider';
 export const TEST_HARNESS_KEY = '__translight_test_harness__';
-const DEFAULT_DUMMY_DELAY_MS = 20;
+const DEFAULT_DUMMY_DELAY_MS = 69;
 const DUMMY_PROFILES = new Set(['normal', 'expanded']);
 const DEFAULT_ICON_PATHS = Object.freeze({
   16: 'icon16.png',

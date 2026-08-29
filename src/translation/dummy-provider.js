@@ -11,7 +11,7 @@ export const DUMMY_PROFILES = Object.freeze({
   EXPANDED: 'expanded'
 });
 
-export const DEFAULT_DUMMY_DELAY_MS = 20;
+export const DEFAULT_DUMMY_DELAY_MS = 69;
 
 const DUMMY_PADDING = ' [dummy expanded]';
 

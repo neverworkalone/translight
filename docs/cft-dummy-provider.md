@@ -10,7 +10,8 @@
 The dummy provider never calls the network or Chrome Translator API. Its
 `normal` profile returns `ko:<source>` and its `expanded` profile pads output to
 approximately 1.4× the source length. Translation resolves after a configurable
-delay (20 ms by default), and abort/close cancels pending delivery.
+delay (69 ms by default, based on a 68.82 ms Chrome Translator API sample
+average), and abort/close cancels pending delivery.
 
 ## Commands
 
@@ -20,7 +21,7 @@ npm run build:test
 npm run test:metacritic:chrome -- \
   --provider=dummy \
   --dummy-profile=normal \
-  --dummy-delay-ms=20 \
+  --dummy-delay-ms=69 \
   --scenario=navigation \
   --chrome=/path/to/Chrome\ for\ Testing
 ```

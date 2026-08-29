@@ -58,7 +58,7 @@ npm run build:test
 npm run test:metacritic:chrome -- \
   --provider=dummy \
   --dummy-profile=normal \
-  --dummy-delay-ms=20 \
+  --dummy-delay-ms=69 \
   --scenario=navigation
 ```
 
