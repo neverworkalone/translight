@@ -17,6 +17,7 @@ import {
 } from './navigation.js';
 
 const STORAGE_KEY = 'translight.tabStates';
+export const TEST_HARNESS_KEY = '__translight_test_harness__';
 const DEFAULT_ICON_PATHS = Object.freeze({
   16: 'icon16.png',
   32: 'icon32.png',
@@ -330,13 +331,14 @@ async function stopTranslation(tabId, state, {suppressAutomatic = false} = {}) {
 async function handleAction(tab) {
   await ready;
   const tabId = tab?.id;
-  if (typeof tabId !== 'number') return;
+  if (typeof tabId !== 'number') return null;
   const state = getState(tabId);
   if (isBusyOrActive(state)) {
     await stopTranslation(tabId, state, {suppressAutomatic: true});
   } else {
     await startTranslation(tab);
   }
+  return {...getState(tabId)};
 }
 
 async function handleTranslationStatus(message, sender) {
@@ -663,6 +665,21 @@ async function handleTabUpdated(tabId, changeInfo) {
 }
 
 const ready = hydrate();
+
+// The Chrome runner uses this service-worker-only seam to invoke the same
+// queued action path as a toolbar click. It is not visible to page or content
+// script realms and exposes no operation other than toggling one tab and
+// reading its resulting state.
+Object.defineProperty(globalThis, TEST_HARNESS_KEY, {
+  configurable: true,
+  value: Object.freeze({
+    toggle: (tabId) => enqueueTabOperation(tabId, async () => {
+      const tab = await chrome.tabs.get(tabId);
+      return handleAction(tab);
+    }),
+    getState: (tabId) => ({...getState(tabId)})
+  })
+});
 
 async function syncAutomaticTranslationRules() {
   if (!chrome.tabs?.query) return;

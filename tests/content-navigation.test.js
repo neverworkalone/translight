@@ -6,6 +6,7 @@ import {
   CONTENT_CONTROLLER_KEY,
   DOCUMENT_TOKEN_KEY,
   installContentController,
+  isMetacriticHostname,
   isMetacriticGalleryStateChange
 } from '../src/content/controller.js';
 import { PageSession } from '../src/content/page-session.js';
@@ -92,6 +93,31 @@ describe('content navigation notifications', () => {
       previousUrl: 'https://www.metacritic.com/pictures/august-september-2026-game-preview/5',
       currentUrl: 'https://www.metacritic.com/pictures/august-september-2026-game-preview/6'
     })).toBe(false);
+  });
+
+  it('limits gallery scroll-state suppression to Metacritic hosts', () => {
+    const galleryDocument = {
+      querySelectorAll: () => [
+        {getAttribute: () => 'same-slug'},
+        {getAttribute: () => 'same-slug'}
+      ]
+    };
+
+    expect(isMetacriticHostname('metacritic.com')).toBe(true);
+    expect(isMetacriticHostname('www.metacritic.com')).toBe(true);
+    expect(isMetacriticHostname('news.metacritic.com')).toBe(true);
+    expect(isMetacriticHostname('metacritic.com.evil.example')).toBe(false);
+    expect(isMetacriticHostname('example.com')).toBe(false);
+    expect(isMetacriticGalleryStateChange({
+      document: galleryDocument,
+      previousUrl: 'https://example.com/pictures/same-slug/5',
+      currentUrl: 'https://example.com/pictures/same-slug/6'
+    })).toBe(false);
+    expect(isMetacriticGalleryStateChange({
+      document: galleryDocument,
+      previousUrl: 'https://news.metacritic.com/pictures/same-slug/5',
+      currentUrl: 'https://news.metacritic.com/pictures/same-slug/6'
+    })).toBe(true);
   });
 
   it('reports same-document hash navigation to the background', async () => {

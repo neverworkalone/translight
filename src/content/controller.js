@@ -12,13 +12,25 @@ const NAVIGATION_POLL_MS = 500;
 const METACRITIC_GALLERY_PATH_PATTERN =
   /^\/pictures\/([^/]+)\/([1-9]\d*)\/?$/u;
 
+export function isMetacriticHostname(hostname) {
+  const normalized = typeof hostname === 'string'
+    ? hostname.toLowerCase().replace(/\.$/u, '')
+    : '';
+  return normalized === 'metacritic.com' || normalized.endsWith('.metacritic.com');
+}
+
 /**
  * Metacritic keeps one gallery document in the DOM and uses replaceState to
  * reflect the item currently under the scroll position. Those URLs are
  * presentation state, not a new route that should cancel the translation
  * queue and rescan the document.
  */
-export function isMetacriticGalleryStateChange({document, previousUrl, currentUrl} = {}) {
+export function isMetacriticGalleryStateChange({
+  document,
+  previousUrl,
+  currentUrl,
+  isMetacriticHost = isMetacriticHostname
+} = {}) {
   if (!document?.querySelectorAll || typeof URL !== 'function') return false;
 
   let previous;
@@ -34,6 +46,9 @@ export function isMetacriticGalleryStateChange({document, previousUrl, currentUr
       previous.hash !== current.hash) {
     return false;
   }
+  if (!isMetacriticHost(previous.hostname) || !isMetacriticHost(current.hostname)) {
+    return false;
+  }
 
   const previousMatch = previous.pathname.match(METACRITIC_GALLERY_PATH_PATTERN);
   const currentMatch = current.pathname.match(METACRITIC_GALLERY_PATH_PATTERN);
@@ -44,8 +59,7 @@ export function isMetacriticGalleryStateChange({document, previousUrl, currentUr
 
   const galleryItems = [...document.querySelectorAll('[data-testid="gallery-item"]')];
   // The URL shape plus the gallery's own slug marker identify this
-  // presentation state without relying on a particular hostname, which also
-  // lets the local production-path fixture exercise the same controller code.
+  // presentation state after the Metacritic host check above.
   return galleryItems.length > 1 &&
     galleryItems.some((item) => item.getAttribute('slug') === currentMatch[1]);
 }
@@ -71,7 +85,8 @@ function sendRuntimeMessage(runtime, message) {
 
 export function installContentController({
   runtime = globalThis.chrome?.runtime,
-  createSession = (options) => new PageSession(options)
+  createSession = (options) => new PageSession(options),
+  isGalleryStateChange = isMetacriticGalleryStateChange
 } = {}) {
   const existing = globalThis[CONTENT_CONTROLLER_KEY];
   if (existing) return existing;
@@ -149,7 +164,7 @@ export function installContentController({
     if (!url || url === controller.lastNavigationUrl) return false;
     const previousUrl = controller.lastNavigationUrl;
     controller.lastNavigationUrl = url;
-    if (isMetacriticGalleryStateChange({
+    if (isGalleryStateChange({
       document: globalThis.document,
       previousUrl,
       currentUrl: url

@@ -76,6 +76,7 @@ async function settle() {
 afterEach(() => {
   vi.resetModules();
   delete globalThis.chrome;
+  delete globalThis.__translight_test_harness__;
   backgroundMessageListeners.length = 0;
   updatedListeners.length = 0;
   removedListeners.length = 0;
@@ -88,6 +89,39 @@ afterEach(() => {
 });
 
 describe('background automatic translation status', () => {
+  it('exposes a test-only toggle that follows the action handler state path', async () => {
+    installChrome({autoTranslateSites: []});
+    await import('../src/background/index.js?background-test-harness-toggle');
+    await runtimeMessage({
+      type: 'CONTENT_READY',
+      documentToken: 'document-1',
+      url: 'https://example.com/page'
+    }, {tab: {id: 1, url: 'https://example.com/page'}});
+    await settle();
+    globalThis.chrome.tabs.get = async () => ({id: 1, url: 'https://example.com/page'});
+
+    const harness = globalThis.__translight_test_harness__;
+    expect(harness).toBeTruthy();
+    const started = await harness.toggle(1);
+    await settle();
+    const startMessage = contentMessages.find(({message}) => message.type === 'TRANSLATION_START')?.message;
+    expect(startMessage).toMatchObject({
+      type: 'TRANSLATION_START',
+      activation: 'manual',
+      documentToken: 'document-1'
+    });
+    expect(started.documentToken).toBe('document-1');
+
+    const stopped = await harness.toggle(1);
+    await settle();
+    expect(contentMessages.at(-1)?.message).toMatchObject({
+      type: 'TRANSLATION_STOP',
+      generation: startMessage.generation,
+      documentToken: 'document-1'
+    });
+    expect(stopped.status).toBe('OFF');
+  });
+
   it('uses the active-tab injection fallback for a manual action', async () => {
     installChrome();
     const sendMessage = vi.spyOn(globalThis.chrome.tabs, 'sendMessage')

@@ -32,7 +32,18 @@ const DEFAULT_TRANSLATION_WAIT_MS = 30_000;
 const DEFAULT_NAVIGATION_WAIT_MS = 30_000;
 const PROCESS_SAMPLE_INTERVAL_MS = 250;
 const PAGE_SAMPLE_INTERVAL_MS = 100;
-let nextTranslationGeneration = Date.now();
+const TEST_HARNESS_KEY = '__translight_test_harness__';
+const TAB_STATUS_OFF = 'OFF';
+const TAB_STATUS_ERROR = 'ERROR';
+const MAX_CDP_PING_MS = 250;
+// Metacritic can produce a few hundred-millisecond task during a normal route
+// load. Keep the browser gate strict enough to catch the reported hangs while
+// allowing that normal navigation work; the CDP ping gate covers an already
+// unresponsive renderer.
+const MAX_LONG_TASK_MS = 500;
+const CPU_TAIL_SAMPLE_COUNT = 8;
+const CPU_TAIL_MARGIN = 75;
+const SETTINGS_KEY = 'translight.settings.v1';
 
 function usage() {
   return `Usage:
@@ -47,8 +58,10 @@ Options:
   --output-dir=<path>             Directory for JSON, trace, and screenshots
   --chrome=<path>                 Chromium-based browser executable path
   --profile-dir=<path>            Keep/use an explicit Chrome user-data directory
+  --debugging-port=<number>       Attach to an existing browser DevTools endpoint
+  --browser-pid=<number>          Optional browser PID for CPU sampling in attach mode
   --skip-build                    Do not run npm run build before launching Chrome
-  --skip-translation              Do not send TRANSLATION_START; test browser flow only
+  --skip-translation              Do not toggle translation; test browser flow only
   --keep-browser                  Leave the launched Chrome running after the run
   --keep-profile                  Keep the temporary profile after the run
   --help                          Show this help
@@ -70,6 +83,12 @@ function parseNumber(value, name, {minimum = 0} = {}) {
   return number;
 }
 
+function parsePort(value, name) {
+  const port = parseNumber(value, name, {minimum: 1});
+  if (port > 65535) throw new Error(`${name} must be <= 65535.`);
+  return port;
+}
+
 function parseArgs(argv) {
   const options = {
     scenario: 'gallery',
@@ -80,6 +99,9 @@ function parseArgs(argv) {
     outputDir: DEFAULT_OUTPUT_DIRECTORY,
     chromePath: null,
     profileDir: null,
+    debuggingPort: null,
+    browserPid: null,
+    urlProvided: false,
     skipBuild: false,
     skipTranslation: false,
     keepBrowser: false,
@@ -121,6 +143,7 @@ function parseArgs(argv) {
         break;
       case '--url':
         options.url = value;
+        options.urlProvided = true;
         break;
       case '--cycles':
         options.cycles = parseNumber(value, '--cycles', {minimum: 1});
@@ -139,6 +162,12 @@ function parseArgs(argv) {
         break;
       case '--profile-dir':
         options.profileDir = resolve(value);
+        break;
+      case '--debugging-port':
+        options.debuggingPort = parsePort(value, '--debugging-port');
+        break;
+      case '--browser-pid':
+        options.browserPid = parseNumber(value, '--browser-pid', {minimum: 1});
         break;
       default:
         throw new Error(`Unknown option: ${argument}`);
@@ -387,6 +416,27 @@ async function waitForTranslightWorker(port, timeoutMs = 15_000) {
   );
 }
 
+async function enableSameSiteContinuation(worker) {
+  return evaluateExtension(worker, `(async () => {
+    const key = ${JSON.stringify(SETTINGS_KEY)};
+    const current = await chrome.storage.local.get(key);
+    const hadValue = Object.prototype.hasOwnProperty.call(current, key);
+    const value = current[key] && typeof current[key] === 'object' && !Array.isArray(current[key])
+      ? current[key]
+      : {};
+    await chrome.storage.local.set({[key]: {...value, autoTranslateSameSite: true}});
+    return {hadValue, value: hadValue ? value : null};
+  })()`);
+}
+
+async function restoreSettings(worker, snapshot) {
+  if (!snapshot) return;
+  const expression = snapshot.hadValue
+    ? `chrome.storage.local.set({[${JSON.stringify(SETTINGS_KEY)}]: ${JSON.stringify(snapshot.value)}})`
+    : `chrome.storage.local.remove(${JSON.stringify(SETTINGS_KEY)})`;
+  await evaluateExtension(worker, expression).catch(() => {});
+}
+
 async function runCommand(command, args, {cwd = REPOSITORY_ROOT} = {}) {
   return new Promise((resolvePromise, reject) => {
     const child = spawn(command, args, {cwd, stdio: ['ignore', 'pipe', 'pipe']});
@@ -481,6 +531,7 @@ class ProcessSampler {
     this.timer = null;
     this.inFlight = false;
     this.error = null;
+    this.baselineIndex = null;
   }
 
   start() {
@@ -508,18 +559,38 @@ class ProcessSampler {
     }
   }
 
+  markBaseline() {
+    this.baselineIndex = this.samples.length;
+  }
+
   async stop() {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     await this.sample();
     const maxTotalCpu = Math.max(...this.samples.map((sample) => sample.totalCpu), 0);
     const maxProcessCpu = Math.max(...this.samples.map((sample) => sample.maxProcessCpu), 0);
+    const baselineSamples = this.samples.slice(
+      this.baselineIndex ?? 0,
+      (this.baselineIndex ?? 0) + CPU_TAIL_SAMPLE_COUNT
+    );
+    const tailSamples = this.samples.slice(-CPU_TAIL_SAMPLE_COUNT);
+    const average = (samples) => samples.length
+      ? samples.reduce((sum, sample) => sum + sample.totalCpu, 0) / samples.length
+      : null;
+    const baselineAverage = average(baselineSamples);
+    const tailAverage = average(tailSamples);
+    const cpuRecovered = baselineAverage == null || tailAverage == null
+      ? null
+      : tailAverage <= baselineAverage + CPU_TAIL_MARGIN;
     return {
       supported: !this.error,
       error: this.error,
       sampleCount: this.samples.length,
       maxTotalCpu: Math.round(maxTotalCpu * 100) / 100,
       maxProcessCpu: Math.round(maxProcessCpu * 100) / 100,
+      baselineAverageTotalCpu: baselineAverage == null ? null : Math.round(baselineAverage * 100) / 100,
+      tailAverageTotalCpu: tailAverage == null ? null : Math.round(tailAverage * 100) / 100,
+      cpuRecovered,
       samples: this.samples
     };
   }
@@ -576,6 +647,67 @@ async function evaluate(connection, expression, name = 'page') {
   return response.result?.value;
 }
 
+const PAGE_PERFORMANCE_KEY = '__translight_chrome_runner_performance__';
+const PAGE_PERFORMANCE_SOURCE = `(() => {
+  const key = ${JSON.stringify(PAGE_PERFORMANCE_KEY)};
+  const previous = globalThis[key];
+  previous?.observer?.disconnect?.();
+  const state = {
+    startedAt: performance.now(),
+    longTasks: [],
+    observer: null
+  };
+  if (typeof PerformanceObserver === 'function') {
+    try {
+      state.observer = new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          if (entry.startTime + entry.duration < state.startedAt) continue;
+          state.longTasks.push(Math.round(entry.duration * 100) / 100);
+          if (state.longTasks.length > 512) state.longTasks.shift();
+        }
+      });
+      state.observer.observe({type: 'longtask', buffered: true});
+    } catch {
+      state.observer = null;
+    }
+  }
+  globalThis[key] = state;
+  return {supported: Boolean(state.observer)};
+})()`;
+
+async function installPagePerformanceProbe(page) {
+  await page.send('Page.addScriptToEvaluateOnNewDocument', {source: PAGE_PERFORMANCE_SOURCE});
+  return evaluate(page, PAGE_PERFORMANCE_SOURCE);
+}
+
+async function resetPagePerformanceProbe(page) {
+  return evaluate(page, `(() => {
+    const state = globalThis[${JSON.stringify(PAGE_PERFORMANCE_KEY)}];
+    if (!state) return false;
+    state.longTasks.length = 0;
+    state.startedAt = performance.now();
+    return true;
+  })()`);
+}
+
+async function readPagePerformanceProbe(page) {
+  return evaluate(page, `(() => {
+    const state = globalThis[${JSON.stringify(PAGE_PERFORMANCE_KEY)}];
+    const durations = state?.longTasks ?? [];
+    return {
+      supported: Boolean(state?.observer),
+      longTaskCount: durations.length,
+      maxLongTaskMs: durations.length ? Math.max(...durations) : 0
+    };
+  })()`);
+}
+
+async function measureCdpPing(page) {
+  const startedAt = performance.now();
+  await evaluate(page, 'performance.now()', 'page responsiveness probe');
+  return Math.round((performance.now() - startedAt) * 100) / 100;
+}
+
 async function readPageStats(page) {
   return evaluate(page, `(() => {
     const translationNodes = [...document.querySelectorAll('translight-translation')]
@@ -586,6 +718,7 @@ async function readPageStats(page) {
       atMs: performance.now(),
       url: location.href,
       path: location.pathname,
+      documentToken: location.href + '::' + performance.timeOrigin,
       scrollY: Math.round(scrollY),
       viewportHeight: innerHeight,
       scrollHeight: document.documentElement.scrollHeight,
@@ -617,10 +750,57 @@ async function measureAction(page, label, action) {
   const startedAt = performance.now();
   await action();
   const after = await readPerformanceMetrics(page);
+  const cdpPingMs = await measureCdpPing(page);
+  const stats = await readPageStats(page);
   return {
     label,
     elapsedMs: Math.round((performance.now() - startedAt) * 100) / 100,
+    cdpPingMs,
+    stats,
     metrics: diffMetrics(before, after)
+  };
+}
+
+async function collectPagePerformance(page, actions = []) {
+  const tailPings = [];
+  for (let index = 0; index < 5; index += 1) {
+    tailPings.push(await measureCdpPing(page));
+    await wait(100);
+  }
+  const probe = await readPagePerformanceProbe(page);
+  const actionPings = actions
+    .map((action) => action.cdpPingMs)
+    .filter((value) => Number.isFinite(value));
+  const allPings = [...actionPings, ...tailPings];
+  const maxCdpPingMs = allPings.length ? Math.max(...allPings) : null;
+  const responsiveness = evaluateResponsiveness({
+    cdpPingSupported: allPings.length > 0,
+    maxCdpPingMs,
+    longTaskSupported: probe.supported,
+    maxLongTaskMs: probe.maxLongTaskMs
+  });
+  return {
+    cdpPingSupported: allPings.length > 0,
+    maxCdpPingMs: maxCdpPingMs == null ? null : Math.round(maxCdpPingMs * 100) / 100,
+    maxLongTaskMs: probe.supported ? probe.maxLongTaskMs : null,
+    longTaskCount: probe.longTaskCount,
+    ...responsiveness,
+    tailCdpPingMs: tailPings
+  };
+}
+
+function evaluateResponsiveness({
+  cdpPingSupported,
+  maxCdpPingMs,
+  longTaskSupported,
+  maxLongTaskMs
+}) {
+  const cdpPingPass = !cdpPingSupported || maxCdpPingMs == null || maxCdpPingMs <= MAX_CDP_PING_MS;
+  const longTaskPass = !longTaskSupported || maxLongTaskMs <= MAX_LONG_TASK_MS;
+  return {
+    cdpPingPass,
+    longTaskPass,
+    responsivenessPass: cdpPingPass && longTaskPass
   };
 }
 
@@ -664,15 +844,19 @@ async function navigate(page, url) {
   await wait(1500);
 }
 
-async function waitForFirstTranslation(page, timeoutMs) {
+async function waitForFirstTranslation(page, timeoutMs, {worker = null, tabId = null} = {}) {
   const deadline = Date.now() + timeoutMs;
   let stats = await readPageStats(page);
   while (Date.now() < deadline) {
-    if (stats.translationCount > 0) return {ready: true, stats};
+    const state = worker && tabId != null ? await readTabState(worker, tabId) : null;
+    const currentDocument = !state || state.documentToken === stats.documentToken;
+    const active = !state || (state.status !== TAB_STATUS_OFF && state.status !== TAB_STATUS_ERROR);
+    if (stats.translationCount > 0 && currentDocument && active) return {ready: true, stats, state};
     await wait(250);
     stats = await readPageStats(page);
   }
-  return {ready: false, stats, reason: 'No translation node appeared before the timeout.'};
+  const state = worker && tabId != null ? await readTabState(worker, tabId) : null;
+  return {ready: false, stats, state, reason: 'No translation node appeared before the timeout.'};
 }
 
 async function waitForStableTranslations(page, timeoutMs) {
@@ -718,7 +902,7 @@ async function scrollThroughPage(page, settleMs, {label = 'scroll'} = {}) {
     for (let y = 0; y <= height; y += step) {
       actions.push(await measureAction(page, `${label}-${pass}-${y}`, () => scrollTo(page, y, settleMs)));
     }
-    await scrollTo(page, height, settleMs);
+    actions.push(await measureAction(page, `${label}-${pass}-end`, () => scrollTo(page, height, settleMs)));
     const finalStats = await readPageStats(page);
     if (finalStats.scrollHeight === lastHeight && finalStats.scrollY >= height - 4) break;
     lastHeight = finalStats.scrollHeight;
@@ -790,40 +974,87 @@ async function evaluateExtension(worker, expression) {
   return evaluate(worker, expression, 'extension service worker');
 }
 
-async function startTranslation(worker) {
-  const generation = ++nextTranslationGeneration;
-  const result = await evaluateExtension(worker, `(async () => {
+async function getActiveTab(worker) {
+  return evaluateExtension(worker, `(async () => {
     const [tab] = await chrome.tabs.query({active: true, lastFocusedWindow: true});
-    if (!tab?.id) throw new Error('No active tab was found.');
-    const generation = ${generation};
-    const message = {type: 'TRANSLATION_START', generation, activation: 'manual'};
-    let lastError;
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      try {
-        await chrome.tabs.sendMessage(tab.id, message);
-        return {tabId: tab.id, generation, url: tab.url ?? '', attempts: attempt + 1};
-      } catch (error) {
-        lastError = error;
-        await new Promise((resolve) => setTimeout(resolve, 250));
-      }
-    }
-    throw new Error('Could not reach the Translight content script after 20 attempts: ' +
-      (lastError?.message ?? 'unknown error'));
+    return tab ? {id: tab.id, url: tab.url ?? ''} : null;
   })()`);
-  return result;
 }
 
-async function stopTranslation(worker, tabId, generation) {
-  if (!tabId) return;
-  const expression = `(async () => {
-    try {
-      await chrome.tabs.sendMessage(${tabId}, {type: 'TRANSLATION_STOP', generation: ${generation}});
-      return true;
-    } catch {
-      return false;
+async function readTabState(worker, tabId) {
+  return evaluateExtension(worker, `(() => {
+    const harness = globalThis[${JSON.stringify(TEST_HARNESS_KEY)}];
+    if (!harness?.getState) throw new Error('Translight test harness is unavailable.');
+    return harness.getState(${tabId});
+  })()`);
+}
+
+async function invokeToolbarAction(worker, tabId) {
+  return evaluateExtension(worker, `(async () => {
+    const harness = globalThis[${JSON.stringify(TEST_HARNESS_KEY)}];
+    if (!harness?.toggle) throw new Error('Translight test harness is unavailable.');
+    return harness.toggle(${tabId});
+  })()`);
+}
+
+async function waitForTabState(worker, tabId, predicate, timeoutMs = DEFAULT_NAVIGATION_WAIT_MS) {
+  const deadline = Date.now() + timeoutMs;
+  let state = await readTabState(worker, tabId);
+  while (Date.now() < deadline) {
+    if (predicate(state)) return state;
+    await wait(200);
+    state = await readTabState(worker, tabId);
+  }
+  throw new Error(`Timed out waiting for tab ${tabId} state; last state: ${JSON.stringify(state)}`);
+}
+
+async function waitForDocumentTabState(page, worker, tabId, predicate, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  let stats = await readPageStats(page);
+  let state = await readTabState(worker, tabId);
+  while (Date.now() < deadline) {
+    if (stats.documentToken && state?.documentToken === stats.documentToken && predicate(state, stats)) {
+      return {stats, state};
     }
-  })()`;
-  await evaluateExtension(worker, expression).catch(() => false);
+    await wait(200);
+    stats = await readPageStats(page);
+    state = await readTabState(worker, tabId);
+  }
+  throw new Error(`Timed out waiting for tab ${tabId} to match the current document; ` +
+    `state=${JSON.stringify(state)}, page=${JSON.stringify(stats)}`);
+}
+
+async function toggleTranslation({page, worker, tabId, expectedStatus, timeoutMs}) {
+  const before = await readTabState(worker, tabId);
+  const returned = await invokeToolbarAction(worker, tabId);
+  const state = await waitForDocumentTabState(
+    page,
+    worker,
+    tabId,
+    (candidate) => expectedStatus === TAB_STATUS_OFF
+      ? candidate.status === TAB_STATUS_OFF
+      : candidate.status !== TAB_STATUS_OFF && candidate.status !== TAB_STATUS_ERROR,
+    timeoutMs
+  );
+  if (expectedStatus === TAB_STATUS_OFF) {
+    const cleanDeadline = Date.now() + (timeoutMs ?? DEFAULT_NAVIGATION_WAIT_MS);
+    let stats = state.stats;
+    while (Date.now() < cleanDeadline && (stats.translationCount > 0 || stats.generatedCount > 0)) {
+      await wait(100);
+      stats = await readPageStats(page);
+    }
+    if (stats.translationCount > 0 || stats.generatedCount > 0) {
+      throw new Error(`Translation cleanup did not finish: ${JSON.stringify(stats)}`);
+    }
+    state.stats = stats;
+  }
+  return {
+    before,
+    returned,
+    after: state.state,
+    stats: state.stats,
+    cdpPingMs: await measureCdpPing(page)
+  };
 }
 
 function summarizePageSamples(samples, baselineTranslationCount = 0) {
@@ -836,8 +1067,8 @@ function summarizePageSamples(samples, baselineTranslationCount = 0) {
     sampleCount: samples.length,
     paths,
     routeChanges: Math.max(paths.length - 1, 0),
-    minimumTranslationCount: Math.min(...translationCounts, 0),
-    maximumTranslationCount: Math.max(...translationCounts, 0),
+    minimumTranslationCount: translationCounts.length ? Math.min(...translationCounts) : 0,
+    maximumTranslationCount: translationCounts.length ? Math.max(...translationCounts) : 0,
     emptyTranslationSamples: samples.filter((sample) => sample.emptyTranslationCount > 0).length,
     translationDropSamples: drops,
     final: samples.at(-1) ?? null
@@ -861,20 +1092,32 @@ function summarizeConsoleResult(result) {
   return summary;
 }
 
-async function runGalleryScenario({page, worker, options, result}) {
+async function runGalleryScenario({page, worker, options, result, tabId}) {
   const scenario = result.scenario;
-  let translationStart = null;
+  const toggles = [];
   let baseline = await readPageStats(page);
   if (!options.skipTranslation) {
-    translationStart = await startTranslation(worker);
-    result.translationStart = {requested: true, ...translationStart};
-    const first = await waitForFirstTranslation(page, options.translationWaitMs);
+    const start = await toggleTranslation({
+      page,
+      worker,
+      tabId,
+      expectedStatus: 'ON',
+      timeoutMs: options.translationWaitMs
+    });
+    toggles.push({action: 'ON', ...start});
+    result.translationStart = {requested: true, ...start};
+    const first = await waitForFirstTranslation(
+      page,
+      options.translationWaitMs,
+      {worker, tabId}
+    );
     result.translationReady = first;
     baseline = first.stats;
   } else {
     result.translationStart = {requested: false};
   }
 
+  await resetPagePerformanceProbe(page);
   const sampler = new PageSampler(page, () => readPageStats(page));
   sampler.start();
   const actions = [];
@@ -887,34 +1130,60 @@ async function runGalleryScenario({page, worker, options, result}) {
   result.pageSamples = pageSamples;
   result.pageSummary = summarizePageSamples(pageSamples.samples, baseline.translationCount);
   result.beforeStop = await readPageStats(page);
-  if (translationStart) {
-    await stopTranslation(worker, translationStart.tabId, translationStart.generation);
-    await wait(500);
+  if (!options.skipTranslation) {
+    const stop = await toggleTranslation({
+      page,
+      worker,
+      tabId,
+      expectedStatus: TAB_STATUS_OFF,
+      timeoutMs: options.translationWaitMs
+    });
+    toggles.push({action: 'OFF', ...stop});
   }
+  result.toggles = toggles;
   result.afterStop = await readPageStats(page);
   result.restoredAfterStop = result.afterStop.translationCount === 0 && result.afterStop.generatedCount === 0;
-  result.testPassed = result.pageSummary.routeChanges > 0 &&
+  result.translationGapActions = options.skipTranslation ? 0 : actions.filter(({stats}) =>
+    stats.translationCount === 0 || stats.emptyTranslationCount > 0
+  ).length;
+  await wait(1000);
+  result.performance = await collectPagePerformance(page, [...actions, ...toggles]);
+  result.scenarioPassed = result.pageSummary.routeChanges > 0 &&
     (options.skipTranslation || result.translationReady?.ready === true) &&
     result.pageSummary.emptyTranslationSamples === 0 &&
+    (options.skipTranslation || result.pageSummary.translationDropSamples === 0) &&
+    (options.skipTranslation || result.translationGapActions === 0) &&
     (options.skipTranslation || result.restoredAfterStop);
   scenario.completed = true;
 }
 
-async function runNavigationScenario({page, worker, options, result}) {
-  let translationStart = null;
+async function runNavigationScenario({page, worker, options, result, tabId}) {
+  const toggles = [];
   result.translationReadyByRoute = [];
   const homeUrl = await evaluate(page, 'location.href');
   const sampler = new PageSampler(page, () => readPageStats(page));
   sampler.start();
   const actions = [];
   if (!options.skipTranslation) {
-    translationStart = await startTranslation(worker);
-    result.translationStart = {requested: true, ...translationStart};
-    result.translationReady = await waitForFirstTranslation(page, options.translationWaitMs);
+    const start = await toggleTranslation({
+      page,
+      worker,
+      tabId,
+      expectedStatus: 'ON',
+      timeoutMs: options.translationWaitMs
+    });
+    toggles.push({action: 'ON', phase: 'home', ...start});
+    result.translationStart = {requested: true, ...start};
+    result.translationReady = await waitForFirstTranslation(
+      page,
+      options.translationWaitMs,
+      {worker, tabId}
+    );
     result.translationReadyByRoute.push({cycle: 0, phase: 'home', ...result.translationReady});
   } else {
     result.translationStart = {requested: false};
   }
+  await resetPagePerformanceProbe(page);
   actions.push(...await scrollThroughPage(page, options.settleMs, {label: 'home'}));
   if (!(await findAndScrollToText(page, 'Latest News'))) {
     throw new Error('Could not find the Latest News section.');
@@ -936,24 +1205,48 @@ async function runNavigationScenario({page, worker, options, result}) {
     routes.push({cycle, phase: 'detail', url: click.url});
     await wait(1200);
     if (!options.skipTranslation) {
-      await stopTranslation(worker, translationStart?.tabId, translationStart?.generation);
-      translationStart = await startTranslation(worker);
-      const detailReady = await waitForFirstTranslation(page, options.translationWaitMs);
+      const detailReady = await waitForFirstTranslation(
+        page,
+        options.translationWaitMs,
+        {worker, tabId}
+      );
       result.translationReadyByRoute.push({cycle, phase: 'detail', ...detailReady});
     }
     actions.push(...await scrollThroughPage(page, options.settleMs, {label: `detail-cycle-${cycle}`}));
     const returnedUrl = await goBack(page, homeUrl);
     routes.push({cycle, phase: 'home', url: returnedUrl});
     if (!options.skipTranslation) {
-      const returnedHomeReady = await waitForFirstTranslation(page, options.translationWaitMs);
+      const returnedHomeReady = await waitForFirstTranslation(
+        page,
+        options.translationWaitMs,
+        {worker, tabId}
+      );
       result.translationReadyByRoute.push({cycle, phase: 'home-returned', ...returnedHomeReady});
     }
     await scrollToTop(page, options.settleMs);
     await wait(500);
     if (cycle < options.cycles && !options.skipTranslation) {
-      await stopTranslation(worker, translationStart?.tabId, translationStart?.generation);
-      translationStart = await startTranslation(worker);
-      const homeReady = await waitForFirstTranslation(page, options.translationWaitMs);
+      const stop = await toggleTranslation({
+        page,
+        worker,
+        tabId,
+        expectedStatus: TAB_STATUS_OFF,
+        timeoutMs: options.translationWaitMs
+      });
+      toggles.push({action: 'OFF', phase: 'home-cycle-reset', cycle, ...stop});
+      const start = await toggleTranslation({
+        page,
+        worker,
+        tabId,
+        expectedStatus: 'ON',
+        timeoutMs: options.translationWaitMs
+      });
+      toggles.push({action: 'ON', phase: 'home-cycle-reset', cycle, ...start});
+      const homeReady = await waitForFirstTranslation(
+        page,
+        options.translationWaitMs,
+        {worker, tabId}
+      );
       result.translationReadyByRoute.push({cycle, phase: 'home-restarted', ...homeReady});
     }
   }
@@ -963,17 +1256,31 @@ async function runNavigationScenario({page, worker, options, result}) {
   result.pageSamples = pageSamples;
   result.pageSummary = summarizePageSamples(pageSamples.samples);
   result.beforeStop = await readPageStats(page);
-  if (translationStart) {
-    await stopTranslation(worker, translationStart.tabId, translationStart.generation);
-    await wait(500);
+  if (!options.skipTranslation) {
+    const stop = await toggleTranslation({
+      page,
+      worker,
+      tabId,
+      expectedStatus: TAB_STATUS_OFF,
+      timeoutMs: options.translationWaitMs
+    });
+    toggles.push({action: 'OFF', phase: 'final', ...stop});
   }
+  result.toggles = toggles;
   result.afterStop = await readPageStats(page);
   result.restoredAfterStop = result.afterStop.translationCount === 0 && result.afterStop.generatedCount === 0;
+  result.translationGapActions = options.skipTranslation ? 0 : actions.filter(({stats}) =>
+    stats.translationCount === 0 || stats.emptyTranslationCount > 0
+  ).length;
+  await wait(1000);
+  result.performance = await collectPagePerformance(page, [...actions, ...toggles]);
   const allTranslationsReady = options.skipTranslation ||
     result.homepageTranslationSettled?.ready === true &&
     result.translationReadyByRoute.every(({ready}) => ready === true);
-  result.testPassed = routes.length === options.cycles * 2 && result.pageSummary.routeChanges > 0 &&
-    allTranslationsReady && (options.skipTranslation || result.restoredAfterStop);
+  result.scenarioPassed = routes.length === options.cycles * 2 && result.pageSummary.routeChanges > 0 &&
+    allTranslationsReady && (options.skipTranslation || result.translationGapActions === 0) &&
+    (options.skipTranslation || result.restoredAfterStop) &&
+    result.performance.responsivenessPass;
   result.scenario.completed = true;
 }
 
@@ -996,45 +1303,62 @@ async function launchChrome(options, port, profileDir) {
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const startedAt = new Date().toISOString();
-  options.chromePath = await resolveBrowserPath(options.chromePath);
-  assertExtensionCapableBrowser(options.chromePath);
-  if (!existsSync(options.chromePath)) throw new Error(`Chrome executable not found: ${options.chromePath}`);
-  if (!options.skipBuild) await runCommand('npm', ['run', 'build']);
-  if (!existsSync(resolve(EXTENSION_PATH, 'manifest.json'))) {
-    throw new Error(`Built extension not found at ${EXTENSION_PATH}. Run npm run build first.`);
+  const attachMode = options.debuggingPort != null;
+  if (attachMode) {
+    if (!options.profileDir) {
+      throw new ValidationBlockedError(
+        'Attach mode requires a dedicated persistent profile. Pass --profile-dir=/path/to/profile.'
+      );
+    }
+  } else {
+    options.chromePath = await resolveBrowserPath(options.chromePath);
+    assertExtensionCapableBrowser(options.chromePath);
+    if (!existsSync(options.chromePath)) throw new Error(`Chrome executable not found: ${options.chromePath}`);
+    if (!options.skipBuild) await runCommand('npm', ['run', 'build']);
+    if (!existsSync(resolve(EXTENSION_PATH, 'manifest.json'))) {
+      throw new Error(`Built extension not found at ${EXTENSION_PATH}. Run npm run build first.`);
+    }
   }
   await mkdir(options.outputDir, {recursive: true});
   const localServer = await ensureLocalServer(options.url);
-  const port = await getFreePort();
-  const ownsProfile = !options.profileDir;
+  const port = options.debuggingPort ?? await getFreePort();
+  const ownsProfile = !attachMode && !options.profileDir;
   const profileDir = options.profileDir ?? `/private/tmp/translight-chrome-${process.pid}-${Date.now()}`;
-  await mkdir(profileDir, {recursive: true});
-  const chrome = await launchChrome(options, port, profileDir);
-  const processSampler = new ProcessSampler(chrome.pid);
-  processSampler.start();
+  if (!attachMode) await mkdir(profileDir, {recursive: true});
+  const chrome = attachMode ? null : await launchChrome(options, port, profileDir);
+  const processSampler = chrome?.pid || options.browserPid
+    ? new ProcessSampler(chrome?.pid ?? options.browserPid)
+    : null;
+  processSampler?.start();
   let page;
   let worker;
   let trace = null;
   let tracingStarted = false;
+  let settingsSnapshot = null;
+  let tabId = null;
   const result = {
     runner: 'metacritic-chrome-runner',
     startedAt,
     commit: (await execFileAsync('git', ['rev-parse', 'HEAD'], {cwd: REPOSITORY_ROOT})).stdout.trim(),
     scenario: {name: options.scenario, url: options.url, cycles: options.cycles},
-    chrome: {path: options.chromePath, pid: chrome.pid, debuggingPort: port},
-    profile: {path: profileDir, temporary: ownsProfile, kept: options.keepProfile || !ownsProfile},
-    extension: {path: EXTENSION_PATH, loaded: false},
+    chrome: {
+      path: options.chromePath,
+      pid: chrome?.pid ?? options.browserPid ?? null,
+      debuggingPort: port,
+      attached: attachMode
+    },
+    profile: {
+      path: profileDir,
+      temporary: ownsProfile,
+      kept: options.keepProfile || !ownsProfile
+    },
+    extension: {path: attachMode ? null : EXTENSION_PATH, loaded: false},
     outputDir: options.outputDir,
     testPassed: false
   };
 
   try {
     await waitForDevTools(port);
-    const pageTarget = await waitForTarget(port, (target) => target.type === 'page', 15_000, 'a page target');
-    page = await connectTarget(pageTarget, 'page');
-    await page.send('Page.enable');
-    await page.send('Runtime.enable');
-    await page.send('Performance.enable');
     const extension = await waitForTranslightWorker(port);
     const extensionTarget = extension.target;
     worker = extension.connection;
@@ -1042,17 +1366,49 @@ async function main() {
     result.extension.id = new URL(extensionTarget.url).hostname;
     result.extension.workerUrl = extensionTarget.url;
     result.extension.version = extension.manifest.version;
+    const activeTab = await getActiveTab(worker);
+    tabId = activeTab?.id;
+    if (typeof tabId !== 'number') throw new Error('No active tab was found.');
+    const pageTarget = await waitForTarget(
+      port,
+      (target) => target.type === 'page' && (!activeTab.url || target.url === activeTab.url),
+      15_000,
+      'the active tab page'
+    ).catch(async () => waitForTarget(port, (target) => target.type === 'page', 15_000, 'a page target'));
+    const attachedUrl = activeTab.url || pageTarget.url || null;
+    page = await connectTarget(pageTarget, 'page');
+    await page.send('Page.enable');
+    await page.send('Runtime.enable');
+    await page.send('Performance.enable');
+    await installPagePerformanceProbe(page);
     // The initial URL can finish before Chrome has loaded the unpacked
-    // extension. Reload once the worker is visible so the content script is
-    // installed in the page we are about to exercise.
-    await navigate(page, options.url);
-    result.pageReloadedAfterExtensionLoad = true;
+    // extension. Reload once the worker is visible in launch mode. Attach
+    // mode keeps the user's existing document and its loaded model/profile.
+    if (!attachMode || options.urlProvided) {
+      await navigate(page, options.url);
+      result.pageReloadedAfterExtensionLoad = true;
+    } else {
+      result.pageReloadedAfterExtensionLoad = false;
+      options.url = attachedUrl || await evaluate(page, 'location.href');
+      result.scenario.url = options.url;
+    }
+    if (processSampler) {
+      await processSampler.sample();
+      processSampler.markBaseline();
+    }
+    if (!options.skipTranslation && options.scenario === 'navigation') {
+      settingsSnapshot = await enableSameSiteContinuation(worker);
+      result.sameSiteContinuationTemporarilyEnabled = true;
+    }
+    if (!options.skipTranslation) {
+      await waitForTabState(worker, tabId, (state) => Boolean(state?.documentToken), 15_000);
+    }
     await startTracing(page);
     tracingStarted = true;
     if (options.scenario === 'gallery') {
-      await runGalleryScenario({page, worker, options, result});
+      await runGalleryScenario({page, worker, options, result, tabId});
     } else {
-      await runNavigationScenario({page, worker, options, result});
+      await runNavigationScenario({page, worker, options, result, tabId});
     }
   } catch (error) {
     result.error = {message: error.message, stack: error.stack};
@@ -1071,20 +1427,40 @@ async function main() {
     }
     result.tracePath = resolve(options.outputDir, 'trace.json');
     if (trace != null) await writeFile(result.tracePath, trace);
-    result.process = await processSampler.stop();
+    result.process = processSampler
+      ? await processSampler.stop()
+      : {
+        supported: false,
+        error: 'Attach mode did not receive --browser-pid; CPU sampling was skipped.'
+      };
+    if (settingsSnapshot && worker) await restoreSettings(worker, settingsSnapshot);
     worker?.close();
     page?.close();
-    if (!options.keepBrowser) {
+    if (chrome && !options.keepBrowser) {
       chrome.kill('SIGTERM');
       await wait(500);
       if (!chrome.killed) chrome.kill('SIGKILL');
-    } else chrome.unref?.();
+    } else chrome?.unref?.();
     if (localServer) localServer.kill('SIGTERM');
     if (ownsProfile && !options.keepProfile) {
       await rm(profileDir, {recursive: true, force: true});
     }
     result.finishedAt = new Date().toISOString();
     result.profile.cleaned = ownsProfile && !options.keepProfile;
+    result.performance ??= {
+      cdpPingSupported: false,
+      maxCdpPingMs: null,
+      maxLongTaskMs: null,
+      longTaskCount: 0,
+      cdpPingPass: false,
+      longTaskPass: false,
+      responsivenessPass: false
+    };
+    result.performance.cpuRecovered = result.process.cpuRecovered;
+    result.performance.cpuGateSkipped = result.process.supported !== true;
+    result.testPassed = result.scenarioPassed === true &&
+      result.performance.responsivenessPass === true &&
+      (result.process.supported !== true || result.process.cpuRecovered === true);
     await writeFile(resolve(options.outputDir, 'result.json'), `${JSON.stringify(result, null, 2)}\n`);
   }
 
@@ -1092,8 +1468,12 @@ async function main() {
   if (!result.testPassed) process.exitCode = 1;
 }
 
-main().catch((error) => {
-  const prefix = error instanceof ValidationBlockedError ? 'validation blocked: ' : '';
-  console.error(`${prefix}${error.stack ?? error.message}`);
-  process.exitCode = error instanceof ValidationBlockedError ? 2 : 1;
-});
+export {evaluateResponsiveness, parseArgs, summarizePageSamples};
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    const prefix = error instanceof ValidationBlockedError ? 'validation blocked: ' : '';
+    console.error(`${prefix}${error.stack ?? error.message}`);
+    process.exitCode = error instanceof ValidationBlockedError ? 2 : 1;
+  });
+}

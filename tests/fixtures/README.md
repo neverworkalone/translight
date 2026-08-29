@@ -30,6 +30,30 @@ runner auto-detects Chrome for Testing or Chromium; pass
 `--chrome=/path/to/browser` when it is installed elsewhere. A temporary Chrome
 profile is removed after the run unless `--keep-profile` is supplied.
 
+To drive an already running dedicated Chrome for Testing profile, start it with
+remote debugging enabled and then attach the runner:
+
+```bash
+"/path/to/Google Chrome for Testing" \
+  --remote-debugging-port=9222 \
+  --user-data-dir=/private/tmp/translight-cft-profile \
+  --disable-extensions-except=/path/to/translight/dist \
+  --load-extension=/path/to/translight/dist
+
+npm run test:metacritic:chrome -- \
+  --debugging-port=9222 \
+  --profile-dir=/private/tmp/translight-cft-profile \
+  --scenario=navigation --cycles=5
+```
+
+Attach mode uses the active tab in that profile, invokes the extension's
+toolbar action path, and never kills the attached browser. Use a dedicated
+profile; the runner may temporarily enable same-site continuation for the
+navigation scenario and restores that setting afterward. Pass
+`--browser-pid=<pid>` when CPU sampling is required in attach mode.
+The attached browser must already have Translight loaded; use a
+Translator-capable Chrome profile when the run requires real translation.
+
 ## Guardian card translation placement
 
 Fixture: `guardian-translation-placement-repro.html` and

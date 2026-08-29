@@ -1,7 +1,8 @@
 import {
   CONTENT_CONTROLLER_KEY,
   DOCUMENT_TOKEN_KEY,
-  installContentController
+  installContentController,
+  isMetacriticGalleryStateChange
 } from '../../src/content/controller.js';
 import {PageSession} from '../../src/content/page-session.js';
 
@@ -175,7 +176,16 @@ function installRuntime() {
       return Promise.resolve();
     }
   };
-  controller = installContentController({runtime, createSession: createInstrumentedSession});
+  controller = installContentController({
+    runtime,
+    createSession: createInstrumentedSession,
+    // The fixture is served from localhost; keep the production hostname
+    // check enabled and inject only the fixture's known host for this test.
+    isGalleryStateChange: (details) => isMetacriticGalleryStateChange({
+      ...details,
+      isMetacriticHost: (hostname) => hostname === '127.0.0.1'
+    })
+  });
 }
 
 async function run() {
