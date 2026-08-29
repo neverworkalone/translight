@@ -3,12 +3,54 @@ import {
   ProcessSampler,
   evaluateCpuRecovery,
   evaluateResponsiveness,
+  finalizeLayoutReport,
   parseArgs,
   summarizePageSamples,
   summarizeRecoveryResponsiveness
 } from './metacritic-chrome-runner.mjs';
 
 describe('Metacritic Chrome runner', () => {
+  it('fails when a fixture geometry snapshot exceeds its tolerance', () => {
+    const report = finalizeLayoutReport({
+      supported: true,
+      tolerancePx: 1,
+      baseline: [{selector: '#root', x: 10, width: 100}],
+      snapshots: [{
+        label: 'incremental',
+        snapshot: [{selector: '#root', x: 12, width: 100}]
+      }]
+    });
+
+    expect(report.pass).toBe(false);
+    expect(report.failures).toEqual([{
+      label: 'incremental',
+      selector: '#root',
+      property: 'x',
+      expected: 10,
+      actual: 12
+    }]);
+  });
+
+  it('parses explicit dummy provider settings', () => {
+    expect(parseArgs([
+      '--provider=dummy',
+      '--dummy-profile=expanded',
+      '--dummy-delay-ms=37',
+      '--cycles=2'
+    ])).toMatchObject({
+      provider: 'dummy',
+      dummyProfile: 'expanded',
+      dummyDelayMs: 37,
+      cycles: 2
+    });
+  });
+
+  it('rejects invalid dummy provider settings', () => {
+    expect(() => parseArgs(['--provider=mock'])).toThrow(/--provider must be real or dummy/u);
+    expect(() => parseArgs(['--dummy-profile=short'])).toThrow(/--dummy-profile must be normal or expanded/u);
+    expect(() => parseArgs(['--dummy-delay-ms=-1'])).toThrow(/--dummy-delay-ms must be an integer/u);
+  });
+
   it('parses persistent attach mode without changing the selected scenario URL', () => {
     expect(parseArgs([
       '--scenario=navigation',

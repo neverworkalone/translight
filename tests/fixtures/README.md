@@ -30,6 +30,29 @@ runner auto-detects Chrome for Testing or Chromium; pass
 `--chrome=/path/to/browser` when it is installed elsewhere. A temporary Chrome
 profile is removed after the run unless `--keep-profile` is supplied.
 
+To run the deterministic packaged-extension CFT coverage, use the local
+Metacritic-shaped fixture with the test-only provider:
+
+```bash
+npm run test:metacritic:chrome -- \
+  --provider=dummy \
+  --dummy-profile=normal \
+  --dummy-delay-ms=20 \
+  --scenario=navigation \
+  --url=http://127.0.0.1:5173/tests/fixtures/metacritic-cft.html \
+  --chrome="/path/to/Google Chrome for Testing"
+```
+
+The runner verifies the extension service worker's test-build marker before
+configuring dummy mode. This scenario invokes the real toolbar-action seam,
+checks dummy output and incremental mutation discovery, forces a pending-work
+OFF → ON restart, drives navigation and browser Back, checks document/session
+state and duplicate source ids, compares fixture geometry to its pre-translation
+baseline during rendering and cleanup, probes page-realm isolation, and applies
+the responsiveness/CPU recovery gates. The fixture's route pages are
+`metacritic-cft.html` and `metacritic-cft-detail.html`; they contain no direct
+PageSession or provider mock.
+
 To drive an already running dedicated Chrome for Testing profile, start it with
 remote debugging enabled and then attach the runner:
 

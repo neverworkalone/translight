@@ -5,6 +5,7 @@ import { PageSession } from '../src/content/page-session.js';
 import { SEGMENT_SELECTOR } from '../src/content/block-collector.js';
 import { MODEL_STATE } from '../src/translation/model-state.js';
 import { TRANSLATION_MODES } from '../src/settings.js';
+import { DummyTranslateProvider } from '../src/translation/dummy-provider.js';
 
 function makeProvider({
   translate = async (text) => `ko:${text}`,
@@ -24,6 +25,24 @@ function wait(milliseconds = 140) {
 }
 
 describe('PageSession', () => {
+  it('does not close an injected provider before its first start', async () => {
+    document.body.innerHTML = '<p>Close-aware provider.</p>';
+    const provider = new DummyTranslateProvider({delayMs: 0});
+    const session = new PageSession({
+      generation: 1,
+      document,
+      provider,
+      settings: {translatePageTitle: false}
+    });
+
+    await session.start();
+
+    expect(document.querySelector('translight-translation')?.textContent).toBe(
+      'ko:Close-aware provider.'
+    );
+    session.stop({notify: false});
+  });
+
   it('translates blocks while leaving original DOM text untouched', async () => {
     document.body.innerHTML = '<h1>Title</h1><p>First paragraph.</p>';
     const statuses = [];

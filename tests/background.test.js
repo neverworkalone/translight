@@ -89,6 +89,17 @@ afterEach(() => {
 });
 
 describe('background automatic translation status', () => {
+  it('reports a production build and rejects dummy configuration', async () => {
+    installChrome({autoTranslateSites: []});
+    await import('../src/background/index.js?background-production-dummy-guard');
+
+    const harness = globalThis.__translight_test_harness__;
+    expect(harness.getBuildInfo()).toMatchObject({testBuild: false, kind: 'production'});
+    await expect(harness.configureProvider({provider: 'dummy'}))
+      .rejects.toMatchObject({code: 'TEST_BUILD_REQUIRED'});
+    expect(contentMessages).toHaveLength(0);
+  });
+
   it('exposes a test-only toggle that follows the action handler state path', async () => {
     installChrome({autoTranslateSites: []});
     await import('../src/background/index.js?background-test-harness-toggle');
@@ -110,6 +121,7 @@ describe('background automatic translation status', () => {
       activation: 'manual',
       documentToken: 'document-1'
     });
+    expect(startMessage.testProvider).toBeUndefined();
     expect(started.documentToken).toBe('document-1');
 
     const stopped = await harness.toggle(1);

@@ -162,14 +162,18 @@ export class PageSession {
   }
 
   start() {
-    this.stop({notify: false});
+    // A newly constructed session has no resources to tear down. In
+    // particular, do not close an injected provider before its first use.
+    // Watch-only sessions also reuse their unprepared provider when content
+    // later makes them translatable.
+    if (this.running) this.stop({notify: false, closeProvider: !this.watchOnly});
     this.controller = new AbortController();
     this.running = true;
     this.runPromise = this.run();
     return this.runPromise;
   }
 
-  stop({notify = true} = {}) {
+  stop({notify = true, closeProvider = true} = {}) {
     const wasRunning = this.running;
     this.paused = false;
     this.running = false;
@@ -189,7 +193,7 @@ export class PageSession {
     this.renderer?.removeAll();
     this.cleanupSegmentWrappers();
     this.renderer = null;
-    this.provider.close?.();
+    if (closeProvider) this.provider.close?.();
     this.restoreTitle();
     if (notify && wasRunning) this.notify('OFF');
   }

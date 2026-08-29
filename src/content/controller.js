@@ -5,6 +5,7 @@ import {
   normalizeSettings,
   subscribeToSettings
 } from '../settings.js';
+import {createTranslationProvider} from '../translation/provider-factory.js';
 
 export const CONTENT_CONTROLLER_KEY = '__translight_content_controller__';
 export const DOCUMENT_TOKEN_KEY = '__translight_document_token__';
@@ -236,7 +237,7 @@ export function installContentController({
     // Navigation that happened while translation was OFF is the baseline for
     // this new session, not an SPA route inside it.
     controller.lastNavigationUrl = globalThis.location?.href ?? controller.lastNavigationUrl;
-    controller.currentSession = createSession({
+    const sessionOptions = {
       generation: message.generation,
       activation: message.activation ?? null,
       sendStatus,
@@ -247,7 +248,14 @@ export function installContentController({
         ? message.routeGeneration
         : controller.routeGeneration,
       onDomMutation: () => controller.navigationHandler()
-    });
+    };
+    if (message.testProvider) {
+      sessionOptions.provider = createTranslationProvider({
+        ...message.testProvider,
+        targetLanguage: controller.settings.targetLanguage
+      });
+    }
+    controller.currentSession = createSession(sessionOptions);
     void controller.currentSession.start();
     controller.startNavigationWatcher(controller.currentSession);
   };
