@@ -357,6 +357,43 @@ describe('TranslationRenderer', () => {
     expect(computedStyle.display).toBe('inline');
   });
 
+  it('does not copy host layout dimensions from generated segment wrappers', () => {
+    document.head.innerHTML = `
+      <style>
+        .tableofcontents li span {
+          position: absolute;
+          height: 12px;
+          width: 14px;
+          margin: 8px;
+          overflow: hidden;
+          white-space: nowrap;
+        }
+      </style>
+    `;
+    document.body.innerHTML = `
+      <ul class="tableofcontents">
+        <li id="source-parent">
+          <span ${SEGMENT_ATTRIBUTE}="true" data-translight-segment-id="source-segment">
+            Roadmap
+          </span>
+        </li>
+      </ul>
+    `;
+    const source = document.querySelector(`[${SEGMENT_ATTRIBUTE}="true"]`);
+    const renderer = new TranslationRenderer({document, sessionId: 'segment-layout-session'});
+
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'source-segment',
+      translatedText: '로드맵'
+    });
+
+    expect(translation.style.width).toBe('');
+    expect(translation.style.marginLeft).toBe('');
+    expect(translation.style.marginRight).toBe('');
+    expect(window.getComputedStyle(translation).width).not.toBe('14px');
+  });
+
   it('does not replace visually hidden accessibility text in a visible source block', () => {
     document.head.innerHTML = `
       <style>

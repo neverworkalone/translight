@@ -260,6 +260,15 @@ function syncSourceLayout(record, {
     return;
   }
 
+  // Segment wrappers are implementation nodes created around text fragments.
+  // Host CSS can size them for icons, table cells, or other layout details;
+  // copying those dimensions to a sibling translation would make the
+  // translated text inherit the wrapper's artificial width and margins.
+  if (element.matches?.(SEGMENT_SELECTOR)) {
+    clearSourceLayout(translation);
+    return;
+  }
+
   if (sourceIsLayout ?? LAYOUT_DISPLAYS.has(getDisplay(element))) {
     clearSourceLayout(translation);
     return;

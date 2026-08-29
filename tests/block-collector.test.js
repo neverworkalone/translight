@@ -66,6 +66,31 @@ describe('collectTranslationBlocks', () => {
     ]);
   });
 
+  it('keeps PSNProfiles shell chrome out of the translation blocks', () => {
+    document.body.innerHTML = `
+      <div id="header">
+        <div class="header">
+          <div class="navigation"><ul><li><a href="/guides">Guides</a></li></ul></div>
+        </div>
+      </div>
+      <div id="banner">
+        <div class="banner-overlay">
+          <div class="guide-info">
+            <h3>Beyond: Two Souls Trophy Guide</h3>
+            <div class="intro">A story-based guide introduction.</div>
+          </div>
+          <div class="stats">230 User Favourites</div>
+          <div class="title-bar">Guide details</div>
+        </div>
+      </div>
+      <main id="content" class="page"><p>Guide body remains translatable.</p></main>
+    `;
+
+    expect(collectTranslationBlocks(document.body).map((block) => block.text)).toEqual([
+      'Guide body remains translatable.'
+    ]);
+  });
+
   it.each(['has-navigation', 'layout-with-navigation', 'AppWithNavigation'])
     ('does not treat ordinary layout class %s as a navigation container', (className) => {
       document.body.innerHTML = `

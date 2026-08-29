@@ -17,6 +17,7 @@ const NAVIGATION_SELECTOR = [
   '[data-nav-moretrigger]',
   '.MainNavigation'
 ].join(',');
+const PSNPROFILES_SHELL_SELECTOR = '#header,#banner';
 const LINK_RATIO_LIMIT = 0.65;
 const DOUBLE_LINE_BREAK_PATTERN = /\r?\n[ \t\f]*(?:\r?\n)+/;
 const SOURCE_ID_ATTRIBUTE = 'data-translight-source-id';
@@ -147,6 +148,17 @@ function hasLettersOrNumbers(text) {
 
 function isNavigationLike(element, text) {
   if (element.closest(NAVIGATION_SELECTOR)) return true;
+  const shell = element.closest(PSNPROFILES_SHELL_SELECTOR);
+  if (shell) {
+    const root = element.ownerDocument;
+    // PSNProfiles puts the guide title, statistics, and navigation in fixed
+    // shell regions. Adding block translations there expands a bottom-anchored
+    // banner and moves its title out of the viewport, so keep that chrome in
+    // its native layout while translating the guide body below it.
+    if (root?.querySelector?.('#header .navigation') &&
+        root.querySelector?.('#banner .guide-info') &&
+        root.querySelector?.('#content.page')) return true;
+  }
   // Figure captions commonly link to the referenced films, but the links are
   // part of the caption content rather than a navigation list.
   if (element.matches('figcaption')) return false;
