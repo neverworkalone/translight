@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Translight Yelp amenity layout reproduction</title>
+    <style>
+      :root { color-scheme: light; }
+      html { scroll-behavior: auto; }
+      body { margin: 0; color: #111827; font: 16px/1.5 Arial, sans-serif; }
+      #report {
+        position: fixed;
+        z-index: 10;
+        top: 0;
+        right: 0;
+        width: 390px;
+        max-height: 92vh;
+        overflow: auto;
+        padding: 12px;
+        box-sizing: border-box;
+        background: #111827;
+        color: #f9fafb;
+        font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+        white-space: pre-wrap;
+      }
+      #top-filler { height: 1200px; padding: 24px; box-sizing: border-box; background: #f3f4f6; }
+      #content { width: 762px; max-width: calc(100% - 48px); margin: 0 auto; padding: 48px 0 1200px; }
+      #amenities { margin: 0; }
+
+      /* The following rules are the relevant Yelp arrange component rules. */
+      .arrange { table-layout: auto; min-width: 100%; display: table; }
+      .arrange > .arrange-unit { box-sizing: border-box; vertical-align: top; display: table-cell; }
+      .arrange-unit-fill { width: 100%; }
+      .vertical-align-baseline > .arrange-unit { vertical-align: baseline; }
+      .gutter-2 { border-collapse: separate; border-spacing: 16px 0; margin-left: -16px; margin-right: -16px; }
+      .gutter-2 > .arrange-unit { border-collapse: collapse; border-spacing: 0; margin-left: 8px; margin-right: 8px; }
+      .gutter-2.layout-wrap > .arrange-unit { margin-left: auto; margin-right: auto; padding-left: 8px; padding-right: 8px; }
+      .layout-wrap { text-align: left; font-size: 0; line-height: 1; display: block; margin-top: -16px; }
+      .layout-wrap > .arrange-unit { width: auto; font-size: 14px; line-height: 1.28571em; display: inline-block; margin-top: 16px; }
+      .layout-2-units > .arrange-unit { width: 50%; }
+      .amenity-icon { width: 24px; height: 24px; display: inline-block; background: #d1d5db; }
+      .amenity-label { font-weight: 600; }
+    </style>
+  </head>
+  <body>
+    <pre id="report">starting…</pre>
+    <div id="top-filler">Yelp-style content above the active viewport.</div>
+    <main id="content">
+      <section id="amenities" aria-label="Amenities and More">
+        <h2>Amenities and More</h2>
+        <div class="yelp-region" role="region" aria-live="polite">
+          <div class="arrange gutter-2 layout-wrap layout-2-units">
+            <div class="arrange-unit">
+              <div class="arrange gutter-2 vertical-align-baseline">
+                <div class="arrange-unit"><span class="amenity-icon" aria-hidden="true"></span></div>
+                <div class="arrange-unit arrange-unit-fill" data-amenity="Offers take-out"><span class="amenity-label">Offers take-out</span></div>
+              </div>
+            </div>
+            <div class="arrange-unit">
+              <div class="arrange gutter-2 vertical-align-baseline">
+                <div class="arrange-unit"><span class="amenity-icon" aria-hidden="true"></span></div>
+                <div class="arrange-unit arrange-unit-fill" data-amenity="Offers delivery"><span class="amenity-label">Offers delivery</span></div>
+              </div>
+            </div>
+            <div class="arrange-unit">
+              <div class="arrange gutter-2 vertical-align-baseline">
+                <div class="arrange-unit"><span class="amenity-icon" aria-hidden="true"></span></div>
+                <div class="arrange-unit arrange-unit-fill" data-amenity="Wheelchair accessible"><span class="amenity-label">Wheelchair accessible</span></div>
+              </div>
+            </div>
+            <div class="arrange-unit">
+              <div class="arrange gutter-2 vertical-align-baseline">
+                <div class="arrange-unit"><span class="amenity-icon" aria-hidden="true"></span></div>
+                <div class="arrange-unit arrange-unit-fill" data-amenity="ADA-compliant main entrance"><span class="amenity-label">ADA-compliant main entrance</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/tests/fixtures/yelp-amenity-layout-repro.js"></script>
+  </body>
+</html>
