@@ -33,9 +33,14 @@ const DEFAULT_NAVIGATION_WAIT_MS = 30_000;
 const PROCESS_SAMPLE_INTERVAL_MS = 250;
 const PAGE_SAMPLE_INTERVAL_MS = 100;
 const TEST_HARNESS_KEY = '__translight_test_harness__';
+const DEFAULT_DUMMY_DELAY_MS = 69;
+const PROVIDER_TYPES = new Set(['real', 'dummy']);
+const DUMMY_PROFILES = new Set(['normal', 'expanded']);
+const COMMIT_SHA_PATTERN = /^[0-9a-f]{40}$/u;
 const TAB_STATUS_OFF = 'OFF';
 const TAB_STATUS_ERROR = 'ERROR';
 const MAX_CDP_PING_MS = 250;
+const LAYOUT_TOLERANCE_PX = 1;
 // Metacritic can produce a few hundred-millisecond task during a normal route
 // load. Keep the browser gate strict enough to catch the reported hangs while
 // allowing that normal navigation work; the CDP ping gate covers an already
@@ -54,6 +59,9 @@ function usage() {
 
 Options:
   --scenario=gallery|navigation   Reproduce the article gallery or homepage flow
+  --provider=real|dummy            Translation provider (default: real)
+  --dummy-profile=normal|expanded  Dummy output profile (default: normal)
+  --dummy-delay-ms=<number>        Dummy provider delay (default: ${DEFAULT_DUMMY_DELAY_MS})
   --url=<url>                     Start URL (defaults to the selected scenario)
   --cycles=<number>               Scroll/back cycles (default: ${DEFAULT_CYCLES})
   --settle-ms=<number>            Delay after each scroll (default: ${DEFAULT_SETTLE_MS})
@@ -95,6 +103,9 @@ function parsePort(value, name) {
 function parseArgs(argv) {
   const options = {
     scenario: 'gallery',
+    provider: 'real',
+    dummyProfile: 'normal',
+    dummyDelayMs: DEFAULT_DUMMY_DELAY_MS,
     url: null,
     cycles: DEFAULT_CYCLES,
     settleMs: DEFAULT_SETTLE_MS,
@@ -143,6 +154,21 @@ function parseArgs(argv) {
           throw new Error('--scenario must be gallery or navigation.');
         }
         options.scenario = value;
+        break;
+      case '--provider':
+        if (!PROVIDER_TYPES.has(value)) {
+          throw new Error('--provider must be real or dummy.');
+        }
+        options.provider = value;
+        break;
+      case '--dummy-profile':
+        if (!DUMMY_PROFILES.has(value)) {
+          throw new Error('--dummy-profile must be normal or expanded.');
+        }
+        options.dummyProfile = value;
+        break;
+      case '--dummy-delay-ms':
+        options.dummyDelayMs = parseNumber(value, '--dummy-delay-ms');
         break;
       case '--url':
         options.url = value;
@@ -850,6 +876,15 @@ async function readPageStats(page) {
       .filter((node) => node.isConnected);
     const generatedNodes = [...document.querySelectorAll('[data-translight-generated="true"]')]
       .filter((node) => node.isConnected);
+    const sourceIds = translationNodes
+      .map((node) => node.getAttribute('data-translight-source-id'))
+      .filter(Boolean);
+    const seenSourceIds = new Set();
+    let duplicateSourceIdCount = 0;
+    for (const sourceId of sourceIds) {
+      if (seenSourceIds.has(sourceId)) duplicateSourceIdCount += 1;
+      else seenSourceIds.add(sourceId);
+    }
     return {
       atMs: performance.now(),
       url: location.href,
@@ -860,10 +895,66 @@ async function readPageStats(page) {
       scrollHeight: document.documentElement.scrollHeight,
       translationCount: translationNodes.length,
       emptyTranslationCount: translationNodes.filter((node) => !node.textContent.trim()).length,
+      translationSourceCount: sourceIds.length,
+      duplicateTranslationSourceCount: duplicateSourceIdCount,
+      translationSessionIds: [...new Set(translationNodes
+        .map((node) => node.getAttribute('data-translight-session-id'))
+        .filter(Boolean))],
       generatedCount: generatedNodes.length,
       bodyTextLength: document.body?.innerText?.length ?? 0
     };
   })()`);
+}
+
+async function readLayoutSnapshot(page) {
+  return evaluate(page, `(() => {
+    const selectors = [
+      '#metacritic-root',
+      '#metacritic-root > section:first-child',
+      '#metacritic-root > section:first-child > h1'
+    ];
+    const round = (value) => Math.round(value * 100) / 100;
+    return selectors.map((selector) => {
+      const element = document.querySelector(selector);
+      const value = element?.getBoundingClientRect?.();
+      return {
+        selector,
+        x: value ? round(value.x) : null,
+        width: value ? round(value.width) : null
+      };
+    });
+  })()`);
+}
+
+function recordLayoutSnapshot(layout, label, snapshot) {
+  if (!layout || !Array.isArray(snapshot) || snapshot.every(({x, width}) => x == null && width == null)) return;
+  layout.snapshots.push({label, snapshot});
+}
+
+function finalizeLayoutReport(layout) {
+  if (!layout) return null;
+  if (!layout.supported) return {...layout, pass: true, failures: []};
+  const failures = [];
+  for (const {label, snapshot} of layout.snapshots) {
+    for (const [index, expected] of layout.baseline.entries()) {
+      const actual = snapshot[index];
+      for (const property of ['x', 'width']) {
+        const expectedValue = expected?.[property];
+        const actualValue = actual?.[property];
+        if (expectedValue == null || actualValue == null ||
+            Math.abs(actualValue - expectedValue) > layout.tolerancePx) {
+          failures.push({
+            label,
+            selector: expected?.selector,
+            property,
+            expected: expectedValue,
+            actual: actualValue
+          });
+        }
+      }
+    }
+  }
+  return {...layout, failures, pass: failures.length === 0};
 }
 
 async function readPerformanceMetrics(page) {
@@ -1020,12 +1111,25 @@ async function waitForFirstTranslation(page, timeoutMs, {worker = null, tabId = 
     const state = worker && tabId != null ? await readTabState(worker, tabId) : null;
     const currentDocument = !state || state.documentToken === stats.documentToken;
     const active = !state || (state.status !== TAB_STATUS_OFF && state.status !== TAB_STATUS_ERROR);
-    if (stats.translationCount > 0 && currentDocument && active) return {ready: true, stats, state};
+    if (stats.translationCount > 0 && currentDocument && active) {
+      return {
+        ready: true,
+        stats,
+        state,
+        evidence: await readTranslationEvidence(page)
+      };
+    }
     await wait(250);
     stats = await readPageStats(page);
   }
   const state = worker && tabId != null ? await readTabState(worker, tabId) : null;
-  return {ready: false, stats, state, reason: 'No translation node appeared before the timeout.'};
+  return {
+    ready: false,
+    stats,
+    state,
+    evidence: await readTranslationEvidence(page),
+    reason: 'No translation node appeared before the timeout.'
+  };
 }
 
 async function waitForStableTranslations(page, timeoutMs) {
@@ -1166,6 +1270,196 @@ async function invokeToolbarAction(worker, tabId) {
   })()`);
 }
 
+async function readExtensionBuildInfo(worker) {
+  return evaluateExtension(worker, `(() => {
+    const harness = globalThis[${JSON.stringify(TEST_HARNESS_KEY)}];
+    return harness?.getBuildInfo?.() ?? null;
+  })()`);
+}
+
+function normalizeCommitSha(value) {
+  return typeof value === 'string' && COMMIT_SHA_PATTERN.test(value) ? value : null;
+}
+
+function resolveTestedCommit({loadedBuild, checkoutCommit, checkoutDirty, attachMode = false} = {}) {
+  const loadedCommit = normalizeCommitSha(loadedBuild?.commit);
+  if (attachMode) {
+    return {
+      testedCommit: loadedCommit,
+      testedCommitSource: 'loaded-extension-build',
+      testedCommitVerified: false,
+      testedCommitAvailable: loadedCommit != null
+    };
+  }
+
+  const expectedCommit = normalizeCommitSha(checkoutCommit);
+  if (!loadedCommit) {
+    throw new Error(
+      'The loaded extension does not report a valid build commit. ' +
+      'Rebuild it with npm run build or npm run build:test before running the local CFT runner.'
+    );
+  }
+  if (!expectedCommit) {
+    throw new Error('The current checkout does not report a valid git HEAD commit.');
+  }
+  if (loadedBuild?.dirty !== false) {
+    throw new ValidationBlockedError(
+      'The loaded extension build is dirty or does not report clean build state. ' +
+      'Commit the relevant changes and rebuild the extension before running local CFT validation.'
+    );
+  }
+  if (checkoutDirty !== false) {
+    throw new ValidationBlockedError(
+      'The current checkout is dirty or its clean state could not be determined. ' +
+      'Commit the relevant changes before running local CFT validation.'
+    );
+  }
+  if (loadedCommit !== expectedCommit) {
+    throw new Error(
+      `Loaded extension build commit ${loadedCommit} does not match checkout HEAD ${expectedCommit}. ` +
+      'Rebuild the extension or remove --skip-build before running the local CFT runner.'
+    );
+  }
+  return {
+    testedCommit: loadedCommit,
+    testedCommitSource: 'loaded-extension-build',
+    testedCommitVerified: true,
+    testedCommitAvailable: true
+  };
+}
+
+async function configureDummyProvider(worker, options) {
+  return evaluateExtension(worker, `(async () => {
+    const harness = globalThis[${JSON.stringify(TEST_HARNESS_KEY)}];
+    if (!harness?.getBuildInfo || !harness?.configureProvider) {
+      throw new Error('The loaded Translight extension does not expose the test-build provider harness.');
+    }
+    const build = harness.getBuildInfo();
+    if (build?.testBuild !== true) {
+      throw new Error(
+        'Dummy provider requested, but the loaded extension is a production build. ' +
+        'Run npm run build:test or omit --skip-build.'
+      );
+    }
+    return harness.configureProvider({
+      provider: 'dummy',
+      profile: ${JSON.stringify(options.dummyProfile)},
+      delayMs: ${options.dummyDelayMs}
+    });
+  })()`);
+}
+
+async function clearDummyProvider(worker) {
+  return evaluateExtension(worker, `(async () => {
+    const harness = globalThis[${JSON.stringify(TEST_HARNESS_KEY)}];
+    await harness?.clearProvider?.();
+  })()`);
+}
+
+async function readTranslationEvidence(page) {
+  return evaluate(page, `(() => {
+    const translations = [...document.querySelectorAll('translight-translation')]
+      .filter((node) => node.isConnected)
+      .slice(0, 8);
+    return translations.map((translation) => {
+      const sourceId = translation.getAttribute('data-translight-source-id');
+      const source = [...document.querySelectorAll('[data-translight-source-id]')]
+        .find((candidate) => !candidate.matches('translight-translation') &&
+          candidate.getAttribute('data-translight-source-id') === sourceId);
+      const clone = source?.cloneNode(true);
+      clone?.querySelectorAll?.('[data-translight-generated="true"], translight-translation')
+        .forEach((node) => node.remove());
+      return {
+        sourceId,
+        sourceText: clone?.textContent?.trim() ?? null,
+        text: translation.textContent.trim()
+      };
+    });
+  })()`);
+}
+
+function providerEvidencePass(provider, evidence) {
+  if (provider !== 'dummy') return true;
+  return evidence.length > 0 && evidence.every(({sourceText, text}) =>
+    typeof text === 'string' && text.startsWith('ko:') && text !== sourceText
+  );
+}
+
+async function appendIncrementalBlocks(page, count = 24) {
+  return evaluate(page, `(() => {
+    const root = document.querySelector('main') || document.body;
+    for (let index = 0; index < ${count}; index += 1) {
+      const block = document.createElement('p');
+      block.dataset.translightCftIncremental = 'true';
+      block.dataset.translightCftIncrementalCount = String(${count});
+      block.textContent = 'CFT incremental content block ${count} ' + index +
+        ' remains visible while the real Translight mutation observer discovers it.';
+      root.appendChild(block);
+    }
+    return String(${count});
+  })()`);
+}
+
+async function waitForIncrementalTranslation(page, timeoutMs, layout = null) {
+  const deadline = Date.now() + timeoutMs;
+  let sampleIndex = 0;
+  recordLayoutSnapshot(layout, `incremental-${sampleIndex++}`, await readLayoutSnapshot(page));
+  let state = await evaluate(page, `(() => {
+    const translations = new Map([...document.querySelectorAll('translight-translation')]
+      .map((node) => [node.getAttribute('data-translight-source-id'), node]));
+    const getTranslation = (source) => translations.get(
+      source.getAttribute('data-translight-source-id'));
+    const source = document.querySelector('[data-translight-cft-incremental="true"]');
+    const translation = source ? getTranslation(source) : null;
+    const sources = [...document.querySelectorAll('[data-translight-cft-incremental="true"]')];
+    return {
+      sourceCount: sources.length,
+      translatedCount: sources.filter((node) => getTranslation(node)).length,
+      sample: translation?.textContent?.trim() ?? null
+    };
+  })()`);
+  while (Date.now() < deadline) {
+    if (state.sourceCount > 0 && state.translatedCount === state.sourceCount) {
+      recordLayoutSnapshot(layout, `incremental-${sampleIndex++}`, await readLayoutSnapshot(page));
+      return state;
+    }
+    await wait(100);
+    recordLayoutSnapshot(layout, `incremental-${sampleIndex++}`, await readLayoutSnapshot(page));
+    state = await evaluate(page, `(() => {
+      const translations = new Map([...document.querySelectorAll('translight-translation')]
+        .map((node) => [node.getAttribute('data-translight-source-id'), node]));
+      const getTranslation = (source) => translations.get(
+        source.getAttribute('data-translight-source-id'));
+      const sources = [...document.querySelectorAll('[data-translight-cft-incremental="true"]')];
+      return {
+        sourceCount: sources.length,
+        translatedCount: sources.filter((node) => getTranslation(node)).length,
+        sample: getTranslation(sources[0])?.textContent?.trim() ?? null
+      };
+    })()`);
+  }
+  recordLayoutSnapshot(layout, `incremental-${sampleIndex}`, await readLayoutSnapshot(page));
+  return state;
+}
+
+async function probePageControlIsolation(page) {
+  return evaluate(page, `(() => {
+    const key = ${JSON.stringify(TEST_HARNESS_KEY)};
+    const visibleBefore = Object.prototype.hasOwnProperty.call(globalThis, key);
+    window.postMessage({
+      type: 'TRANSLIGHT_TEST_PROVIDER',
+      provider: 'dummy',
+      profile: 'expanded',
+      delayMs: 0
+    }, '*');
+    return {
+      harnessVisible: visibleBefore,
+      extensionRuntimeVisible: Boolean(globalThis.chrome?.runtime?.sendMessage),
+      translationCountBeforeAction: document.querySelectorAll('translight-translation').length
+    };
+  })()`);
+}
+
 async function waitForTabState(worker, tabId, predicate, timeoutMs = DEFAULT_NAVIGATION_WAIT_MS) {
   const deadline = Date.now() + timeoutMs;
   let state = await readTabState(worker, tabId);
@@ -1258,6 +1552,10 @@ function summarizeConsoleResult(result) {
     summary.actionCount = summary.actions.length;
     delete summary.actions;
   }
+  if (summary.layout) {
+    summary.layout = {...summary.layout, snapshotCount: summary.layout.snapshots?.length ?? 0};
+    delete summary.layout.snapshots;
+  }
   return summary;
 }
 
@@ -1282,6 +1580,17 @@ async function runGalleryScenario({page, worker, options, result, tabId, capture
     );
     result.translationReady = first;
     baseline = first.stats;
+    recordLayoutSnapshot(result.layout, 'after-initial', await readLayoutSnapshot(page));
+    result.providerEvidence = first.evidence;
+    result.providerOutputPass = providerEvidencePass(options.provider, first.evidence);
+    const incrementalCount = await appendIncrementalBlocks(page);
+    result.incremental = {
+      requestedCount: Number(incrementalCount),
+      ...(await waitForIncrementalTranslation(page, options.translationWaitMs, result.layout))
+    };
+    result.incremental.pass = result.incremental.sourceCount === result.incremental.requestedCount &&
+      result.incremental.translatedCount === result.incremental.sourceCount &&
+      (options.provider !== 'dummy' || result.incremental.sample?.startsWith('ko:'));
   } else {
     result.translationStart = {requested: false};
   }
@@ -1312,6 +1621,8 @@ async function runGalleryScenario({page, worker, options, result, tabId, capture
   }
   result.toggles = toggles;
   result.afterStop = await readPageStats(page);
+  recordLayoutSnapshot(result.layout, 'after-cleanup', await readLayoutSnapshot(page));
+  result.layout = finalizeLayoutReport(result.layout);
   result.restoredAfterStop = result.afterStop.translationCount === 0 && result.afterStop.generatedCount === 0;
   result.translationGapActions = options.skipTranslation ? 0 : actions.filter(({stats}) =>
     stats.translationCount === 0 || stats.emptyTranslationCount > 0
@@ -1323,6 +1634,10 @@ async function runGalleryScenario({page, worker, options, result, tabId, capture
     result.pageSummary.emptyTranslationSamples === 0 &&
     (options.skipTranslation || result.pageSummary.translationDropSamples === 0) &&
     (options.skipTranslation || result.translationGapActions === 0) &&
+    (options.skipTranslation || result.providerOutputPass !== false) &&
+    (options.skipTranslation || result.incremental?.pass === true) &&
+    (options.skipTranslation || result.pageControlIsolationPass === true) &&
+    (options.skipTranslation || result.layout?.pass !== false) &&
     (options.skipTranslation || result.restoredAfterStop);
   scenario.completed = true;
 }
@@ -1350,8 +1665,54 @@ async function runNavigationScenario({page, worker, options, result, tabId, capt
       {worker, tabId}
     );
     result.translationReadyByRoute.push({cycle: 0, phase: 'home', ...result.translationReady});
+    recordLayoutSnapshot(result.layout, 'after-initial', await readLayoutSnapshot(page));
+    result.providerEvidence = result.translationReady.evidence;
+    result.providerEvidencePass = providerEvidencePass(options.provider, result.providerEvidence);
+    const incrementalCount = await appendIncrementalBlocks(page);
+    result.incremental = {
+      requestedCount: Number(incrementalCount),
+      ...(await waitForIncrementalTranslation(page, options.translationWaitMs, result.layout))
+    };
+    result.incremental.pass = result.incremental.sourceCount === result.incremental.requestedCount &&
+      result.incremental.translatedCount === result.incremental.sourceCount &&
+      (options.provider !== 'dummy' || result.incremental.sample?.startsWith('ko:'));
   } else {
     result.translationStart = {requested: false};
+  }
+  if (!options.skipTranslation && options.provider === 'dummy') {
+    // Force a stop while work is pending, then start a new session. The
+    // provider delay makes late-result delivery observable instead of letting
+    // this scenario cover only the idle OFF -> ON path.
+    await appendIncrementalBlocks(page, 48);
+    await wait(Math.max(120, options.dummyDelayMs + 100));
+    const raceStop = await toggleTranslation({
+      page,
+      worker,
+      tabId,
+      expectedStatus: TAB_STATUS_OFF,
+      timeoutMs: options.translationWaitMs
+    });
+    toggles.push({action: 'OFF', phase: 'pending-work-race', ...raceStop});
+    const raceStart = await toggleTranslation({
+      page,
+      worker,
+      tabId,
+      expectedStatus: 'ON',
+      timeoutMs: options.translationWaitMs
+    });
+    toggles.push({action: 'ON', phase: 'pending-work-race', ...raceStart});
+    const raceReady = await waitForFirstTranslation(page, options.translationWaitMs, {worker, tabId});
+    result.pendingWorkRestart = {
+      stop: raceStop,
+      start: raceStart,
+      ready: raceReady,
+      pass: raceStop.stats.translationCount === 0 &&
+        raceStop.stats.duplicateTranslationSourceCount === 0 &&
+        raceReady.ready === true &&
+        raceReady.stats.duplicateTranslationSourceCount === 0 &&
+        raceReady.stats.translationSessionIds.length === 1 &&
+        providerEvidencePass(options.provider, raceReady.evidence)
+    };
   }
   await resetPagePerformanceProbe(page);
   actions.push(...await scrollThroughPage(page, options.settleMs, {label: 'home'}));
@@ -1382,6 +1743,7 @@ async function runNavigationScenario({page, worker, options, result, tabId, capt
       );
       result.translationReadyByRoute.push({cycle, phase: 'detail', ...detailReady});
     }
+    recordLayoutSnapshot(result.layout, `after-detail-${cycle}`, await readLayoutSnapshot(page));
     actions.push(...await scrollThroughPage(page, options.settleMs, {label: `detail-cycle-${cycle}`}));
     const returnedUrl = await goBack(page, homeUrl);
     routes.push({cycle, phase: 'home', url: returnedUrl});
@@ -1393,6 +1755,7 @@ async function runNavigationScenario({page, worker, options, result, tabId, capt
       );
       result.translationReadyByRoute.push({cycle, phase: 'home-returned', ...returnedHomeReady});
     }
+    recordLayoutSnapshot(result.layout, `after-home-${cycle}`, await readLayoutSnapshot(page));
     await scrollToTop(page, options.settleMs);
     await wait(500);
     if (cycle < options.cycles && !options.skipTranslation) {
@@ -1418,6 +1781,7 @@ async function runNavigationScenario({page, worker, options, result, tabId, capt
         {worker, tabId}
       );
       result.translationReadyByRoute.push({cycle, phase: 'home-restarted', ...homeReady});
+      recordLayoutSnapshot(result.layout, `after-home-restarted-${cycle}`, await readLayoutSnapshot(page));
     }
   }
   const pageSamples = await sampler.stop();
@@ -1439,6 +1803,8 @@ async function runNavigationScenario({page, worker, options, result, tabId, capt
   }
   result.toggles = toggles;
   result.afterStop = await readPageStats(page);
+  recordLayoutSnapshot(result.layout, 'after-cleanup', await readLayoutSnapshot(page));
+  result.layout = finalizeLayoutReport(result.layout);
   result.restoredAfterStop = result.afterStop.translationCount === 0 && result.afterStop.generatedCount === 0;
   result.translationGapActions = options.skipTranslation ? 0 : actions.filter(({stats}) =>
     stats.translationCount === 0 || stats.emptyTranslationCount > 0
@@ -1450,6 +1816,12 @@ async function runNavigationScenario({page, worker, options, result, tabId, capt
     result.translationReadyByRoute.every(({ready}) => ready === true);
   result.scenarioPassed = routes.length === options.cycles * 2 && result.pageSummary.routeChanges > 0 &&
     allTranslationsReady && (options.skipTranslation || result.translationGapActions === 0) &&
+    (options.skipTranslation || result.providerEvidencePass !== false) &&
+    (options.skipTranslation || result.incremental?.pass === true) &&
+    (options.skipTranslation || result.pageControlIsolationPass === true) &&
+    (options.skipTranslation || result.pendingWorkRestart?.pass !== false) &&
+    (options.skipTranslation || result.layout?.pass !== false) &&
+    (options.skipTranslation || result.pageSummary.final?.translationSessionIds?.length === 1) &&
     (options.skipTranslation || result.restoredAfterStop) &&
     result.performance.responsivenessPass;
   result.scenario.completed = true;
@@ -1492,7 +1864,9 @@ async function main() {
     options.chromePath = await resolveBrowserPath(options.chromePath);
     assertExtensionCapableBrowser(options.chromePath);
     if (!existsSync(options.chromePath)) throw new Error(`Chrome executable not found: ${options.chromePath}`);
-    if (!options.skipBuild) await runCommand('npm', ['run', 'build']);
+    if (!options.skipBuild) {
+      await runCommand('npm', ['run', options.provider === 'dummy' ? 'build:test' : 'build']);
+    }
     if (!existsSync(resolve(EXTENSION_PATH, 'manifest.json'))) {
       throw new Error(`Built extension not found at ${EXTENSION_PATH}. Run npm run build first.`);
     }
@@ -1514,10 +1888,28 @@ async function main() {
   let settingsSnapshot = null;
   let tabId = null;
   let processResult = null;
+  const checkoutCommit = (await execFileAsync('git', ['rev-parse', 'HEAD'], {cwd: REPOSITORY_ROOT})).stdout.trim();
+  const checkoutStatus = (await execFileAsync(
+    'git',
+    ['status', '--porcelain=v1', '--untracked-files=all'],
+    {cwd: REPOSITORY_ROOT}
+  )).stdout;
+  const checkoutDirty = checkoutStatus.trim().length > 0;
   const result = {
     runner: 'metacritic-chrome-runner',
     startedAt,
-    commit: (await execFileAsync('git', ['rev-parse', 'HEAD'], {cwd: REPOSITORY_ROOT})).stdout.trim(),
+    commit: checkoutCommit,
+    checkoutCommit,
+    checkoutDirty,
+    testedCommit: null,
+    testedCommitSource: null,
+    testedCommitVerified: false,
+    testedCommitAvailable: false,
+    provider: {
+      type: options.provider,
+      profile: options.provider === 'dummy' ? options.dummyProfile : null,
+      delayMs: options.provider === 'dummy' ? options.dummyDelayMs : null
+    },
     scenario: {name: options.scenario, url: options.url, cycles: options.cycles},
     chrome: {
       path: options.chromePath,
@@ -1545,6 +1937,22 @@ async function main() {
     result.extension.id = new URL(extensionTarget.url).hostname;
     result.extension.workerUrl = extensionTarget.url;
     result.extension.version = extension.manifest.version;
+    result.extension.build = await readExtensionBuildInfo(worker);
+    Object.assign(result, resolveTestedCommit({
+      loadedBuild: result.extension.build,
+      checkoutCommit,
+      checkoutDirty,
+      attachMode
+    }));
+    if (options.provider === 'dummy') {
+      if (result.extension.build?.testBuild !== true) {
+        throw new Error(
+          'Dummy provider requested, but the loaded extension is a production build. ' +
+          'Run npm run build:test or omit --skip-build.'
+        );
+      }
+      result.provider.configured = await configureDummyProvider(worker, options);
+    } else await clearDummyProvider(worker);
     const activeTab = await getActiveTab(worker);
     tabId = activeTab?.id;
     if (typeof tabId !== 'number') throw new Error('No active tab was found.');
@@ -1571,6 +1979,18 @@ async function main() {
       options.url = attachedUrl || await evaluate(page, 'location.href');
       result.scenario.url = options.url;
     }
+    result.pageControlIsolation = await probePageControlIsolation(page);
+    result.pageControlIsolationPass = result.pageControlIsolation.harnessVisible === false &&
+      result.pageControlIsolation.extensionRuntimeVisible === false &&
+      result.pageControlIsolation.translationCountBeforeAction === 0;
+    const layoutBaseline = await readLayoutSnapshot(page);
+    result.layout = {
+      supported: layoutBaseline.length > 0 && layoutBaseline.every(({x, width}) =>
+        Number.isFinite(x) && Number.isFinite(width)),
+      tolerancePx: LAYOUT_TOLERANCE_PX,
+      baseline: layoutBaseline,
+      snapshots: []
+    };
     if (!options.skipTranslation && options.scenario === 'navigation') {
       settingsSnapshot = await enableSameSiteContinuation(worker);
       result.sameSiteContinuationTemporarilyEnabled = true;
@@ -1623,6 +2043,7 @@ async function main() {
     }
   } catch (error) {
     result.error = {message: error.message, stack: error.stack};
+    if (error instanceof ValidationBlockedError) result.validationBlocked = true;
     result.testPassed = false;
     if (page) {
       result.failureStats = await readPageStats(page).catch(() => null);
@@ -1689,7 +2110,8 @@ async function main() {
     result.performance.validationPass = performanceValidationRequested &&
       result.performance.responsivenessPass === true &&
       result.performance.cpuRecoveryPass;
-    result.validationBlocked = performanceValidationRequested && result.process.supported !== true;
+    result.validationBlocked = result.validationBlocked === true ||
+      (performanceValidationRequested && result.process.supported !== true);
     result.testPassed = performanceValidationRequested && result.scenarioPassed === true &&
       result.performance.responsivenessPass === true &&
       result.performance.cpuRecoveryPass;
@@ -1708,7 +2130,9 @@ export {
   ProcessSampler,
   evaluateCpuRecovery,
   evaluateResponsiveness,
+  finalizeLayoutReport,
   parseArgs,
+  resolveTestedCommit,
   summarizePageSamples,
   summarizeRecoveryResponsiveness
 };

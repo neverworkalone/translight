@@ -162,14 +162,18 @@ export class PageSession {
   }
 
   start() {
-    this.stop({notify: false});
+    // A newly constructed session has no resources to tear down. In
+    // particular, do not close an injected provider before its first use.
+    // Watch-only sessions also reuse their unprepared provider when content
+    // later makes them translatable.
+    if (this.running) this.stop({notify: false, closeProvider: !this.watchOnly});
     this.controller = new AbortController();
     this.running = true;
     this.runPromise = this.run();
     return this.runPromise;
   }
 
-  stop({notify = true} = {}) {
+  stop({notify = true, closeProvider = true} = {}) {
     const wasRunning = this.running;
     this.paused = false;
     this.running = false;
@@ -189,7 +193,7 @@ export class PageSession {
     this.renderer?.removeAll();
     this.cleanupSegmentWrappers();
     this.renderer = null;
-    this.provider.close?.();
+    if (closeProvider) this.provider.close?.();
     this.restoreTitle();
     if (notify && wasRunning) this.notify('OFF');
   }
@@ -741,10 +745,10 @@ export class PageSession {
       }
       if (blocks.length) {
         if (this.watchOnly) {
-          // Move out of watch-only before starting. Reddit can deliver many
-          // mutation batches while the model is preparing; without this
+          // Let start() observe watchOnly before stop() clears it so the
+          // unprepared provider survives this promotion. Reddit can deliver
+          // many mutation batches while the model is preparing; without this
           // transition every batch would cancel and restart the same session.
-          this.watchOnly = false;
           void this.start();
         }
         else void this.enqueueBlocks(blocks);
@@ -885,10 +889,9 @@ export class PageSession {
       isTranslatableTitle(this.document, this.settings.targetLanguage);
     if (!blocks.length && !hasTranslatableTitle) return;
     if (this.watchOnly) {
-      // The provider has not been prepared in watch-only mode. Starting here
-      // promotes the session exactly once; subsequent route rescans reuse the
-      // prepared provider and queue instead.
-      this.watchOnly = false;
+      // start() snapshots watchOnly before stop() clears it, preserving the
+      // unprepared provider during this one-time promotion. Subsequent route
+      // rescans reuse the prepared provider and queue instead.
       void this.start();
       return;
     }

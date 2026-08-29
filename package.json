@@ -7,7 +7,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build && vite build --config vite.content.config.js",
+    "build": "TRANSLIGHT_BUILD_MODE=production npm run build:extension",
+    "build:test": "TRANSLIGHT_BUILD_MODE=test npm run build:extension",
+    "build:extension": "vite build && vite build --config vite.content.config.js",
     "benchmark:collector": "node tests/benchmarks/block-collector-visibility.mjs",
     "icons:active": "node scripts/create-active-icons.mjs",
     "package": "bash pack.sh --minify",

@@ -30,6 +30,32 @@ runner auto-detects Chrome for Testing or Chromium; pass
 `--chrome=/path/to/browser` when it is installed elsewhere. A temporary Chrome
 profile is removed after the run unless `--keep-profile` is supplied.
 
+To run the deterministic packaged-extension CFT coverage, use the local
+Metacritic-shaped fixture with the test-only provider:
+
+```bash
+npm run test:metacritic:chrome -- \
+  --provider=dummy \
+  --dummy-profile=normal \
+  --dummy-delay-ms=69 \
+  --scenario=navigation \
+  --url=http://127.0.0.1:5173/tests/fixtures/metacritic-cft.html \
+  --chrome="/path/to/Google Chrome for Testing"
+```
+
+The runner verifies the extension service worker's test-build marker before
+configuring dummy mode and verifies that the loaded build SHA and clean-build
+state match the checkout in local launch mode. A dirty tracked file or
+non-ignored untracked input blocks commit-verified validation; ignored files
+are excluded. This scenario invokes the real toolbar-action seam,
+checks dummy output and incremental mutation discovery, forces a pending-work
+OFF → ON restart, drives navigation and browser Back, checks document/session
+state and duplicate source ids, compares fixture geometry to its pre-translation
+baseline during rendering and cleanup, probes page-realm isolation, and applies
+the responsiveness/CPU recovery gates. The fixture's route pages are
+`metacritic-cft.html` and `metacritic-cft-detail.html`; they contain no direct
+PageSession or provider mock.
+
 To drive an already running dedicated Chrome for Testing profile, start it with
 remote debugging enabled and then attach the runner:
 
@@ -51,6 +77,10 @@ toolbar action path, and never kills the attached browser. Use a dedicated
 profile; the runner may temporarily enable same-site continuation for the
 navigation scenario and restores that setting afterward. Pass
 `--browser-pid=<pid>` when CPU sampling is required in attach mode.
+Launch results use the loaded extension build SHA as `testedCommit`; attach
+results do not claim checkout verification when the loaded build is older,
+dirty, or does not expose a SHA. The loaded build's `dirty` state and the
+checkout's `checkoutDirty` state are recorded in the result artifact.
 The attached browser must already have Translight loaded; use a
 Translator-capable Chrome profile when the run requires real translation.
 Performance validation records eight timer-driven samples at the 250 ms

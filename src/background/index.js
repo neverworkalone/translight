@@ -15,9 +15,13 @@ import {
   documentUrlForUrl,
   isNavigationStateCurrent
 } from './navigation.js';
+import {BUILD_INFO, IS_TEST_BUILD} from '../build-info.js';
 
 const STORAGE_KEY = 'translight.tabStates';
+const TEST_PROVIDER_STORAGE_KEY = 'translight.testProvider';
 export const TEST_HARNESS_KEY = '__translight_test_harness__';
+const DEFAULT_DUMMY_DELAY_MS = 69;
+const DUMMY_PROFILES = new Set(['normal', 'expanded']);
 const DEFAULT_ICON_PATHS = Object.freeze({
   16: 'icon16.png',
   32: 'icon32.png',
@@ -54,6 +58,7 @@ const ERROR_MESSAGE_KEYS = Object.freeze({
 let tabStates = {};
 let generationSequence = Date.now();
 const tabOperationChains = new Map();
+let testProviderConfig = null;
 // Full document URLs are only needed to identify a late loading event. Keep
 // them out of persisted tab state because URLs may contain private paths or
 // query parameters.
@@ -63,6 +68,51 @@ const documentUrls = new Map();
 // cannot stop or restart the live session after a newer route has won.
 const latestContentRoutes = new Map();
 
+function testBuildRequiredError() {
+  const error = new Error('Dummy translation requires an extension built with npm run build:test.');
+  error.code = 'TEST_BUILD_REQUIRED';
+  return error;
+}
+
+function normalizeTestProviderConfig({provider = 'dummy', profile = 'normal', delayMs = DEFAULT_DUMMY_DELAY_MS} = {}) {
+  if (!IS_TEST_BUILD) throw testBuildRequiredError();
+  if (provider !== 'dummy') {
+    const error = new Error('The CFT test harness only supports the dummy provider.');
+    error.code = 'UNSUPPORTED_PROVIDER';
+    throw error;
+  }
+  if (!DUMMY_PROFILES.has(profile)) {
+    const error = new Error('Dummy translation profile must be normal or expanded.');
+    error.code = 'INVALID_CONFIGURATION';
+    throw error;
+  }
+  if (!Number.isInteger(delayMs) || delayMs < 0) {
+    const error = new Error('Dummy translation delay must be an integer >= 0.');
+    error.code = 'INVALID_CONFIGURATION';
+    throw error;
+  }
+  return Object.freeze({type: provider, profile, delayMs});
+}
+
+async function configureTestProvider(options) {
+  const nextConfig = normalizeTestProviderConfig(options);
+  await ready;
+  testProviderConfig = nextConfig;
+  const storage = getSessionStorage();
+  await storage?.set?.({[TEST_PROVIDER_STORAGE_KEY]: {...testProviderConfig}});
+  return {...testProviderConfig};
+}
+
+async function clearTestProvider() {
+  await ready;
+  testProviderConfig = null;
+  await getSessionStorage()?.remove?.(TEST_PROVIDER_STORAGE_KEY);
+}
+
+function providerMessageFields() {
+  return testProviderConfig ? {testProvider: {...testProviderConfig}} : {};
+}
+
 function getSessionStorage() {
   return globalThis.chrome?.storage?.session ?? null;
 }
@@ -71,8 +121,19 @@ async function hydrate() {
   const storage = getSessionStorage();
   if (!storage?.get) return;
   try {
-    const result = await storage.get(STORAGE_KEY);
+    const result = await storage.get([STORAGE_KEY, TEST_PROVIDER_STORAGE_KEY]);
     tabStates = normalizeTabStates(result?.[STORAGE_KEY]);
+    if (IS_TEST_BUILD && result?.[TEST_PROVIDER_STORAGE_KEY]) {
+      try {
+        testProviderConfig = normalizeTestProviderConfig({
+          provider: result[TEST_PROVIDER_STORAGE_KEY].type,
+          profile: result[TEST_PROVIDER_STORAGE_KEY].profile,
+          delayMs: result[TEST_PROVIDER_STORAGE_KEY].delayMs
+        });
+      } catch {
+        testProviderConfig = null;
+      }
+    }
     await Promise.all(Object.keys(tabStates).map((tabId) => refreshAction(Number(tabId), tabStates[tabId])));
   } catch {
     tabStates = {};
@@ -289,6 +350,7 @@ async function startTranslation(tab, {
         type: 'TRANSLATION_START',
         generation,
         activation,
+        ...providerMessageFields(),
         ...(targetDocumentToken != null ? {documentToken: targetDocumentToken} : {}),
         ...(Number.isInteger(routeGeneration) ? {routeGeneration} : {})
       },
@@ -673,6 +735,9 @@ const ready = hydrate();
 Object.defineProperty(globalThis, TEST_HARNESS_KEY, {
   configurable: true,
   value: Object.freeze({
+    getBuildInfo: () => ({...BUILD_INFO}),
+    configureProvider: (options) => configureTestProvider(options),
+    clearProvider: () => clearTestProvider(),
     toggle: (tabId) => enqueueTabOperation(tabId, async () => {
       const tab = await chrome.tabs.get(tabId);
       return handleAction(tab);

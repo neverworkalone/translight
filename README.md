@@ -48,6 +48,51 @@ npm install
 npm run build
 ```
 
+### Run CFT regression tests without the Translator model
+
+Build the dedicated test extension and run the packaged-extension navigation
+scenario in Chrome for Testing:
+
+```bash
+npm run build:test
+npm run test:metacritic:chrome -- \
+  --provider=dummy \
+  --dummy-profile=normal \
+  --dummy-delay-ms=69 \
+  --scenario=navigation
+```
+
+The runner also invokes `npm run build:test` automatically unless
+`--skip-build` is supplied. It verifies the loaded service worker's test-build
+marker before enabling the dummy provider. Local commit verification also
+requires both the loaded bundle and the current checkout to be clean; tracked
+changes and non-ignored untracked inputs block the run, while ignored build
+artifacts do not. Use `--dummy-profile=expanded` to exercise wrapping and
+overflow with deterministic output, and pass
+`--chrome=/path/to/Chrome for Testing` when the binary is not in the default
+locations. Results are written to `artifacts/metacritic-chrome/result.json`.
+
+The dummy mode exercises extension action/background/content/`PageSession`/
+queue/provider/renderer, mutation discovery, navigation and Back, OFF → ON,
+cleanup, baseline geometry checks during incremental rendering, and
+responsiveness. It does not test Translator API availability, model
+preparation/download, API errors, or translation quality.
+
+For Translator API validation, keep the real provider path:
+
+```bash
+npm run build
+npm run test:metacritic:chrome -- \
+  --provider=real \
+  --scenario=gallery \
+  --chrome=/path/to/attached-or-test-Chromium
+```
+
+An attached browser may be used with `--debugging-port`, `--profile-dir`, and
+`--browser-pid` according to the runner help. Dummy selection is rejected by a
+production build, is not a setting or options-page feature, and has no page
+`postMessage` or query-parameter activation path.
+
 ### Run tests and checks
 
 ```bash

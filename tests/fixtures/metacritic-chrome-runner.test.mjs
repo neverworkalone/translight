@@ -3,12 +3,131 @@ import {
   ProcessSampler,
   evaluateCpuRecovery,
   evaluateResponsiveness,
+  finalizeLayoutReport,
   parseArgs,
+  resolveTestedCommit,
   summarizePageSamples,
   summarizeRecoveryResponsiveness
 } from './metacritic-chrome-runner.mjs';
 
 describe('Metacritic Chrome runner', () => {
+  it('fails when a fixture geometry snapshot exceeds its tolerance', () => {
+    const report = finalizeLayoutReport({
+      supported: true,
+      tolerancePx: 1,
+      baseline: [{selector: '#root', x: 10, width: 100}],
+      snapshots: [{
+        label: 'incremental',
+        snapshot: [{selector: '#root', x: 12, width: 100}]
+      }]
+    });
+
+    expect(report.pass).toBe(false);
+    expect(report.failures).toEqual([{
+      label: 'incremental',
+      selector: '#root',
+      property: 'x',
+      expected: 10,
+      actual: 12
+    }]);
+  });
+
+  it('parses explicit dummy provider settings', () => {
+    expect(parseArgs([
+      '--provider=dummy',
+      '--dummy-profile=expanded',
+      '--dummy-delay-ms=37',
+      '--cycles=2'
+    ])).toMatchObject({
+      provider: 'dummy',
+      dummyProfile: 'expanded',
+      dummyDelayMs: 37,
+      cycles: 2
+    });
+  });
+
+  it('rejects invalid dummy provider settings', () => {
+    expect(() => parseArgs(['--provider=mock'])).toThrow(/--provider must be real or dummy/u);
+    expect(() => parseArgs(['--dummy-profile=short'])).toThrow(/--dummy-profile must be normal or expanded/u);
+    expect(() => parseArgs(['--dummy-delay-ms=-1'])).toThrow(/--dummy-delay-ms must be an integer/u);
+  });
+
+  it('rejects a stale extension bundle in local launch mode', () => {
+    const checkoutCommit = 'b'.repeat(40);
+    const loadedCommit = 'a'.repeat(40);
+
+    expect(() => resolveTestedCommit({
+      loadedBuild: {commit: loadedCommit, dirty: false},
+      checkoutCommit,
+      checkoutDirty: false,
+      attachMode: false
+    })).toThrow(new RegExp(`does not match checkout HEAD ${checkoutCommit}`, 'u'));
+  });
+
+  it('marks a matching local launch bundle commit as verified', () => {
+    const commit = 'a'.repeat(40);
+
+    expect(resolveTestedCommit({
+      loadedBuild: {commit, dirty: false},
+      checkoutCommit: commit,
+      checkoutDirty: false,
+      attachMode: false
+    })).toEqual({
+      testedCommit: commit,
+      testedCommitSource: 'loaded-extension-build',
+      testedCommitVerified: true,
+      testedCommitAvailable: true
+    });
+  });
+
+  it('uses the loaded extension commit for attach mode without claiming checkout verification', () => {
+    const loadedCommit = 'a'.repeat(40);
+    const result = resolveTestedCommit({
+      loadedBuild: {commit: loadedCommit, dirty: true},
+      checkoutCommit: 'b'.repeat(40),
+      checkoutDirty: true,
+      attachMode: true
+    });
+
+    expect(result).toEqual({
+      testedCommit: loadedCommit,
+      testedCommitSource: 'loaded-extension-build',
+      testedCommitVerified: false,
+      testedCommitAvailable: true
+    });
+  });
+
+  it('rejects a launch bundle that has no valid build commit', () => {
+    expect(() => resolveTestedCommit({
+      loadedBuild: {kind: 'test', testBuild: true, commit: 'unknown'},
+      checkoutCommit: 'b'.repeat(40),
+      checkoutDirty: false,
+      attachMode: false
+    })).toThrow(/does not report a valid build commit/u);
+  });
+
+  it('blocks a local launch when the loaded extension bundle is dirty', () => {
+    const commit = 'a'.repeat(40);
+
+    expect(() => resolveTestedCommit({
+      loadedBuild: {commit, dirty: true},
+      checkoutCommit: commit,
+      checkoutDirty: false,
+      attachMode: false
+    })).toThrow(/loaded extension build is dirty/u);
+  });
+
+  it('blocks a local launch when the current checkout is dirty', () => {
+    const commit = 'a'.repeat(40);
+
+    expect(() => resolveTestedCommit({
+      loadedBuild: {commit, dirty: false},
+      checkoutCommit: commit,
+      checkoutDirty: true,
+      attachMode: false
+    })).toThrow(/current checkout is dirty/u);
+  });
+
   it('parses persistent attach mode without changing the selected scenario URL', () => {
     expect(parseArgs([
       '--scenario=navigation',
