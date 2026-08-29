@@ -173,3 +173,14 @@ Clearly distinguish between:
 Passing the full automated test suite alone does NOT prove that the reported user-visible issue is resolved.
 
 Do not report results from an older commit or patch state as validation of the latest change.
+
+## Review Feedback
+
+When asked to check PR review comments, evaluate the feedback rather than merely summarizing it: fix findings you agree with, and explain your reasoning when you disagree.
+
+* Read all current review comments and threads.
+* Evaluate each comment against the current code and PR head.
+* If you agree with the finding, fix it and run the relevant validation.
+* If you disagree, explain why with concrete technical reasoning instead of changing the code.
+* Push confirmed fixes to the existing PR.
+* DO NOT self-review or merge the PR unless explicitly asked.

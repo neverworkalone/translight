@@ -525,6 +525,179 @@ describe('PageSession', () => {
     expect(description.querySelector('translight-translation')).toBeNull();
   });
 
+  it('keeps nested inline residual paragraphs across a session restart', async () => {
+    document.body.innerHTML = '<p id="description">This introduction explains the hotel location.<span><b>Facilities: </b>Guests can use the hotel swimming pool.\n\n<b>Rooms: </b>Each room has a balcony with sea views.</span> This final note explains the cancellation policy.</p>';
+    const description = document.querySelector('#description');
+    const originalDescription = description.innerHTML;
+    const expectedTexts = [
+      'This introduction explains the hotel location.',
+      'Facilities: Guests can use the hotel swimming pool.',
+      'Rooms: Each room has a balcony with sea views.',
+      'This final note explains the cancellation policy.'
+    ];
+    const calls = [];
+    const session = new PageSession({
+      generation: 609,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+    const expectRendered = () => {
+      const segments = Array.from(description.querySelectorAll(SEGMENT_SELECTOR));
+      const translations = Array.from(description.querySelectorAll('translight-translation'));
+      expect(segments.map((segment) => segment.textContent.trim())).toEqual(expectedTexts);
+      expect(translations.map((translation) => translation.textContent.replace(/^ko:/, '').trim()))
+        .toEqual(expectedTexts);
+      expect(segments).toHaveLength(expectedTexts.length);
+      expect(translations).toHaveLength(expectedTexts.length);
+      expect(segments.every((segment) =>
+        segment.nextElementSibling?.matches('translight-translation')
+      )).toBe(true);
+    };
+
+    try {
+      await session.start();
+      expect(calls).toEqual(expectedTexts);
+      expectRendered();
+
+      session.stop({notify: false});
+      expect(description.innerHTML).toBe(originalDescription);
+      expect(description.querySelector(SEGMENT_SELECTOR)).toBeNull();
+      expect(description.querySelector('translight-translation')).toBeNull();
+
+      await session.start();
+      expectRendered();
+      expect(calls).toEqual(expectedTexts);
+    } finally {
+      session.stop({notify: false});
+    }
+
+    expect(description.innerHTML).toBe(originalDescription);
+    expect(description.querySelector(SEGMENT_SELECTOR)).toBeNull();
+    expect(description.querySelector('translight-translation')).toBeNull();
+  });
+
+  it('keeps partially split nested inline labels across a session restart', async () => {
+    document.body.innerHTML = '<p id="description">Opening hotel description has enough English words. <span><b>Facilities: </b>Guests can use the hotel swimming pool.\n\nGuests can also use the hotel spa. <b>Rooms: </b>Each room has a balcony with sea views.</span> Final cancellation policy has enough English words.</p>';
+    const description = document.querySelector('#description');
+    const originalDescription = description.innerHTML;
+    const expectedTexts = [
+      'Opening hotel description has enough English words.',
+      'Facilities: Guests can use the hotel swimming pool.',
+      'Guests can also use the hotel spa. Rooms: Each room has a balcony with sea views.',
+      'Final cancellation policy has enough English words.'
+    ];
+    const calls = [];
+    const session = new PageSession({
+      generation: 610,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+    const expectRendered = () => {
+      const segments = Array.from(description.querySelectorAll(SEGMENT_SELECTOR));
+      const translations = Array.from(description.querySelectorAll('translight-translation'));
+      expect(segments.map((segment) => segment.textContent.trim())).toEqual(expectedTexts);
+      expect(translations.map((translation) => translation.textContent.replace(/^ko:/, '').trim()))
+        .toEqual(expectedTexts);
+      expect(segments).toHaveLength(expectedTexts.length);
+      expect(translations).toHaveLength(expectedTexts.length);
+      expect(segments.every((segment) =>
+        segment.nextElementSibling?.matches('translight-translation')
+      )).toBe(true);
+    };
+
+    try {
+      await session.start();
+      expect(calls).toEqual(expectedTexts);
+      expectRendered();
+
+      session.stop({notify: false});
+      expect(description.innerHTML).toBe(originalDescription);
+      expect(description.querySelector(SEGMENT_SELECTOR)).toBeNull();
+      expect(description.querySelector('translight-translation')).toBeNull();
+
+      await session.start();
+      expect(calls).toEqual(expectedTexts);
+      expectRendered();
+    } finally {
+      session.stop({notify: false});
+    }
+
+    expect(description.innerHTML).toBe(originalDescription);
+    expect(description.querySelector(SEGMENT_SELECTOR)).toBeNull();
+    expect(description.querySelector('translight-translation')).toBeNull();
+  });
+
+  it('cleans up ancestor and descendant newline segments across a session restart', async () => {
+    document.body.innerHTML = '<p id="description">Opening hotel description has enough English words.\n\n<b>Facilities: </b><span>Guests can use the hotel swimming pool.\n\nGuests can also use the hotel spa.</span> Final cancellation policy has enough English words.</p>';
+    const description = document.querySelector('#description');
+    const originalDescription = description.innerHTML;
+    const expectedTexts = [
+      'Opening hotel description has enough English words.',
+      'Facilities:',
+      'Guests can use the hotel swimming pool.',
+      'Guests can also use the hotel spa.',
+      'Final cancellation policy has enough English words.'
+    ];
+    const calls = [];
+    const session = new PageSession({
+      generation: 611,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+    const expectRendered = () => {
+      const segments = Array.from(description.querySelectorAll(SEGMENT_SELECTOR));
+      const translations = Array.from(description.querySelectorAll('translight-translation'));
+      expect(segments.map((segment) => segment.textContent.trim())).toEqual(expectedTexts);
+      expect(translations.map((translation) => translation.textContent.replace(/^ko:/, '').trim()))
+        .toEqual(expectedTexts);
+      expect(segments).toHaveLength(expectedTexts.length);
+      expect(translations).toHaveLength(expectedTexts.length);
+      expect(segments.every((segment) =>
+        segment.querySelector(SEGMENT_SELECTOR) === null &&
+        segment.nextElementSibling?.matches('translight-translation')
+      )).toBe(true);
+    };
+
+    try {
+      await session.start();
+      expect(calls).toEqual(expectedTexts);
+      expectRendered();
+
+      session.stop({notify: false});
+      expect(description.innerHTML).toBe(originalDescription);
+      expect(description.querySelector(SEGMENT_SELECTOR)).toBeNull();
+      expect(description.querySelector('translight-translation')).toBeNull();
+
+      await session.start();
+      expect(calls).toEqual(expectedTexts);
+      expectRendered();
+    } finally {
+      session.stop({notify: false});
+    }
+
+    expect(description.innerHTML).toBe(originalDescription);
+    expect(description.querySelector(SEGMENT_SELECTOR)).toBeNull();
+    expect(description.querySelector('translight-translation')).toBeNull();
+  });
+
   it('keeps Goodreads translations after source paragraphs through nested inline wrappers', async () => {
     document.body.innerHTML = '<div id="review-text"><span class="outer-one">Introductory outer text has enough English words.<span class="outer-two">Introductory inner text has enough English words.<span class="Formatted">First review paragraph has enough English text.<br><br>Second review paragraph has enough English text.</span>Concluding inner text has enough English words.</span>Concluding outer text has enough English words.</span></div>';
     const reviewText = document.querySelector('#review-text');
