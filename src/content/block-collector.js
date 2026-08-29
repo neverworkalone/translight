@@ -18,6 +18,7 @@ const NAVIGATION_SELECTOR = [
   '.MainNavigation'
 ].join(',');
 const PSNPROFILES_SHELL_SELECTOR = '#header,#banner';
+const PSNPROFILES_TOC_ITEM_SELECTOR = '.tableofcontents li';
 const LINK_RATIO_LIMIT = 0.65;
 const DOUBLE_LINE_BREAK_PATTERN = /\r?\n[ \t\f]*(?:\r?\n)+/;
 const SOURCE_ID_ATTRIBUTE = 'data-translight-source-id';
@@ -156,8 +157,7 @@ function isNavigationLike(element, text) {
     // banner and moves its title out of the viewport, so keep that chrome in
     // its native layout while translating the guide body below it.
     if (root?.querySelector?.('#header .navigation') &&
-        root.querySelector?.('#banner .guide-info') &&
-        root.querySelector?.('#content.page')) return true;
+        root.querySelector?.('#banner .guide-info')) return true;
   }
   // Figure captions commonly link to the referenced films, but the links are
   // part of the caption content rather than a navigation list.
@@ -238,6 +238,13 @@ function createSegmentWrapper(element) {
   const wrapper = element.ownerDocument.createElement('span');
   wrapper.setAttribute(SEGMENT_ATTRIBUTE, 'true');
   wrapper.setAttribute(SEGMENT_ID_ATTRIBUTE, `source-${++sourceSequence}`);
+  // PSNProfiles uses spans for trophy icons and constrains every span inside
+  // its table of contents to a 14px absolute box. The generated source
+  // wrapper is only a segmentation boundary, so let the original link keep
+  // the list item's layout while retaining the wrapper for bookkeeping.
+  if (element.closest?.(PSNPROFILES_TOC_ITEM_SELECTOR)) {
+    wrapper.style.setProperty('display', 'contents', 'important');
+  }
   return wrapper;
 }
 

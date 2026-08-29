@@ -91,6 +91,56 @@ describe('collectTranslationBlocks', () => {
     ]);
   });
 
+  it('keeps PSNProfiles shell chrome out while the guide body is still mounting', () => {
+    document.body.innerHTML = `
+      <div id="header">
+        <div class="navigation"><a href="/guides">Guides</a></div>
+      </div>
+      <div id="banner">
+        <div class="guide-info">
+          <h3>Beyond: Two Souls Trophy Guide</h3>
+        </div>
+      </div>
+      <p>Guide body remains translatable.</p>
+    `;
+
+    expect(collectTranslationBlocks(document.body).map((block) => block.text)).toEqual([
+      'Guide body remains translatable.'
+    ]);
+  });
+
+  it('does not let PSNProfiles TOC segmentation wrappers hide the source link', () => {
+    document.head.innerHTML = `
+      <style>
+        .tableofcontents li span {
+          position: absolute;
+          height: 12px;
+          width: 14px;
+          margin: 8px;
+          overflow: hidden;
+          white-space: nowrap;
+        }
+      </style>
+    `;
+    document.body.innerHTML = `
+      <ul class="nav tableofcontents zebra">
+        <li id="source" class="ellipsis">
+          <span class="icon-sprite bronze"></span>
+
+          <a href="#source">Somebody Else?</a>
+        </li>
+      </ul>
+    `;
+
+    const blocks = collectTranslationBlocks(document.body);
+    const source = blocks.find((block) => block.text === 'Somebody Else?')?.element;
+
+    expect(source?.matches('[data-translight-segment="true"]')).toBe(true);
+    expect(source?.style.getPropertyValue('display')).toBe('contents');
+    expect(source?.style.getPropertyPriority('display')).toBe('important');
+    expect(source?.querySelector('a')?.textContent).toBe('Somebody Else?');
+  });
+
   it.each(['has-navigation', 'layout-with-navigation', 'AppWithNavigation'])
     ('does not treat ordinary layout class %s as a navigation container', (className) => {
       document.body.innerHTML = `
