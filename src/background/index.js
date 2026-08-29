@@ -17,6 +17,7 @@ import {
 } from './navigation.js';
 
 const STORAGE_KEY = 'translight.tabStates';
+export const TEST_HARNESS_KEY = '__translight_test_harness__';
 const DEFAULT_ICON_PATHS = Object.freeze({
   16: 'icon16.png',
   32: 'icon32.png',
@@ -57,6 +58,10 @@ const tabOperationChains = new Map();
 // them out of persisted tab state because URLs may contain private paths or
 // query parameters.
 const documentUrls = new Map();
+// Route messages can be queued while the user goes back/forward again. Keep
+// only the newest generation for the current document so an older route
+// cannot stop or restart the live session after a newer route has won.
+const latestContentRoutes = new Map();
 
 function getSessionStorage() {
   return globalThis.chrome?.storage?.session ?? null;
@@ -93,6 +98,28 @@ function rememberDocumentUrl(tabId, url) {
   const documentUrl = documentUrlForUrl(url);
   if (documentUrl) documentUrls.set(String(tabId), documentUrl);
   return documentUrl;
+}
+
+function rememberContentRoute(tabId, message) {
+  if (!Number.isInteger(message?.routeGeneration) || !message?.documentToken) return;
+  const state = getState(tabId);
+  if (state.documentToken && state.documentToken !== message.documentToken) return;
+  const key = String(tabId);
+  const current = latestContentRoutes.get(key);
+  if (!current || current.documentToken !== message.documentToken ||
+      message.routeGeneration > current.routeGeneration) {
+    latestContentRoutes.set(key, {
+      documentToken: message.documentToken,
+      routeGeneration: message.routeGeneration
+    });
+  }
+}
+
+function isLatestContentRoute(tabId, message) {
+  if (!Number.isInteger(message?.routeGeneration)) return true;
+  const current = latestContentRoutes.get(String(tabId));
+  return !current || current.documentToken !== message.documentToken ||
+    message.routeGeneration >= current.routeGeneration;
 }
 
 function enqueueTabOperation(tabId, operation) {
@@ -171,23 +198,25 @@ async function sendContentMessage(tabId, message, {allowInjection = false} = {})
   }
 }
 
-async function sendStopMessage(tabId, generation) {
+async function sendStopMessage(tabId, generation, documentToken) {
   try {
     const message = {type: 'TRANSLATION_STOP'};
     if (Number.isInteger(generation)) message.generation = generation;
+    if (documentToken != null) message.documentToken = documentToken;
     await chrome.tabs.sendMessage(tabId, message);
   } catch {
     // Navigation may have already destroyed the content page.
   }
 }
 
-async function sendRouteDecision(tabId, routeGeneration, continueTranslation) {
+async function sendRouteDecision(tabId, routeGeneration, continueTranslation, documentToken) {
   if (!Number.isInteger(routeGeneration)) return;
   try {
     await chrome.tabs.sendMessage(tabId, {
       type: 'TRANSLATION_ROUTE',
       routeGeneration,
-      continueTranslation: continueTranslation === true
+      continueTranslation: continueTranslation === true,
+      ...(documentToken != null ? {documentToken} : {})
     });
   } catch {
     // The content page may disappear while the background is deciding policy.
@@ -229,9 +258,10 @@ async function startTranslation(tab, {
   if (typeof tabId !== 'number') return;
 
   const current = getState(tabId);
-  const isNewDocument = documentToken != null &&
+  const targetDocumentToken = documentToken ?? current.documentToken;
+  const isNewDocument = targetDocumentToken != null &&
     current.documentToken != null &&
-    current.documentToken !== documentToken;
+    current.documentToken !== targetDocumentToken;
   const autoTranslateSuppressed = isNewDocument ? false : current.autoTranslateSuppressed;
   if (activation === TAB_ACTIVATION.AUTO && autoTranslateSuppressed) return;
   const generation = nextGeneration();
@@ -242,7 +272,7 @@ async function startTranslation(tab, {
     activation,
     origin: originForUrl(url) || current.origin,
     hostname: hostnameForUrl(url) || current.hostname,
-    documentToken: documentToken ?? current.documentToken,
+    documentToken: targetDocumentToken,
     autoTranslateSuppressed: activation === TAB_ACTIVATION.MANUAL
       ? false
       : autoTranslateSuppressed,
@@ -259,6 +289,7 @@ async function startTranslation(tab, {
         type: 'TRANSLATION_START',
         generation,
         activation,
+        ...(targetDocumentToken != null ? {documentToken: targetDocumentToken} : {}),
         ...(Number.isInteger(routeGeneration) ? {routeGeneration} : {})
       },
       {allowInjection: activation === TAB_ACTIVATION.MANUAL}
@@ -289,7 +320,8 @@ async function stopTranslation(tabId, state, {suppressAutomatic = false} = {}) {
   try {
     await sendContentMessage(tabId, {
       type: 'TRANSLATION_STOP',
-      generation: state.generation
+      generation: state.generation,
+      ...(state.documentToken != null ? {documentToken: state.documentToken} : {})
     });
   } catch {
     // Keep the background state OFF when the page is gone or the content script cannot run.
@@ -299,13 +331,14 @@ async function stopTranslation(tabId, state, {suppressAutomatic = false} = {}) {
 async function handleAction(tab) {
   await ready;
   const tabId = tab?.id;
-  if (typeof tabId !== 'number') return;
+  if (typeof tabId !== 'number') return null;
   const state = getState(tabId);
   if (isBusyOrActive(state)) {
     await stopTranslation(tabId, state, {suppressAutomatic: true});
   } else {
     await startTranslation(tab);
   }
+  return {...getState(tabId)};
 }
 
 async function handleTranslationStatus(message, sender) {
@@ -364,7 +397,7 @@ async function handleContentReady(message, sender) {
     rememberDocumentUrl(tabId, url);
     return;
   }
-  if (state.documentToken === message.documentToken && message.contentSessionActive === true &&
+  if (!isResume && state.documentToken === message.documentToken && message.contentSessionActive === true &&
       (isBusyOrActive(state) || state.status === TAB_STATUS.SKIPPED)) {
     rememberDocumentUrl(tabId, url);
     return;
@@ -388,7 +421,7 @@ async function handleContentReady(message, sender) {
       errorCode: null,
       errorMessage: null
     });
-    await sendStopMessage(tabId, resumedGeneration);
+    await sendStopMessage(tabId, resumedGeneration, message.documentToken);
     return;
   }
   if (hasResumedContentSession && navigation.translate && resumedGeneration != null) {
@@ -511,11 +544,12 @@ async function handleContentNavigation(message, sender) {
 
   let state = getState(tabId);
   if (state.documentToken && state.documentToken !== message.documentToken) return;
+  if (!isLatestContentRoute(tabId, message)) return;
   if (state.autoTranslateSuppressed) {
     const currentUrl = documentUrlForUrl(message.url);
     const suppressedUrl = documentUrls.get(String(tabId));
     if (!suppressedUrl || currentUrl === suppressedUrl) {
-      await sendRouteDecision(tabId, message.routeGeneration, false);
+      await sendRouteDecision(tabId, message.routeGeneration, false, message.documentToken);
       return;
     }
     state = await setState(tabId, {autoTranslateSuppressed: false});
@@ -531,7 +565,7 @@ async function handleContentNavigation(message, sender) {
   });
 
   if (!navigation.translate) {
-    await sendRouteDecision(tabId, message.routeGeneration, false);
+    await sendRouteDecision(tabId, message.routeGeneration, false, message.documentToken);
     if (state.status !== TAB_STATUS.OFF || state.activation != null || state.documentToken != null) {
       await stopTranslation(tabId, state);
     }
@@ -541,7 +575,7 @@ async function handleContentNavigation(message, sender) {
   // SKIPPED is a live watch-only PageSession. Keep it alive so the content
   // layer can prepare the provider only when the new route yields English.
   if (isBusyOrActive(state) || state.status === TAB_STATUS.SKIPPED) {
-    await sendRouteDecision(tabId, message.routeGeneration, true);
+    await sendRouteDecision(tabId, message.routeGeneration, true, message.documentToken);
     return;
   }
 
@@ -561,8 +595,18 @@ async function handleTabUpdated(tabId, changeInfo) {
   let state = getState(tabId);
   const initialGeneration = state.generation;
   const initialDocumentToken = state.documentToken;
-  let url = changeInfo.url || '';
-  if (!url && chrome.tabs?.get) {
+  const eventUrl = changeInfo.url || '';
+  let url = eventUrl;
+  if (state.documentToken && chrome.tabs?.get) {
+    try {
+      const currentTabUrl = (await chrome.tabs.get(tabId))?.url || '';
+      if (eventUrl && currentTabUrl &&
+          documentUrlForUrl(eventUrl) !== documentUrlForUrl(currentTabUrl)) return;
+      if (!url) url = currentTabUrl;
+    } catch {
+      // Fall back to the event URL when the tab disappears during navigation.
+    }
+  } else if (!url && chrome.tabs?.get) {
     try {
       url = (await chrome.tabs.get(tabId))?.url || '';
     } catch {
@@ -578,6 +622,14 @@ async function handleTabUpdated(tabId, changeInfo) {
   )) return;
   state = latestState;
 
+  if (state.documentToken &&
+      documentUrls.get(String(tabId)) === documentUrlForUrl(url)) {
+    // The current document already reported this URL. The loading event is a
+    // late duplicate, including hash-only updates, so CONTENT_READY and the
+    // content route watcher remain the owners of the live session.
+    return;
+  }
+
   const navigation = classifyNavigation({
     state,
     url,
@@ -585,14 +637,6 @@ async function handleTabUpdated(tabId, changeInfo) {
     autoTranslateSameSite: settings.autoTranslateSameSite
   });
   if (navigation.translate) {
-    const documentUrl = documentUrlForUrl(url);
-    if (state.documentToken && documentUrls.get(String(tabId)) === documentUrl) {
-      // Let CONTENT_READY own the hand-off when it already reached this
-      // document. A loading event can be delivered after the new content
-      // script has reported ready; resetting the state here would invalidate
-      // the new session and leave the action icon in its default state.
-      return;
-    }
     if (state.activation == null && state.status === TAB_STATUS.OFF &&
         state.documentToken == null && !state.autoTranslateSuppressed) return;
 
@@ -604,7 +648,7 @@ async function handleTabUpdated(tabId, changeInfo) {
       hostname: navigation.hostname || state.hostname
     });
     documentUrls.delete(String(tabId));
-    await sendStopMessage(tabId, state.generation);
+    if (initialDocumentToken == null) await sendStopMessage(tabId, state.generation, state.documentToken);
     return;
   }
   const loadingState = createLoadingStatePatch(state, nextGeneration());
@@ -617,10 +661,25 @@ async function handleTabUpdated(tabId, changeInfo) {
     hostname: hostnameForUrl(url) || null
   });
   documentUrls.delete(String(tabId));
-  await sendStopMessage(tabId, state.generation);
+  if (initialDocumentToken == null) await sendStopMessage(tabId, state.generation, state.documentToken);
 }
 
 const ready = hydrate();
+
+// The Chrome runner uses this service-worker-only seam to invoke the same
+// queued action path as a toolbar click. It is not visible to page or content
+// script realms and exposes no operation other than toggling one tab and
+// reading its resulting state.
+Object.defineProperty(globalThis, TEST_HARNESS_KEY, {
+  configurable: true,
+  value: Object.freeze({
+    toggle: (tabId) => enqueueTabOperation(tabId, async () => {
+      const tab = await chrome.tabs.get(tabId);
+      return handleAction(tab);
+    }),
+    getState: (tabId) => ({...getState(tabId)})
+  })
+});
 
 async function syncAutomaticTranslationRules() {
   if (!chrome.tabs?.query) return;
@@ -679,6 +738,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
     void enqueueTabOperation(tabId, () => handleContentRulesChanged(message, sender));
   }
   if (message?.type === 'CONTENT_NAVIGATION' && typeof tabId === 'number') {
+    rememberContentRoute(tabId, message);
     void enqueueTabOperation(tabId, () => handleContentNavigation(message, sender));
   }
   return false;
@@ -693,5 +753,6 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   tabStates = removeTabState(tabStates, tabId);
   tabOperationChains.delete(String(tabId));
   documentUrls.delete(String(tabId));
+  latestContentRoutes.delete(String(tabId));
   void persist();
 });

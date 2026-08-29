@@ -50,11 +50,60 @@ describe('content controller initialization', () => {
     runtime.listeners[0]({
       type: 'TRANSLATION_ROUTE',
       routeGeneration: 1,
-      continueTranslation: true
+      continueTranslation: true,
+      documentToken: first.documentToken
     }, {}, () => {});
     expect(sessions[0].applyRouteDecision).toHaveBeenCalledWith(expect.objectContaining({
       routeGeneration: 1,
       continueTranslation: true
     }));
+  });
+
+  it('does not stop a session belonging to a different document', async () => {
+    const runtime = makeRuntime();
+    const sessions = [];
+    const createSession = (options) => {
+      const session = {
+        generation: options.generation,
+        start: () => Promise.resolve(),
+        stop: vi.fn(),
+        applyRouteDecision: vi.fn()
+      };
+      sessions.push(session);
+      return session;
+    };
+
+    const controller = installContentController({runtime, createSession});
+    await runtime.listeners[0]({
+      type: 'TRANSLATION_START',
+      generation: 6,
+      documentToken: 'a-different-document'
+    }, {}, () => {});
+    expect(sessions).toHaveLength(0);
+
+    await runtime.listeners[0]({
+      type: 'TRANSLATION_START',
+      generation: 7,
+      documentToken: controller.documentToken
+    }, {}, () => {});
+    const session = sessions[0];
+    session.stop.mockClear();
+
+    runtime.listeners[0]({
+      type: 'TRANSLATION_STOP',
+      generation: 7,
+      documentToken: 'a-different-document'
+    }, {}, () => {});
+
+    expect(session.stop).not.toHaveBeenCalled();
+    expect(controller.currentSession).toBe(session);
+
+    runtime.listeners[0]({
+      type: 'TRANSLATION_ROUTE',
+      routeGeneration: 2,
+      continueTranslation: true,
+      documentToken: 'a-different-document'
+    }, {}, () => {});
+    expect(session.applyRouteDecision).not.toHaveBeenCalled();
   });
 });

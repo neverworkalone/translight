@@ -113,6 +113,131 @@ describe('PageSession', () => {
     expect(scheduleLayoutSync).not.toHaveBeenCalled();
   });
 
+  it('debounces repeated scroll reprioritization while the page is moving', async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '<p>Long page content that remains in the queue.</p>';
+    const session = new PageSession({
+      generation: 122,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider()
+    });
+
+    try {
+      await session.start();
+      const reprioritizeSpy = vi.spyOn(session.queue, 'reprioritize');
+      for (let index = 0; index < 8; index += 1) {
+        window.dispatchEvent(new Event('scroll'));
+        await vi.advanceTimersByTimeAsync(10);
+      }
+
+      expect(reprioritizeSpy).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(100);
+      expect(reprioritizeSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      session.stop({notify: false});
+      vi.useRealTimers();
+    }
+  });
+
+  it('pauses provider work while a BFCache document is hidden', async () => {
+    let resolveActive;
+    const calls = [];
+    document.body.innerHTML = `
+      <p>First hidden-document paragraph.</p>
+      <p>Second hidden-document paragraph.</p>
+    `;
+    const session = new PageSession({
+      generation: 123,
+      document,
+      settings: {translatePageTitle: false},
+      concurrency: 1,
+      provider: makeProvider({
+        translate: (text) => {
+          calls.push(text);
+          if (text === 'First hidden-document paragraph.') {
+            return new Promise((resolve) => { resolveActive = resolve; });
+          }
+          return Promise.resolve(`ko:${text}`);
+        }
+      })
+    });
+
+    const run = session.start();
+    try {
+      await wait(0);
+      session.pause();
+      resolveActive('ko:First hidden-document paragraph.');
+      await wait(0);
+      expect(calls).toEqual(['First hidden-document paragraph.']);
+      expect(session.queue.pending).toHaveLength(1);
+
+      session.resume();
+      await run;
+      expect(calls).toEqual([
+        'First hidden-document paragraph.',
+        'Second hidden-document paragraph.'
+      ]);
+    } finally {
+      session.stop({notify: false});
+    }
+  });
+
+  it('does not overlap retired route translations with the next route', async () => {
+    let active = 0;
+    let maxActive = 0;
+    const resolvers = [];
+    const translate = (text) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      return new Promise((resolve) => {
+        const finish = () => {
+          active -= 1;
+          resolve(`ko:${text}`);
+        };
+        if (text.includes('next-route')) Promise.resolve().then(finish);
+        else resolvers.push(finish);
+      });
+    };
+    document.body.innerHTML = `
+      <p>First route paragraph.</p>
+      <p>Second route paragraph.</p>
+    `;
+    const session = new PageSession({
+      generation: 124,
+      document,
+      settings: {translatePageTitle: false},
+      concurrency: 2,
+      provider: makeProvider({translate})
+    });
+
+    const run = session.start();
+    try {
+      await wait(0);
+      expect(active).toBe(2);
+
+      expect(session.beginRouteChange({routeGeneration: 1})).toBe(true);
+      document.body.innerHTML = `
+        <p>First next-route paragraph.</p>
+        <p>Second next-route paragraph.</p>
+      `;
+      expect(session.applyRouteDecision({
+        routeGeneration: 1,
+        continueTranslation: true
+      })).toBe(true);
+
+      await wait(140);
+      expect(active).toBe(2);
+      expect(maxActive).toBe(2);
+
+      while (resolvers.length) resolvers.shift()();
+      await run;
+    } finally {
+      while (resolvers.length) resolvers.shift()();
+      session.stop({notify: false});
+    }
+  });
+
   it('translates direct text inside a semantic Craigslist posting body section', async () => {
     document.body.innerHTML = `
       <section class="page-container">
@@ -918,6 +1043,127 @@ describe('PageSession', () => {
     session.stop({notify: false});
   });
 
+  it('does not repeat unchanged route settle scans during back-forward cycles', async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '<p>Stable route content.</p>';
+    const session = new PageSession({
+      generation: 120,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider()
+    });
+    const collectSpy = vi.spyOn(session, 'collectBlocks');
+
+    try {
+      await session.start();
+      expect(collectSpy).toHaveBeenCalledTimes(2);
+
+      for (let routeGeneration = 1; routeGeneration <= 8; routeGeneration += 1) {
+        expect(session.beginRouteChange({routeGeneration})).toBe(true);
+        expect(session.applyRouteDecision({
+          routeGeneration,
+          continueTranslation: true
+        })).toBe(true);
+
+        await vi.advanceTimersByTimeAsync(100);
+        await vi.advanceTimersByTimeAsync(400);
+      }
+
+      expect(collectSpy).toHaveBeenCalledTimes(2 + 8);
+    } finally {
+      session.stop({notify: false});
+      vi.useRealTimers();
+    }
+  });
+
+  it('rechecks a route candidate revealed by an unobserved style change', async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = `
+      <p id="seed">The initial route content keeps the session active.</p>
+      <p id="late" style="display: none">The late route content becomes visible after the first settle scan.</p>
+    `;
+    const calls = [];
+    const session = new PageSession({
+      generation: 121,
+      document,
+      settings: {translatePageTitle: false},
+      observe: false,
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    try {
+      await session.start();
+      expect(calls).not.toContain('The late route content becomes visible after the first settle scan.');
+
+      expect(session.beginRouteChange({routeGeneration: 1})).toBe(true);
+      expect(session.applyRouteDecision({
+        routeGeneration: 1,
+        continueTranslation: true
+      })).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(100);
+      document.querySelector('#late').style.display = 'block';
+      await vi.advanceTimersByTimeAsync(400);
+
+      expect(calls).toContain('The late route content becomes visible after the first settle scan.');
+      expect(document.querySelector('#late + translight-translation')?.textContent)
+        .toBe('ko:The late route content becomes visible after the first settle scan.');
+    } finally {
+      session.stop({notify: false});
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([128, 129])('does not drop an independent hidden route candidate at the visibility limit (%i)', async (candidateCount) => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '<p id="seed">The initial route content keeps the session active.</p>' +
+      Array.from({length: candidateCount}, (_, index) =>
+        `<p class="late" hidden>Late independent paragraph ${index} becomes visible.</p>`
+      ).join('');
+    const calls = [];
+    const session = new PageSession({
+      generation: 124 + candidateCount,
+      document,
+      settings: {translatePageTitle: false},
+      observe: false,
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    try {
+      await session.start();
+      expect(session.beginRouteChange({routeGeneration: 1})).toBe(true);
+      expect(session.applyRouteDecision({
+        routeGeneration: 1,
+        continueTranslation: true
+      })).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(100);
+      expect(session.routeVisibilityCandidates.size).toBe(128);
+      expect(session.routeVisibilityOverflow).toBe(candidateCount > 128);
+
+      document.querySelectorAll('.late').forEach((element) => { element.hidden = false; });
+      await vi.advanceTimersByTimeAsync(400);
+
+      expect(calls.filter((text) => text.startsWith('Late independent paragraph')))
+        .toHaveLength(candidateCount);
+      expect(document.querySelectorAll('.late + translight-translation'))
+        .toHaveLength(candidateCount);
+    } finally {
+      session.stop({notify: false});
+      vi.useRealTimers();
+    }
+  });
+
   it('does not let a previous route title result overwrite the next title', async () => {
     document.title = 'Old route title';
     document.body.innerHTML = '<p>Old route body.</p>';
@@ -1707,6 +1953,51 @@ describe('PageSession', () => {
     );
   });
 
+  it.each([
+    ['a characterData change', 'characterData'],
+    ['a Text-node addition', 'text-addition']
+  ])('restores changed replacement source text before retranslation after %s', async (_label, mutationKind) => {
+    document.body.innerHTML = '<p id="source">Visit <a href="https://openai.com">OpenAI</a> docs</p>';
+    const inputs = [];
+    const session = new PageSession({
+      generation: 421,
+      document,
+      observe: false,
+      settings: {
+        translationMode: TRANSLATION_MODES.TRANSLATION_ORIGINAL,
+        translatePageTitle: false
+      },
+      provider: makeProvider({
+        translate: async (text) => {
+          inputs.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    await session.start();
+    const anchor = document.querySelector('a');
+    let mutation;
+    if (mutationKind === 'characterData') {
+      const replacementText = anchor.querySelector(
+        '[data-translight-replacement-text="true"]'
+      ).firstChild;
+      replacementText.data = 'OpenAI team';
+      mutation = {type: 'characterData', target: replacementText};
+    } else {
+      const addedText = document.createTextNode(' team');
+      anchor.appendChild(addedText);
+      mutation = {type: 'childList', target: anchor, addedNodes: [addedText], removedNodes: []};
+    }
+    session.handleMutations([mutation]);
+    await wait();
+
+    expect(inputs).toEqual(['Visit OpenAI docs', 'Visit OpenAI team docs']);
+    expect(inputs).not.toContain(expect.stringContaining('ko:'));
+    session.stop({notify: false});
+    expect(document.querySelector('#source').textContent).toBe('Visit OpenAI team docs');
+  });
+
   it('applies mode changes without calling the provider again', async () => {
     document.body.innerHTML = '<p>Mode paragraph.</p>';
     let calls = 0;
@@ -1827,6 +2118,180 @@ describe('PageSession', () => {
     expect(calls).toEqual(['Initial English title', 'English body content keeps the session active.']);
     session.stop();
     document.documentElement.removeAttribute('lang');
+  });
+
+  it('does not schedule recovery for its own generated translation insertions', async () => {
+    document.body.innerHTML = Array.from({length: 120}, (_, index) => `
+      <div class="metacritic-card-${index}">
+        <div class="card-content">
+          <p>This is Metacritic card ${index} with enough English content to translate.</p>
+        </div>
+      </div>
+    `).join('');
+    const session = new PageSession({
+      generation: 55,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider()
+    });
+    const recoverySpy = vi.spyOn(session, 'scheduleTranslationRecovery');
+
+    try {
+      await session.start();
+      await wait(50);
+
+      expect(recoverySpy).not.toHaveBeenCalled();
+    } finally {
+      session.stop({notify: false});
+    }
+  });
+
+  it('does not scan translation records for generated-only insertion batches', async () => {
+    document.body.innerHTML = '<p id="seed">The seed paragraph keeps the session active.</p>';
+    const session = new PageSession({
+      generation: 56,
+      document,
+      settings: {translatePageTitle: false},
+      observe: false,
+      provider: makeProvider()
+    });
+
+    await session.start();
+    const originalPrune = session.renderer.pruneDisconnected.bind(session.renderer);
+    let pruneVisits = 0;
+    vi.spyOn(session.renderer, 'pruneDisconnected').mockImplementation(function () {
+      pruneVisits += this.records.size;
+      return originalPrune();
+    });
+
+    const createGeneratedRecords = (count) => Array.from({length: count}, (_, index) => {
+      const source = document.createElement('p');
+      source.textContent = `Generated batch source ${count}-${index} has enough English text.`;
+      document.body.appendChild(source);
+      const translation = session.renderer.insert({
+        element: source,
+        sourceId: `generated-batch-${count}-${index}`,
+        text: source.textContent,
+        translatedText: `ko:${source.textContent}`
+      });
+      return {
+        type: 'childList',
+        target: translation.parentNode,
+        addedNodes: [translation],
+        removedNodes: []
+      };
+    });
+    const handleGeneratedBatches = (count) => {
+      pruneVisits = 0;
+      const records = createGeneratedRecords(count);
+      for (let index = 0; index < records.length; index += 3) {
+        session.handleMutations(records.slice(index, index + 3));
+      }
+      return pruneVisits;
+    };
+
+    try {
+      expect(handleGeneratedBatches(120)).toBe(0);
+      expect(handleGeneratedBatches(240)).toBe(0);
+
+      const hostUpdate = document.createElement('div');
+      document.body.appendChild(hostUpdate);
+      session.handleMutations([{
+        type: 'childList',
+        target: document.body,
+        addedNodes: [hostUpdate],
+        removedNodes: []
+      }]);
+      const pendingMutationTimer = session.mutationTimer;
+      expect(pendingMutationTimer).not.toBeNull();
+      const generatedRecord = createGeneratedRecords(1)[0];
+      session.handleMutations([generatedRecord]);
+      expect(session.mutationTimer).toBe(pendingMutationTimer);
+
+      const seed = document.querySelector('#seed');
+      seed.remove();
+      session.handleMutations([{
+        type: 'childList',
+        target: document.body,
+        addedNodes: [],
+        removedNodes: [seed]
+      }]);
+      await wait(120);
+
+      expect(pruneVisits).toBeGreaterThan(0);
+      expect(session.renderer.hasRecord(seed)).toBe(false);
+    } finally {
+      session.stop({notify: false});
+    }
+  });
+
+  it.each([
+    [120, 40],
+    [240, 80]
+  ])('does not run a full recovery scan for repeated unrelated host additions (%i records, %i callbacks)', async (recordCount, callbackCount) => {
+    document.body.innerHTML = Array.from({length: recordCount}, (_, index) =>
+      `<p>Stable host source ${index} with enough English text for recovery.</p>`
+    ).join('');
+    const session = new PageSession({
+      generation: 58 + recordCount,
+      document,
+      settings: {translatePageTitle: false},
+      observe: false,
+      provider: makeProvider()
+    });
+
+    await session.start();
+    const getMissingTranslations = vi.spyOn(session.renderer, 'getMissingTranslations');
+    const getRecoveryState = vi.spyOn(session.renderer, 'getRecoveryState');
+    const pruneDisconnected = vi.spyOn(session.renderer, 'pruneDisconnected');
+    const restoreChangedSources = vi.spyOn(session.renderer, 'restoreChangedSources');
+
+    try {
+      for (let index = 0; index < callbackCount; index += 1) {
+        const added = document.createElement('meta');
+        added.setAttribute('data-host-update', String(index));
+        document.body.appendChild(added);
+        session.handleMutations([{
+          type: 'childList',
+          target: document.body,
+          addedNodes: [added],
+          removedNodes: []
+        }]);
+      }
+      await wait(140);
+
+      expect(getMissingTranslations).not.toHaveBeenCalled();
+      expect(getRecoveryState).not.toHaveBeenCalled();
+      expect(pruneDisconnected).not.toHaveBeenCalled();
+      expect(restoreChangedSources).not.toHaveBeenCalled();
+    } finally {
+      session.stop({notify: false});
+    }
+  });
+
+  it('recovers a removed translation without scanning unrelated records', async () => {
+    document.body.innerHTML = Array.from({length: 120}, (_, index) =>
+      `<p>Recoverable source paragraph ${index} has enough English text.</p>`
+    ).join('');
+    const session = new PageSession({
+      generation: 57,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider()
+    });
+
+    try {
+      await session.start();
+      const getMissingTranslations = vi.spyOn(session.renderer, 'getMissingTranslations');
+      const translation = document.querySelector('translight-translation');
+      translation.remove();
+      await wait(500);
+
+      expect(getMissingTranslations).not.toHaveBeenCalled();
+      expect(translation.isConnected).toBe(true);
+    } finally {
+      session.stop({notify: false});
+    }
   });
 
   it('starts with visible blocks, then adjacent blocks, then document-order blocks', async () => {

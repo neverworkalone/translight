@@ -512,6 +512,41 @@ describe('collectTranslationBlocks', () => {
     expect(larger.returnedNodes).toBeLessThanOrEqual(smaller.returnedNodes * 2);
   });
 
+  it('keeps visibility checks bounded for deeply nested detail-page candidates', () => {
+    const tags = ['h3', 'p', 'li', 'h4'];
+    document.body.innerHTML = `
+      <main id="detail-page">
+        ${Array.from({length: 24}, (_, cardIndex) => `
+          <section class="global-carousel">
+            <div class="grid-container"><div class="product-card"><div class="product-card-content">
+              ${tags.map((tagName, blockIndex) => `
+                <${tagName}>Metacritic detail card ${cardIndex} ${blockIndex} content has enough English text to translate.</${tagName}>
+              `).join('')}
+            </div></div></div>
+          </section>
+        `).join('')}
+      </main>
+    `;
+
+    const originalGetComputedStyle = window.getComputedStyle;
+    let getComputedStyleCalls = 0;
+    window.getComputedStyle = (...args) => {
+      getComputedStyleCalls += 1;
+      return originalGetComputedStyle(...args);
+    };
+
+    try {
+      const blocks = collectTranslationBlocks(document.body);
+
+      expect(blocks).toHaveLength(24 * tags.length);
+      expect(getComputedStyleCalls).toBeLessThanOrEqual(
+        document.querySelectorAll('*').length * 5
+      );
+    } finally {
+      window.getComputedStyle = originalGetComputedStyle;
+    }
+  });
+
   it('keeps nested residual segmentation within a linear operation budget', () => {
     const measure = (containerCount) => {
       document.body.innerHTML = `<p id="description">Opening note has enough English words.${Array.from({length: containerCount}, (_, index) => `<span><b>First ${index}: </b>First inline paragraph has enough English words.\n\n<b>Second ${index}: </b>Second inline paragraph has enough English words.</span>Middle note ${index} has enough English words.`).join('')}Closing note has enough English words.</p>`;

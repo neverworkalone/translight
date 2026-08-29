@@ -1,5 +1,9 @@
-import {describe, expect, it} from 'vitest';
-import {prioritizeBlocks, TranslationQueue} from '../src/content/translation-queue.js';
+import {describe, expect, it, vi} from 'vitest';
+import {
+  CACHE_RESULT_BATCH_SIZE,
+  prioritizeBlocks,
+  TranslationQueue
+} from '../src/content/translation-queue.js';
 
 function block(sourceId, text, rect) {
   return {
@@ -50,6 +54,105 @@ describe('TranslationQueue', () => {
     expect(results).toHaveLength(3);
   });
 
+  it('yields between bounded batches of warm-cache results', async () => {
+    const blocks = Array.from({length: 256}, (_, index) =>
+      block(`source-${index}`, `cached-${index}`, {
+        top: 0,
+        bottom: 20,
+        left: 0,
+        right: 100
+      })
+    );
+    const cache = new Map(blocks.map(({text}) => [text, `ko:${text}`]));
+    const results = [];
+    const translate = vi.fn();
+    const queue = new TranslationQueue({
+      concurrency: 3,
+      cache,
+      translate,
+      onResult: (_item, value, metadata) => results.push({value, metadata})
+    });
+    const firstTimer = new Promise((resolve) => setTimeout(() => resolve(results.length), 0));
+
+    const idle = queue.enqueue(blocks);
+    const processedBeforeTimer = await firstTimer;
+    await idle;
+
+    expect(processedBeforeTimer).toBeLessThanOrEqual(CACHE_RESULT_BATCH_SIZE);
+    expect(results).toHaveLength(blocks.length);
+    expect(results.every(({metadata}) => metadata.fromCache)).toBe(true);
+    expect(translate).not.toHaveBeenCalled();
+    queue.cancel();
+  });
+
+  it('keeps a cache hit value stable while a miss evicts its key during yield', async () => {
+    const cache = new Map([
+      ['victim', 'ko:victim'],
+      ['repeat', 'ko:repeat']
+    ]);
+    for (let index = 2; index < 256; index += 1) {
+      cache.set(`filler-${index}`, `ko:filler-${index}`);
+    }
+    const results = [];
+    const providerCalls = [];
+    const queue = new TranslationQueue({
+      concurrency: 3,
+      cache,
+      cacheLimit: 256,
+      translate: async (text) => {
+        providerCalls.push(text);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        return `ko:${text}`;
+      },
+      onResult: (item, value, metadata) => results.push({sourceId: item.sourceId, value, metadata})
+    });
+    const repeatBlocks = Array.from({length: CACHE_RESULT_BATCH_SIZE}, (_, index) =>
+      block(`repeat-${index}`, 'repeat', {top: 0, bottom: 20, left: 0, right: 100})
+    );
+
+    await queue.enqueue([
+      block('new', 'new', {top: 0, bottom: 20, left: 0, right: 100}),
+      ...repeatBlocks,
+      block('victim', 'victim', {top: 0, bottom: 20, left: 0, right: 100})
+    ]);
+
+    expect(providerCalls).toEqual(['new']);
+    expect(results).toHaveLength(CACHE_RESULT_BATCH_SIZE + 2);
+    expect(results.find(({sourceId}) => sourceId === 'victim')).toEqual({
+      sourceId: 'victim',
+      value: 'ko:victim',
+      metadata: {fromCache: true}
+    });
+    expect(results.some(({value}) => value === undefined)).toBe(false);
+    expect(cache.has('victim')).toBe(false);
+    queue.cancel();
+  });
+
+  it('cancels deferred warm-cache results before they reach the renderer', async () => {
+    const blocks = Array.from({length: 64}, (_, index) =>
+      block(`source-${index}`, `cached-${index}`, {
+        top: 0,
+        bottom: 20,
+        left: 0,
+        right: 100
+      })
+    );
+    const cache = new Map(blocks.map(({text}) => [text, `ko:${text}`]));
+    const results = [];
+    const queue = new TranslationQueue({
+      concurrency: 3,
+      cache,
+      onResult: (item) => results.push(item.sourceId)
+    });
+    setTimeout(() => queue.cancel(), 0);
+
+    await queue.enqueue(blocks);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(results.length).toBeLessThanOrEqual(CACHE_RESULT_BATCH_SIZE);
+    expect(queue.cacheResultYieldTimer).toBeNull();
+  });
+
   it('drops late results after cancellation', async () => {
     let resolveTranslation;
     const results = [];
@@ -62,6 +165,51 @@ describe('TranslationQueue', () => {
     resolveTranslation('late');
     await pending;
     expect(results).toEqual([]);
+  });
+
+  it('detaches its session abort listener when a route cancels the queue', () => {
+    const listeners = new Set();
+    const signal = {
+      addEventListener: (_type, listener) => listeners.add(listener),
+      removeEventListener: (_type, listener) => listeners.delete(listener)
+    };
+    const cache = new Map([['shared', 'cached']]);
+    const queue = new TranslationQueue({signal, cache});
+
+    expect(listeners).toHaveLength(1);
+    queue.cancel();
+
+    expect(listeners).toHaveLength(0);
+    expect(cache).toEqual(new Map([['shared', 'cached']]));
+  });
+
+  it('pauses pending work without dropping it until the document is visible again', async () => {
+    let resolveActive;
+    const calls = [];
+    const queue = new TranslationQueue({
+      concurrency: 1,
+      translate: (text) => {
+        calls.push(text);
+        if (text === 'active') return new Promise((resolve) => { resolveActive = resolve; });
+        return Promise.resolve(`ko:${text}`);
+      }
+    });
+    const idle = queue.enqueue([
+      block('active', 'active', {top: 0, bottom: 20, left: 0, right: 100}),
+      block('pending', 'pending', {top: 30, bottom: 50, left: 0, right: 100})
+    ]);
+
+    queue.pause();
+    resolveActive('ko:active');
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(calls).toEqual(['active']);
+    expect(queue.pending).toHaveLength(1);
+
+    queue.resume();
+    await idle;
+    expect(calls).toEqual(['active', 'pending']);
+    queue.cancel();
   });
 
   it('does not permanently lose blocks beyond the pending limit', async () => {
@@ -118,26 +266,85 @@ describe('TranslationQueue', () => {
 
   it('re-evaluates pending priority when the viewport changes', async () => {
     let resolveActive;
-    let viewport = {innerHeight: 800, innerWidth: 1000};
+    const viewport = {innerHeight: 800, innerWidth: 1000, scrollY: 0};
+    const documentRect = (top) => () => ({
+      top: top - viewport.scrollY,
+      bottom: top + 50 - viewport.scrollY,
+      left: 0,
+      right: 100
+    });
     const far = block('far', 'far', {top: 2200, bottom: 2250, left: 0, right: 100});
+    far.element.getBoundingClientRect = documentRect(2200);
     const visibleAfterScroll = block('after-scroll', 'after-scroll', {top: 2200, bottom: 2250, left: 0, right: 100});
+    visibleAfterScroll.element.getBoundingClientRect = documentRect(2200);
+    const stillFar = block('still-far', 'still-far', {top: 4400, bottom: 4450, left: 0, right: 100});
+    stillFar.element.getBoundingClientRect = documentRect(4400);
+    const results = [];
     const queue = new TranslationQueue({
       concurrency: 1,
       getViewport: () => viewport,
       translate: (text) => new Promise((resolve) => {
         if (text === 'far') resolveActive = resolve;
         else resolve(`ko:${text}`);
-      })
+      }),
+      onResult: (item) => results.push(item.sourceId)
     });
 
-    queue.enqueue([far, visibleAfterScroll]);
+    queue.enqueue([far, visibleAfterScroll, stillFar]);
     await Promise.resolve();
-    visibleAfterScroll.element.getBoundingClientRect = () => ({top: 100, bottom: 120, left: 0, right: 100});
-    viewport = {innerHeight: 800, innerWidth: 1000};
+    viewport.scrollY = 2100;
     queue.reprioritize();
-    expect(queue.pending[0].sourceId).toBe('after-scroll');
 
     resolveActive('ko:far');
     await queue.whenIdle();
+    expect(results.slice(0, 2)).toEqual(['far', 'after-scroll']);
+  });
+
+  it('does not rescan a long pending page for every scroll reprioritization', () => {
+    let resolveActive;
+    let rectCalls = 0;
+    const results = [];
+    const viewport = {innerHeight: 800, innerWidth: 1000, scrollY: 0};
+    const rectState = new Map();
+    const blocks = Array.from({length: 2050}, (_, index) => ({
+      sourceId: `scroll-source-${index}`,
+      text: `scroll-text-${index}`,
+      element: {
+        getBoundingClientRect: () => {
+          rectCalls += 1;
+          const rect = rectState.get(index);
+          return {
+            ...rect,
+            top: rect.top - viewport.scrollY,
+            bottom: rect.bottom - viewport.scrollY
+          };
+        }
+      }
+    }));
+    for (let index = 0; index < blocks.length; index += 1) {
+      rectState.set(index, {top: 3000 + index, bottom: 3020 + index, left: 0, right: 100});
+    }
+    const queue = new TranslationQueue({
+      concurrency: 1,
+      pendingLimit: 2048,
+      getViewport: () => viewport,
+      translate: (text) => text === 'scroll-text-0'
+        ? new Promise((resolve) => { resolveActive = resolve; })
+        : Promise.resolve(`ko:${text}`),
+      onResult: (item) => results.push(item.sourceId)
+    });
+
+    queue.enqueue(blocks);
+    const setupCalls = rectCalls;
+    viewport.scrollY = 4947;
+    for (let index = 0; index < 8; index += 1) queue.reprioritize();
+
+    expect(rectCalls).toBe(setupCalls);
+    resolveActive?.('ko:scroll-text-0');
+    return queue.whenIdle().then(() => {
+      expect(results.slice(0, 2)).toEqual(['scroll-source-0', 'scroll-source-2047']);
+      expect(rectCalls).toBe(setupCalls);
+      queue.cancel();
+    });
   });
 });

@@ -9,6 +9,60 @@ import {
 export const CONTENT_CONTROLLER_KEY = '__translight_content_controller__';
 export const DOCUMENT_TOKEN_KEY = '__translight_document_token__';
 const NAVIGATION_POLL_MS = 500;
+const METACRITIC_GALLERY_PATH_PATTERN =
+  /^\/pictures\/([^/]+)\/([1-9]\d*)\/?$/u;
+
+export function isMetacriticHostname(hostname) {
+  const normalized = typeof hostname === 'string'
+    ? hostname.toLowerCase().replace(/\.$/u, '')
+    : '';
+  return normalized === 'metacritic.com' || normalized.endsWith('.metacritic.com');
+}
+
+/**
+ * Metacritic keeps one gallery document in the DOM and uses replaceState to
+ * reflect the item currently under the scroll position. Those URLs are
+ * presentation state, not a new route that should cancel the translation
+ * queue and rescan the document.
+ */
+export function isMetacriticGalleryStateChange({
+  document,
+  previousUrl,
+  currentUrl,
+  isMetacriticHost = isMetacriticHostname
+} = {}) {
+  if (!document?.querySelectorAll || typeof URL !== 'function') return false;
+
+  let previous;
+  let current;
+  try {
+    previous = new URL(previousUrl);
+    current = new URL(currentUrl);
+  } catch {
+    return false;
+  }
+  if (previous.origin !== current.origin ||
+      previous.search !== current.search ||
+      previous.hash !== current.hash) {
+    return false;
+  }
+  if (!isMetacriticHost(previous.hostname) || !isMetacriticHost(current.hostname)) {
+    return false;
+  }
+
+  const previousMatch = previous.pathname.match(METACRITIC_GALLERY_PATH_PATTERN);
+  const currentMatch = current.pathname.match(METACRITIC_GALLERY_PATH_PATTERN);
+  if (!previousMatch || !currentMatch || previousMatch[1] !== currentMatch[1] ||
+      previousMatch[2] === currentMatch[2]) {
+    return false;
+  }
+
+  const galleryItems = [...document.querySelectorAll('[data-testid="gallery-item"]')];
+  // The URL shape plus the gallery's own slug marker identify this
+  // presentation state after the Metacritic host check above.
+  return galleryItems.length > 1 &&
+    galleryItems.some((item) => item.getAttribute('slug') === currentMatch[1]);
+}
 
 function getDocumentToken() {
   if (globalThis[DOCUMENT_TOKEN_KEY]) return globalThis[DOCUMENT_TOKEN_KEY];
@@ -31,7 +85,8 @@ function sendRuntimeMessage(runtime, message) {
 
 export function installContentController({
   runtime = globalThis.chrome?.runtime,
-  createSession = (options) => new PageSession(options)
+  createSession = (options) => new PageSession(options),
+  isGalleryStateChange = isMetacriticGalleryStateChange
 } = {}) {
   const existing = globalThis[CONTENT_CONTROLLER_KEY];
   if (existing) return existing;
@@ -67,8 +122,13 @@ export function installContentController({
   });
   controller.pageLifecycleHandler = (event) => {
     // A history back/forward can restore this document from the back-forward
-    // cache. Keep its live session and translated DOM intact until pageshow.
-    if (event?.persisted) return;
+    // cache. Keep its live session and translated DOM intact until pageshow,
+    // but stop starting more provider work while this document is hidden.
+    if (event?.persisted) {
+      controller.stopNavigationWatcher();
+      controller.currentSession?.pause?.();
+      return;
+    }
     if (controller.navigationTimer != null) {
       const clearInterval = controller.navigationView?.clearInterval ?? globalThis.clearInterval;
       clearInterval?.(controller.navigationTimer);
@@ -80,6 +140,7 @@ export function installContentController({
   controller.pageShowHandler = (event) => {
     if (!event?.persisted) return;
     const session = controller.currentSession;
+    session?.resume?.();
     if (session) controller.startNavigationWatcher(session);
     sendRuntimeMessage(runtime, {
       type: 'CONTENT_READY',
@@ -103,6 +164,13 @@ export function installContentController({
     if (!url || url === controller.lastNavigationUrl) return false;
     const previousUrl = controller.lastNavigationUrl;
     controller.lastNavigationUrl = url;
+    if (isGalleryStateChange({
+      document: globalThis.document,
+      previousUrl,
+      currentUrl: url
+    })) {
+      return false;
+    }
     const routeGeneration = ++controller.routeGeneration;
     const route = {
       previousUrl,
@@ -162,6 +230,7 @@ export function installContentController({
   });
 
   const startSession = (message) => {
+    if (message.documentToken != null && message.documentToken !== controller.documentToken) return;
     controller.stopNavigationWatcher();
     controller.currentSession?.stop({ notify: false });
     // Navigation that happened while translation was OFF is the baseline for
@@ -184,6 +253,7 @@ export function installContentController({
   };
 
   const stopSession = (message) => {
+    if (message.documentToken != null && message.documentToken !== controller.documentToken) return;
     const session = controller.currentSession;
     if (!session) return;
     if (message.generation != null && session.generation !== message.generation) return;
@@ -206,6 +276,10 @@ export function installContentController({
     }
 
     if (message?.type === 'TRANSLATION_ROUTE') {
+      if (message.documentToken != null && message.documentToken !== controller.documentToken) {
+        sendResponse?.({ok: true});
+        return false;
+      }
       controller.currentSession?.applyRouteDecision?.(message);
       sendResponse?.({ok: true});
       return false;

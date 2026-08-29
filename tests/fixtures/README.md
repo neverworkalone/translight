@@ -5,6 +5,63 @@ README. Each fixture should keep its page and runner together, and each new bug
 should add a short section here with the URL, setup, scenarios, and expected
 result.
 
+## Metacritic Chrome automation runner
+
+The local runner launches a separate Chrome user-data directory with the built
+Translight extension loaded, drives the browser through the Chrome DevTools
+Protocol, samples Chrome processes and page translation state, and writes a
+JSON report plus a Chrome trace under `artifacts/metacritic-chrome/`.
+
+It requires Chromium or Chrome for Testing. The official Google Chrome app
+ignores the command-line switches used to load an unpacked extension, so the
+runner reports `validation blocked` instead of silently measuring a browser
+without Translight.
+
+Build the extension and run the gallery scroll scenario with:
+
+```bash
+npm run test:metacritic:chrome
+```
+
+Use `--scenario=navigation` for the homepage → Latest News → New and Notable
+→ back flow, `--cycles=5` for more repetitions, or `--skip-translation` to
+smoke-test browser control without requiring Chrome's Translator model. The
+runner auto-detects Chrome for Testing or Chromium; pass
+`--chrome=/path/to/browser` when it is installed elsewhere. A temporary Chrome
+profile is removed after the run unless `--keep-profile` is supplied.
+
+To drive an already running dedicated Chrome for Testing profile, start it with
+remote debugging enabled and then attach the runner:
+
+```bash
+"/path/to/Google Chrome for Testing" \
+  --remote-debugging-port=9222 \
+  --user-data-dir=/private/tmp/translight-cft-profile \
+  --disable-extensions-except=/path/to/translight/dist \
+  --load-extension=/path/to/translight/dist
+
+npm run test:metacritic:chrome -- \
+  --debugging-port=9222 \
+  --profile-dir=/private/tmp/translight-cft-profile \
+  --scenario=navigation --cycles=5
+```
+
+Attach mode uses the active tab in that profile, invokes the extension's
+toolbar action path, and never kills the attached browser. Use a dedicated
+profile; the runner may temporarily enable same-site continuation for the
+navigation scenario and restores that setting afterward. Pass
+`--browser-pid=<pid>` when CPU sampling is required in attach mode.
+The attached browser must already have Translight loaded; use a
+Translator-capable Chrome profile when the run requires real translation.
+Performance validation records eight timer-driven samples at the 250 ms
+interval before the scenario. After the scenario it keeps translation ON and
+checks rolling eight-sample CPU windows for up to 10 seconds, stopping at the
+first recovered window and recording `recoveryTimeMs`, before translation OFF,
+trace/file cleanup, or other runner teardown. Recovery CDP pings and the page
+Long Task probe are included in the responsiveness gate. If attach mode has no
+`--browser-pid`, the run is explicitly a browser-flow smoke test and reports
+`smokePassed` instead of claiming `testPassed`.
+
 ## Guardian card translation placement
 
 Fixture: `guardian-translation-placement-repro.html` and
@@ -419,6 +476,118 @@ the two newly added blocks, without repeatedly traversing the whole page.
 
 The repaired case must report `initialTranslationCount: 2`,
 `mutationTranslationCount: 4`, `testPassed: true`, and
+`restoredAfterStop: true`.
+
+## Metacritic translation CPU regression
+
+Fixture: `metacritic-cpu-repro.html` and `metacritic-cpu-repro.js`
+
+Open this URL in Chrome while the Vite development server is running:
+
+```text
+http://127.0.0.1:5173/tests/fixtures/metacritic-cpu-repro.html
+```
+
+This fixture models the supplied Metacritic homepage at
+`https://www.metacritic.com/`: many deeply nested card wrappers contain
+English headings, descriptions, and tags, and the source elements are laid
+out in flex containers like the live page. The session must not rescan every
+translation record in response to its own generated-node insertions, and it
+must not move a translation that is already in its requested position.
+
+The repaired case must report `recoverySchedules: 0`,
+`translationCount: 376`, `testPassed: true`, and `restoredAfterStop: true`.
+
+## Metacritic repeated navigation regression
+
+Fixture: `metacritic-navigation-repro.html` and
+`metacritic-navigation-repro.js`
+
+Open this URL in Chrome while the Vite development server is running:
+
+```text
+http://127.0.0.1:5173/tests/fixtures/metacritic-navigation-repro.html
+```
+
+This fixture replaces a deeply nested Metacritic-style card page eight times,
+matching repeated link and back/forward route changes in one live session. Each
+route must end with exactly one translation per source block, and stopping the
+session must remove every generated node. The settle window must not rescan the
+same unchanged route repeatedly.
+
+The repaired case must report `testPassed: true`,
+`restoredAfterStop: true`, and `collectCalls <= 18`.
+
+## Metacritic scroll and repeated back/forward regression
+
+Fixture: `metacritic-scroll-navigation-repro.html` and
+`metacritic-scroll-navigation-repro.js`
+
+Open this URL in Chrome while the Vite development server is running:
+
+```text
+http://127.0.0.1:5173/tests/fixtures/metacritic-scroll-navigation-repro.html
+```
+
+This fixture follows the supplied live-site path: start translation through the
+real content controller, scroll to `Latest News` and wait for its items, return
+to the top, click the `New and Notable` `Star Wars Zero Company` link, scroll
+the detail route to the bottom, then repeat browser back/forward cycles. The
+page uses deeply nested cards so scroll reprioritization and controller route
+messages exercise the same pending work as the Metacritic homepage. It then
+stops and restarts translation three times through the same controller and
+page-memory cache on the full homepage, covering the cold initial run and a
+partial cache larger than the cache limit. It then uses a small, known working
+set on a `warm-cache-probe` route to repeat the same-controller OFF → ON cycle
+three times with cache-only results. Each restored route must retain exactly one
+translation per source, and stopping the session must clean up every generated
+node.
+
+The repaired case must report `latestNewsTranslated >= 8`,
+`interactionRectCalls <= 5000` for the supplied navigation path (the report's
+`totalInteractionRectCalls` additionally includes the restart probes), no disconnected renderer records, an empty
+queue after each route completes, `recoveryScanCalls === 0` for the simulated
+path, three full-home `restartSnapshots`, and three
+`warmCacheProbe.snapshots` with cache hits and no provider calls. The result
+must report `testPassed: true` with `restoredAfterStop: true`. Each restart
+snapshot records the first host timer's observed cache-hit count; it must stay
+within the queue's cache-result batch budget. The `phases` report separates
+initial and post-prepare collection, `removeAll`, cache-result application,
+and Long Task observations. `testPassed` also applies response budgets of
+250 ms for the first timer, each collection phase, and each Long Task, 100 ms
+for `removeAll`, and 16 ms for one result application; if Long Task entries are
+unsupported, that one browser metric is reported but not gated. Add
+`?metrics=1` to inspect collect/mutation,
+prune/recovery-scan, queue-sort, and record-lifetime counters; add `?stacks=1`
+to attribute rectangle reads to production call sites. Add
+`&providerDelay=12` to keep retired route calls in flight long enough to
+exercise the provider-overlap budget; `providerMaxActive` must remain at most
+the queue concurrency budget.
+
+## Metacritic gallery scroll-state translation stability
+
+Fixture: `metacritic-gallery-scroll-repro.html` and
+`metacritic-gallery-scroll-repro.js`
+
+Open this URL in Chrome while the Vite development server is running:
+
+```text
+http://127.0.0.1:5173/tests/fixtures/metacritic-gallery-scroll-repro.html
+```
+
+This fixture models the supplied Metacritic article at
+`https://www.metacritic.com/pictures/august-september-2026-game-preview-wolverine-silent-hill-townfall-control-resonant/5`.
+The page keeps 22 gallery items in one document and updates
+`/pictures/<slug>/<item>` with `history.replaceState` as the scroll position
+changes, matching the live page's scroll spy. The controller must treat those
+URLs as presentation state: it must keep one queue and the translated article
+paragraphs connected while the gallery URL changes.
+
+The repaired case must report `galleryUrlChanges > 0`,
+`contentRouteMessages: 0`, `sessionRouteChanges: 0`,
+`controllerRouteGeneration: 0`,
+`minimumTranslatedParagraphs === sourceParagraphs`,
+`translationContentsMatch: true`, and `testPassed: true` with
 `restoredAfterStop: true`.
 
 When adding another browser regression, use a descriptive `<bug-name>-repro`

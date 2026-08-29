@@ -2,6 +2,9 @@ export const DEFAULT_QUEUE_CONCURRENCY = 3;
 export const DEFAULT_CACHE_LIMIT = 256;
 export const DEFAULT_PENDING_LIMIT = 2048;
 export const DEFAULT_SEEN_LIMIT = 4096;
+// Cache hits do not cross a provider promise, so bound their synchronous
+// result-application work before yielding to the browser's next task.
+export const CACHE_RESULT_BATCH_SIZE = 16;
 
 function numeric(value, fallback = 0) {
   return Number.isFinite(value) ? value : fallback;
@@ -34,9 +37,15 @@ function rectFor(block) {
  * viewport, rank 1 is in the immediately adjacent viewport, and rank 2 is
  * everything else. The index keeps each rank stable in document order.
  */
-export function getViewportPriority(block, index = 0, {document = globalThis.document, viewport} = {}) {
+export function getViewportPriority(
+  block,
+  index = 0,
+  {document = globalThis.document, viewport, getRect} = {}
+) {
   const {height, width} = viewportSize(document, viewport);
-  const rect = rectFor(block);
+  const rect = typeof getRect === 'function'
+    ? getRect(block)
+    : rectFor(block);
   if (!rect) return {rank: 2, distance: index, index};
 
   const visible = rect.bottom >= 0 && rect.top <= height && rect.right >= 0 && rect.left <= width;
@@ -120,11 +129,24 @@ export class TranslationQueue {
     this.inFlight = new Map();
     this.cancelled = false;
     this.idleResolvers = [];
+    this.settledResolvers = [];
     this.batchChain = Promise.resolve();
     this.viewportVersion = 0;
+    this.priorityDirty = true;
+    this.priorityRectCache = new Map();
+    this.paused = false;
     this.signal = signal;
+    this.cacheResultBatchCount = 0;
+    this.cacheResultYieldPromise = null;
+    this.cacheResultYieldResolve = null;
+    this.cacheResultYieldTimer = null;
     this.abortListener = () => this.cancel();
-    signal?.addEventListener?.('abort', this.abortListener, {once: true});
+    if (signal?.addEventListener) {
+      signal.addEventListener('abort', this.abortListener, {once: true});
+      this.abortListenerAttached = true;
+    } else {
+      this.abortListenerAttached = false;
+    }
   }
 
   isIdle() {
@@ -134,6 +156,14 @@ export class TranslationQueue {
   whenIdle() {
     if (this.cancelled || this.isIdle()) return Promise.resolve();
     return new Promise((resolve) => this.idleResolvers.push(resolve));
+  }
+
+  whenSettled() {
+    // cancel() stops new work but cannot interrupt a provider promise that
+    // is already running. Route changes use this separate barrier before
+    // starting another queue against the same provider.
+    if (this.active === 0) return Promise.resolve();
+    return new Promise((resolve) => this.settledResolvers.push(resolve));
   }
 
   enqueue(blocks = []) {
@@ -153,6 +183,7 @@ export class TranslationQueue {
     }
 
     this.pending.push(...candidates);
+    this.priorityDirty = true;
     this.sortPending();
     if (this.pending.length > this.pendingLimit) {
       const dropped = this.pending.slice(this.pendingLimit);
@@ -191,21 +222,79 @@ export class TranslationQueue {
   }
 
   currentPriorityOptions() {
+    const viewport = this.getViewport?.();
     return {
       document: this.document,
-      viewport: this.getViewport?.()
+      viewport,
+      getRect: (block) => this.getCachedRect(block, viewport)
     };
+  }
+
+  getCachedRect(block, viewport) {
+    // A scroll changes viewport-relative coordinates without changing the
+    // document position. Reusing that snapshot avoids forcing layout for
+    // every pending block while a user is scrolling. Callers invalidate it
+    // when a DOM or viewport-size change can move the source.
+    const {height, width} = viewportSize(this.document, viewport);
+    const scrollX = numeric(viewport?.scrollX, numeric(viewport?.pageXOffset));
+    const scrollY = numeric(viewport?.scrollY, numeric(viewport?.pageYOffset));
+    const cached = this.priorityRectCache.get(block);
+    if (cached && cached.viewportWidth === width && cached.viewportHeight === height) {
+      return {
+        top: cached.documentTop - scrollY,
+        bottom: cached.documentBottom - scrollY,
+        left: cached.documentLeft - scrollX,
+        right: cached.documentRight - scrollX
+      };
+    }
+
+    const rect = rectFor(block);
+    if (!rect) {
+      this.priorityRectCache.delete(block);
+      return null;
+    }
+    this.priorityRectCache.set(block, {
+      documentTop: rect.top + scrollY,
+      documentBottom: rect.bottom + scrollY,
+      documentLeft: rect.left + scrollX,
+      documentRight: rect.right + scrollX,
+      viewportWidth: width,
+      viewportHeight: height
+    });
+    return rect;
+  }
+
+  invalidateLayout() {
+    this.priorityRectCache.clear();
   }
 
   reprioritize() {
     if (this.cancelled) return;
     this.viewportVersion += 1;
-    this.sortPending();
+    this.priorityDirty = true;
+    // Scrolling only needs to update the viewport snapshot. The next pump
+    // applies it when selecting work, avoiding a full pending-queue sort for
+    // every scroll event while the provider is busy.
+  }
+
+  pause() {
+    if (this.cancelled) return;
+    this.paused = true;
+  }
+
+  resume() {
+    if (this.cancelled || !this.paused) return;
+    this.paused = false;
+    this.pump();
   }
 
   sortPending() {
-    if (this.pending.length < 2) return;
+    if (!this.priorityDirty || this.pending.length < 2) {
+      this.priorityDirty = false;
+      return;
+    }
     this.pending = prioritizeBlocks(this.pending, this.currentPriorityOptions());
+    this.priorityDirty = false;
   }
 
   forgetSeen(key) {
@@ -215,23 +304,73 @@ export class TranslationQueue {
   }
 
   cancel() {
-    if (this.cancelled) return;
+    if (this.cancelled) {
+      this.detachAbortListener();
+      return;
+    }
     this.cancelled = true;
+    this.paused = false;
+    this.detachAbortListener();
     this.pending.length = 0;
+    this.seen.clear();
+    this.seenOrder.length = 0;
+    this.inFlight.clear();
+    this.priorityRectCache.clear();
+    this.cancelCacheResultYield();
     for (const resolve of this.idleResolvers.splice(0)) resolve();
+    if (this.active === 0) {
+      for (const resolve of this.settledResolvers.splice(0)) resolve();
+    }
+  }
+
+  scheduleCacheResultYield() {
+    if (this.cacheResultYieldPromise) return this.cacheResultYieldPromise;
+    this.cacheResultYieldPromise = new Promise((resolve) => {
+      this.cacheResultYieldResolve = resolve;
+      this.cacheResultYieldTimer = setTimeout(() => {
+        this.cacheResultYieldTimer = null;
+        this.cacheResultYieldResolve = null;
+        this.cacheResultYieldPromise = null;
+        this.cacheResultBatchCount = 0;
+        resolve();
+      }, 0);
+    });
+    return this.cacheResultYieldPromise;
+  }
+
+  cancelCacheResultYield() {
+    if (this.cacheResultYieldTimer != null) clearTimeout(this.cacheResultYieldTimer);
+    const resolve = this.cacheResultYieldResolve;
+    this.cacheResultYieldTimer = null;
+    this.cacheResultYieldResolve = null;
+    this.cacheResultYieldPromise = null;
+    this.cacheResultBatchCount = 0;
+    resolve?.();
+  }
+
+  async waitForCacheResultSlot() {
+    if (this.cacheResultBatchCount < CACHE_RESULT_BATCH_SIZE) {
+      this.cacheResultBatchCount += 1;
+      return;
+    }
+    await this.scheduleCacheResultYield();
+    if (!this.cancelled) this.cacheResultBatchCount += 1;
   }
 
   destroy() {
     this.cancel();
+    this.batchChain = Promise.resolve();
+  }
+
+  detachAbortListener() {
+    if (!this.abortListenerAttached) return;
     this.signal?.removeEventListener?.('abort', this.abortListener);
-    this.cache.clear();
-    this.seen.clear();
-    this.seenOrder.length = 0;
-    this.inFlight.clear();
+    this.abortListenerAttached = false;
   }
 
   pump() {
-    while (!this.cancelled && this.isCurrent() && this.active < this.concurrency && this.pending.length) {
+    while (!this.cancelled && !this.paused && this.isCurrent() &&
+        this.active < this.concurrency && this.pending.length) {
       this.sortPending();
       const block = this.pending.shift();
       this.active += 1;
@@ -239,6 +378,9 @@ export class TranslationQueue {
         this.active -= 1;
         if (this.isIdle()) {
           for (const resolve of this.idleResolvers.splice(0)) resolve();
+        }
+        if (this.active === 0) {
+          for (const resolve of this.settledResolvers.splice(0)) resolve();
         }
         this.pump();
       });
@@ -256,14 +398,19 @@ export class TranslationQueue {
 
     try {
       if (this.cache.has(cacheKey)) {
-        if (this.isCurrent() && !this.cancelled) {
-          this.onResult(block, this.cache.get(cacheKey), {fromCache: true});
+        const cachedValue = this.cache.get(cacheKey);
+        await this.waitForCacheResultSlot();
+        if (this.isCurrent() && !this.cancelled && !this.signal?.aborted) {
+          this.onResult(block, cachedValue, {fromCache: true});
         }
         return;
       }
       let translationPromise = this.inFlight.get(cacheKey);
       if (!translationPromise) {
-        translationPromise = Promise.resolve(this.translate(text, {signal: this.signal}));
+        translationPromise = Promise.resolve(this.translate(text, {
+          signal: this.signal,
+          queue: this
+        }));
         this.inFlight.set(cacheKey, translationPromise);
       }
       let translatedText;
