@@ -1,25 +1,28 @@
 # CFT dummy-provider validation report
 
 Date: 2026-08-29
-Implementation commit: `b4db52c39375d472b79eebf4ed8b8a9dc4005bee`
+Implementation commit: `af3c3fc6bad8c9c3da10497379f8ace2ec48add6`
 Browser: Chrome for Testing 152.0.7977.64, mac-arm64
 
 ## Commands and results
 
 | Command | Result |
 | --- | --- |
-| `npm run check` | PASS — 19 test files, 306 tests; production build completed |
+| `npm run check` | PASS — 19 test files, 311 tests; production build completed |
 | `npm run build:test` | PASS — packaged test extension built |
 | `git diff --check` | PASS |
-| Packaged CFT `--provider=dummy --dummy-profile=normal --scenario=navigation` (runner default delay) | PASS — `testBuild:true`, `delayMs:69`; home/detail/back translated 9/48/149 nodes; no duplicate source ids; OFF restored the page; all 27 geometry snapshots stayed within 1 px; max long task 0 ms, CPU recovery 1.87 s |
-| Packaged CFT `--provider=dummy --dummy-profile=expanded --scenario=navigation` (runner default delay) | PASS — `testBuild:true`, `delayMs:69`; expanded output was observed through the renderer; all 27 geometry snapshots stayed within 1 px; max long task 0 ms, CPU recovery 1.99 s |
-| Production-build guard with `--provider=dummy --skip-build` | PASS (expected rejection) — loaded build reported `kind:production`, `testBuild:false`, and the runner failed with the explicit `npm run build:test` message |
+| Watch-only Dummy lifecycle regression | PASS — real `DummyTranslateProvider` survived initial Korean-only → English mutation promotion, translated consecutive blocks with one preparation, and became unavailable only after explicit stop |
+| Packaged CFT `--provider=dummy --dummy-profile=normal --scenario=navigation` (runner default delay) | PASS — `testBuild:true`, `delayMs:69`, `testedCommitVerified:true`; home/detail/back translated 9/48/149 nodes; no duplicate source ids; OFF restored the page; all 27 geometry snapshots stayed within 1 px; max long task 0 ms, CPU recovery 1.88 s |
+| Packaged CFT `--provider=dummy --dummy-profile=expanded --scenario=navigation` (runner default delay) | PASS — `testBuild:true`, `delayMs:69`, `testedCommitVerified:true`; expanded output was observed through the renderer; all 27 geometry snapshots stayed within 1 px; max long task 0 ms, CPU recovery 1.82 s |
+| Production-build guard with `--provider=dummy --skip-build` | PASS (expected rejection) — loaded build reported `kind:production`, `commit:af3c3fc6…`, `testBuild:false`, and the runner failed with the explicit `npm run build:test` message |
+| Stale test-bundle guard with `--provider=dummy --skip-build` | PASS (expected rejection) — loaded `commit:aaaaaaaa…` did not match checkout `af3c3fc6…`; `testedCommit:null`, `validationBlocked:true`, exit 2 |
 
 The CFT artifacts were written to:
 
-- `/private/tmp/translight-cft/result-normal-69/result.json`
-- `/private/tmp/translight-cft/result-expanded-69/result.json`
-- `/private/tmp/translight-cft/result-production-guard-69/result.json`
+- `/private/tmp/translight-cft/result-normal-af3c/result.json`
+- `/private/tmp/translight-cft/result-expanded-af3c/result.json`
+- `/private/tmp/translight-cft/result-production-guard-af3c/result.json`
+- `/private/tmp/translight-cft/result-stale-build-guard-af3c-2/result.json`
 
 Both successful artifacts record the provider type, profile, delay, extension
 version/build identifier, and tested commit. The scenario also reports that the
