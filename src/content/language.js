@@ -7,7 +7,7 @@ const STANDALONE_HANDLE_PATTERN = /^@[\p{L}\p{N}._-]+$/u;
 export const LANGUAGE_MIN_LETTERS = 3;
 export const LANGUAGE_MIN_LATIN_LETTERS = 2;
 export const LANGUAGE_MIN_HANGUL_LETTERS = 2;
-export const HANGUL_DOMINANCE_RATIO = 0.5;
+export const HANGUL_SKIP_RATIO = 0.1;
 
 export function normalizeLanguageCode(value) {
   const match = String(value ?? '').trim().match(LANGUAGE_CODE_PATTERN);
@@ -36,9 +36,9 @@ function hasDetectableText(stats) {
     (stats.latinCount > 0 || stats.hangulCount > 0);
 }
 
-function isHangulDominant(stats) {
+function hasHangulSkipRatio(stats) {
   return stats.hangulCount >= LANGUAGE_MIN_HANGUL_LETTERS &&
-    stats.hangulCount / Math.max(stats.letterCount, 1) >= HANGUL_DOMINANCE_RATIO;
+    stats.hangulCount / Math.max(stats.letterCount, 1) >= HANGUL_SKIP_RATIO;
 }
 
 /**
@@ -49,7 +49,7 @@ function isHangulDominant(stats) {
 export function classifyTextLanguage(value) {
   const stats = analyzeText(value);
   if (!hasDetectableText(stats)) return '';
-  if (isHangulDominant(stats)) return 'ko';
+  if (hasHangulSkipRatio(stats)) return 'ko';
   if (stats.latinCount >= LANGUAGE_MIN_LATIN_LETTERS) return 'en';
   return '';
 }
@@ -91,9 +91,9 @@ export function nearestContentLanguage(element) {
 
 /**
  * Decide whether a collected content block should be sent to the provider.
- * Explicit local declarations take precedence over the character heuristic;
- * the heuristic intentionally recognizes English only for the current
- * en-to-ko product scope.
+ * Content-based Korean protection takes precedence over a local English
+ * declaration; the heuristic intentionally recognizes English only for the
+ * current en-to-ko product scope.
  */
 export function isTranslatableBlock(element, text, targetLanguage = 'ko') {
   const target = normalizeLanguageCode(targetLanguage);
@@ -101,14 +101,15 @@ export function isTranslatableBlock(element, text, targetLanguage = 'ko') {
   const stats = analyzeText(text);
   if (!target || !hasDetectableText(stats)) return false;
 
+  if (target === 'ko' && hasHangulSkipRatio(stats)) return false;
+
   const declared = nearestContentLanguage(element);
   if (declared === target) return false;
   if (declared === 'en') return true;
   if (declared) return false;
 
   return target === 'ko' &&
-    stats.latinCount >= LANGUAGE_MIN_LATIN_LETTERS &&
-    !isHangulDominant(stats);
+    stats.latinCount >= LANGUAGE_MIN_LATIN_LETTERS;
 }
 
 export function isTranslatableText(text, targetLanguage = 'ko') {
