@@ -29,6 +29,15 @@ DO NOT self-review or merge a PR that you created or updated as part of the curr
   * code-based expectations
   * mocked-environment results
   * actual browser observations
+ 
+## PR Selection
+
+* If the user specifies a PR number, review that PR.
+* If the user requests a review without specifying a PR, find the currently open PR and review the latest relevant one.
+* Before reviewing, verify that the target PR is still open.
+* DO NOT continue reviewing a previously discussed PR after it has been merged or closed unless the user explicitly requests a post-merge or historical review.
+* If the previously reviewed PR has been merged or closed and a newer open PR exists, review the newer open PR.
+* If multiple open PRs make the target genuinely ambiguous, identify the candidates and ask the user which one to review.
 
 ## Prior Discussion and Proportionality
 
