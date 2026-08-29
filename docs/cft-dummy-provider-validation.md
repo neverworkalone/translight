@@ -1,33 +1,35 @@
 # CFT dummy-provider validation report
 
 Date: 2026-08-29
-Implementation commit: `af3c3fc6bad8c9c3da10497379f8ace2ec48add6`
+Implementation commit: `36cb08d75382e69b1783a13f4833559581f6bac8`
 Browser: Chrome for Testing 152.0.7977.64, mac-arm64
 
 ## Commands and results
 
 | Command | Result |
 | --- | --- |
-| `npm run check` | PASS — 19 test files, 311 tests; production build completed |
-| `npm run build:test` | PASS — packaged test extension built |
+| `npm run check` | PASS — 19 test files, 313 tests; production build completed with a clean checkout marker |
+| `npm run build:test` | PASS — packaged test extension built with `testBuild:true` and `dirty:false` |
 | `git diff --check` | PASS |
 | Watch-only Dummy lifecycle regression | PASS — real `DummyTranslateProvider` survived initial Korean-only → English mutation promotion, translated consecutive blocks with one preparation, and became unavailable only after explicit stop |
-| Packaged CFT `--provider=dummy --dummy-profile=normal --scenario=navigation` (runner default delay) | PASS — `testBuild:true`, `delayMs:69`, `testedCommitVerified:true`; home/detail/back translated 9/48/149 nodes; no duplicate source ids; OFF restored the page; all 27 geometry snapshots stayed within 1 px; max long task 0 ms, CPU recovery 1.88 s |
-| Packaged CFT `--provider=dummy --dummy-profile=expanded --scenario=navigation` (runner default delay) | PASS — `testBuild:true`, `delayMs:69`, `testedCommitVerified:true`; expanded output was observed through the renderer; all 27 geometry snapshots stayed within 1 px; max long task 0 ms, CPU recovery 1.82 s |
-| Production-build guard with `--provider=dummy --skip-build` | PASS (expected rejection) — loaded build reported `kind:production`, `commit:af3c3fc6…`, `testBuild:false`, and the runner failed with the explicit `npm run build:test` message |
-| Stale test-bundle guard with `--provider=dummy --skip-build` | PASS (expected rejection) — loaded `commit:aaaaaaaa…` did not match checkout `af3c3fc6…`; `testedCommit:null`, `validationBlocked:true`, exit 2 |
+| Packaged CFT `--provider=dummy --dummy-profile=normal --scenario=navigation` (runner default delay) | PASS — `testBuild:true`, `dirty:false`, `delayMs:69`, `testedCommitVerified:true`; home/detail/back translated 9/48/149 nodes; no duplicate source ids; OFF restored the page; all 27 geometry snapshots stayed within 1 px; max long task 0 ms, max CDP ping 2.83 ms, CPU recovery 1.83 s |
+| Packaged CFT `--provider=dummy --dummy-profile=expanded --scenario=navigation` (runner default delay) | PASS — `testBuild:true`, `dirty:false`, `delayMs:69`, `testedCommitVerified:true`; expanded output was observed through the renderer; home/detail/back translated 9/49/149 nodes; all 27 geometry snapshots stayed within 1 px; max long task 0 ms, max CDP ping 42.36 ms, CPU recovery 1.81 s |
+| Production-build guard with `--provider=dummy --skip-build` | PASS (expected rejection) — loaded build reported `kind:production`, `dirty:false`, `testBuild:false`, and the runner failed with the explicit `npm run build:test` message before page translation |
+| Dirty test-bundle guard with `--provider=dummy --skip-build` | PASS (expected rejection) — clean checkout reported `checkoutDirty:false`, loaded test bundle reported `dirty:true`, `testedCommit:null`, `testedCommitVerified:false`, `validationBlocked:true`, exit 2 |
+| Dirty-checkout guard and attach-mode identity unit coverage | PASS — runner tests cover `loadedBuild.dirty:true`, `checkoutDirty:true`, clean local verification, and attach mode without checkout verification |
 
 The CFT artifacts were written to:
 
-- `/private/tmp/translight-cft/result-normal-af3c/result.json`
-- `/private/tmp/translight-cft/result-expanded-af3c/result.json`
-- `/private/tmp/translight-cft/result-production-guard-af3c/result.json`
-- `/private/tmp/translight-cft/result-stale-build-guard-af3c-2/result.json`
+- `/private/tmp/translight-cft/result-normal-36cb08d/result.json`
+- `/private/tmp/translight-cft/result-expanded-36cb08d/result.json`
+- `/private/tmp/translight-cft/result-production-guard-36cb08d/result.json`
+- `/private/tmp/translight-cft/result-dirty-build-36cb08d/result.json`
 
 Both successful artifacts record the provider type, profile, delay, extension
-version/build identifier, and tested commit. The scenario also reports that the
-page realm could not see the extension harness or runtime and had zero
-translations before the extension action was invoked.
+version/build identifier, clean build state, checkout state, and tested commit.
+The scenario also reports that the page realm could not see the extension
+harness or runtime and had zero translations before the extension action was
+invoked.
 
 ## Delay calibration
 
