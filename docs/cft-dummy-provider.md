@@ -26,14 +26,18 @@ npm run test:metacritic:chrome -- \
   --chrome=/path/to/Chrome\ for\ Testing
 ```
 
-The Vite build embeds the current git HEAD SHA in `BUILD_INFO`. The CFT runner
-records the provider type/profile/delay, extension manifest version and build
-identifier, the loaded build SHA, the tested commit, and geometry-check results
-in `artifacts/metacritic-chrome/result.json`. In local launch mode it fails
-before the scenario when the loaded bundle is stale or does not report a valid
-SHA; this also protects `--skip-build`. Attach mode preserves the real-provider
-path and reports the loaded SHA separately, without claiming it matches the
-current checkout when that cannot be verified.
+The Vite build embeds the current git HEAD SHA and clean/dirty state in
+`BUILD_INFO`. The dirty state comes from Git porcelain status with ignored files
+excluded, so tracked changes and non-ignored untracked build inputs cannot be
+mistaken for a clean commit. The CFT runner records the provider
+type/profile/delay, extension manifest version and build identifier, the loaded
+build SHA/dirty state, the checkout state, the tested commit, and
+geometry-check results in `artifacts/metacritic-chrome/result.json`. In local
+launch mode it fails before the scenario when the loaded bundle is stale,
+dirty, or does not report a valid SHA, or when the checkout is dirty; this also
+protects `--skip-build`. Attach mode preserves the real-provider path and
+reports the loaded SHA separately, without claiming it matches or verifies the
+current checkout.
 
 It also fails if dummy mode is requested against a production build. Dummy
 mode is therefore explicit both in the CLI and in the test-build marker.

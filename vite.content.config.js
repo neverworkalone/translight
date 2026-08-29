@@ -16,6 +16,17 @@ const buildCommit = process.env.TRANSLIGHT_BUILD_COMMIT?.trim() || (() => {
     return 'unknown';
   }
 })();
+const buildDirty = (() => {
+  if (process.env.TRANSLIGHT_BUILD_DIRTY?.trim() === 'true') return true;
+  try {
+    return execFileSync('git', ['status', '--porcelain=v1', '--untracked-files=all'], {
+      cwd: projectRoot,
+      encoding: 'utf8'
+    }).trim().length > 0;
+  } catch {
+    return null;
+  }
+})();
 const testProviderFactory = `${projectRoot}/src/translation/provider-factory.test-build.js`;
 
 function testProviderFactoryAlias() {
@@ -34,7 +45,8 @@ export default defineConfig({
   define: {
     __TRANSLIGHT_BUILD_KIND__: JSON.stringify(buildKind),
     __TRANSLIGHT_BUILD_IDENTIFIER__: JSON.stringify(buildIdentifier),
-    __TRANSLIGHT_BUILD_COMMIT__: JSON.stringify(buildCommit)
+    __TRANSLIGHT_BUILD_COMMIT__: JSON.stringify(buildCommit),
+    __TRANSLIGHT_BUILD_DIRTY__: JSON.stringify(buildDirty)
   },
   build: {
     target: 'es2022',

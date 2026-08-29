@@ -44,8 +44,10 @@ npm run test:metacritic:chrome -- \
 ```
 
 The runner verifies the extension service worker's test-build marker before
-configuring dummy mode and verifies that the loaded build SHA matches the
-checkout in local launch mode. This scenario invokes the real toolbar-action seam,
+configuring dummy mode and verifies that the loaded build SHA and clean-build
+state match the checkout in local launch mode. A dirty tracked file or
+non-ignored untracked input blocks commit-verified validation; ignored files
+are excluded. This scenario invokes the real toolbar-action seam,
 checks dummy output and incremental mutation discovery, forces a pending-work
 OFF → ON restart, drives navigation and browser Back, checks document/session
 state and duplicate source ids, compares fixture geometry to its pre-translation
@@ -76,8 +78,9 @@ profile; the runner may temporarily enable same-site continuation for the
 navigation scenario and restores that setting afterward. Pass
 `--browser-pid=<pid>` when CPU sampling is required in attach mode.
 Launch results use the loaded extension build SHA as `testedCommit`; attach
-results do not claim checkout verification when the loaded build is older or
-does not expose a SHA.
+results do not claim checkout verification when the loaded build is older,
+dirty, or does not expose a SHA. The loaded build's `dirty` state and the
+checkout's `checkoutDirty` state are recorded in the result artifact.
 The attached browser must already have Translight loaded; use a
 Translator-capable Chrome profile when the run requires real translation.
 Performance validation records eight timer-driven samples at the 250 ms

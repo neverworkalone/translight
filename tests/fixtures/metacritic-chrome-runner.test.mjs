@@ -57,8 +57,9 @@ describe('Metacritic Chrome runner', () => {
     const loadedCommit = 'a'.repeat(40);
 
     expect(() => resolveTestedCommit({
-      loadedBuild: {commit: loadedCommit},
+      loadedBuild: {commit: loadedCommit, dirty: false},
       checkoutCommit,
+      checkoutDirty: false,
       attachMode: false
     })).toThrow(new RegExp(`does not match checkout HEAD ${checkoutCommit}`, 'u'));
   });
@@ -67,8 +68,9 @@ describe('Metacritic Chrome runner', () => {
     const commit = 'a'.repeat(40);
 
     expect(resolveTestedCommit({
-      loadedBuild: {commit},
+      loadedBuild: {commit, dirty: false},
       checkoutCommit: commit,
+      checkoutDirty: false,
       attachMode: false
     })).toEqual({
       testedCommit: commit,
@@ -81,8 +83,9 @@ describe('Metacritic Chrome runner', () => {
   it('uses the loaded extension commit for attach mode without claiming checkout verification', () => {
     const loadedCommit = 'a'.repeat(40);
     const result = resolveTestedCommit({
-      loadedBuild: {commit: loadedCommit},
+      loadedBuild: {commit: loadedCommit, dirty: true},
       checkoutCommit: 'b'.repeat(40),
+      checkoutDirty: true,
       attachMode: true
     });
 
@@ -98,8 +101,31 @@ describe('Metacritic Chrome runner', () => {
     expect(() => resolveTestedCommit({
       loadedBuild: {kind: 'test', testBuild: true, commit: 'unknown'},
       checkoutCommit: 'b'.repeat(40),
+      checkoutDirty: false,
       attachMode: false
     })).toThrow(/does not report a valid build commit/u);
+  });
+
+  it('blocks a local launch when the loaded extension bundle is dirty', () => {
+    const commit = 'a'.repeat(40);
+
+    expect(() => resolveTestedCommit({
+      loadedBuild: {commit, dirty: true},
+      checkoutCommit: commit,
+      checkoutDirty: false,
+      attachMode: false
+    })).toThrow(/loaded extension build is dirty/u);
+  });
+
+  it('blocks a local launch when the current checkout is dirty', () => {
+    const commit = 'a'.repeat(40);
+
+    expect(() => resolveTestedCommit({
+      loadedBuild: {commit, dirty: false},
+      checkoutCommit: commit,
+      checkoutDirty: true,
+      attachMode: false
+    })).toThrow(/current checkout is dirty/u);
   });
 
   it('parses persistent attach mode without changing the selected scenario URL', () => {

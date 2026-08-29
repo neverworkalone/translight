@@ -10,11 +10,15 @@ const buildIdentifier = typeof __TRANSLIGHT_BUILD_IDENTIFIER__ === 'string'
 const buildCommit = typeof __TRANSLIGHT_BUILD_COMMIT__ === 'string'
   ? __TRANSLIGHT_BUILD_COMMIT__
   : null;
+const buildDirty = typeof __TRANSLIGHT_BUILD_DIRTY__ === 'boolean'
+  ? __TRANSLIGHT_BUILD_DIRTY__
+  : null;
 
 export const BUILD_INFO = Object.freeze({
   kind: buildKind,
   identifier: buildIdentifier,
   commit: buildCommit,
+  dirty: buildDirty,
   testBuild: buildKind === 'test'
 });
 

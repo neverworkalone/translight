@@ -1281,7 +1281,7 @@ function normalizeCommitSha(value) {
   return typeof value === 'string' && COMMIT_SHA_PATTERN.test(value) ? value : null;
 }
 
-function resolveTestedCommit({loadedBuild, checkoutCommit, attachMode = false} = {}) {
+function resolveTestedCommit({loadedBuild, checkoutCommit, checkoutDirty, attachMode = false} = {}) {
   const loadedCommit = normalizeCommitSha(loadedBuild?.commit);
   if (attachMode) {
     return {
@@ -1301,6 +1301,18 @@ function resolveTestedCommit({loadedBuild, checkoutCommit, attachMode = false} =
   }
   if (!expectedCommit) {
     throw new Error('The current checkout does not report a valid git HEAD commit.');
+  }
+  if (loadedBuild?.dirty !== false) {
+    throw new ValidationBlockedError(
+      'The loaded extension build is dirty or does not report clean build state. ' +
+      'Commit the relevant changes and rebuild the extension before running local CFT validation.'
+    );
+  }
+  if (checkoutDirty !== false) {
+    throw new ValidationBlockedError(
+      'The current checkout is dirty or its clean state could not be determined. ' +
+      'Commit the relevant changes before running local CFT validation.'
+    );
   }
   if (loadedCommit !== expectedCommit) {
     throw new Error(
@@ -1877,11 +1889,18 @@ async function main() {
   let tabId = null;
   let processResult = null;
   const checkoutCommit = (await execFileAsync('git', ['rev-parse', 'HEAD'], {cwd: REPOSITORY_ROOT})).stdout.trim();
+  const checkoutStatus = (await execFileAsync(
+    'git',
+    ['status', '--porcelain=v1', '--untracked-files=all'],
+    {cwd: REPOSITORY_ROOT}
+  )).stdout;
+  const checkoutDirty = checkoutStatus.trim().length > 0;
   const result = {
     runner: 'metacritic-chrome-runner',
     startedAt,
     commit: checkoutCommit,
     checkoutCommit,
+    checkoutDirty,
     testedCommit: null,
     testedCommitSource: null,
     testedCommitVerified: false,
@@ -1922,6 +1941,7 @@ async function main() {
     Object.assign(result, resolveTestedCommit({
       loadedBuild: result.extension.build,
       checkoutCommit,
+      checkoutDirty,
       attachMode
     }));
     if (options.provider === 'dummy') {
@@ -2023,6 +2043,7 @@ async function main() {
     }
   } catch (error) {
     result.error = {message: error.message, stack: error.stack};
+    if (error instanceof ValidationBlockedError) result.validationBlocked = true;
     result.testPassed = false;
     if (page) {
       result.failureStats = await readPageStats(page).catch(() => null);
@@ -2089,7 +2110,8 @@ async function main() {
     result.performance.validationPass = performanceValidationRequested &&
       result.performance.responsivenessPass === true &&
       result.performance.cpuRecoveryPass;
-    result.validationBlocked = performanceValidationRequested && result.process.supported !== true;
+    result.validationBlocked = result.validationBlocked === true ||
+      (performanceValidationRequested && result.process.supported !== true);
     result.testPassed = performanceValidationRequested && result.scenarioPassed === true &&
       result.performance.responsivenessPass === true &&
       result.performance.cpuRecoveryPass;

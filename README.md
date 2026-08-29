@@ -64,10 +64,13 @@ npm run test:metacritic:chrome -- \
 
 The runner also invokes `npm run build:test` automatically unless
 `--skip-build` is supplied. It verifies the loaded service worker's test-build
-marker before enabling the dummy provider. Use `--dummy-profile=expanded` to
-exercise wrapping and overflow with deterministic output, and pass
-`--chrome=/path/to/Chrome for Testing` when the binary is not in the default
-locations. Results are written to `artifacts/metacritic-chrome/result.json`.
+marker before enabling the dummy provider. Local commit verification also
+requires both the loaded bundle and the current checkout to be clean; tracked
+changes and non-ignored untracked inputs block the run, while ignored build
+artifacts do not. Use `--dummy-profile=expanded` to exercise wrapping and
+overflow with deterministic output, and pass `--chrome=/path/to/Chrome for
+Testing` when the binary is not in the default locations. Results are written
+to `artifacts/metacritic-chrome/result.json`.
 
 The dummy mode exercises extension action/background/content/`PageSession`/
 queue/provider/renderer, mutation discovery, navigation and Back, OFF → ON,
