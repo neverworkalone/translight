@@ -4,7 +4,8 @@ import {
   evaluateCpuRecovery,
   evaluateResponsiveness,
   parseArgs,
-  summarizePageSamples
+  summarizePageSamples,
+  summarizeRecoveryResponsiveness
 } from './metacritic-chrome-runner.mjs';
 
 describe('Metacritic Chrome runner', () => {
@@ -51,7 +52,7 @@ describe('Metacritic Chrome runner', () => {
     }).responsivenessPass).toBe(false);
   });
 
-  it('uses fixed idle and post-scenario CPU windows for the recovery gate', () => {
+  it('passes an immediate rolling CPU recovery window', () => {
     const samples = (totalCpu) => Array.from({length: 8}, () => ({totalCpu}));
 
     expect(evaluateCpuRecovery({
@@ -82,17 +83,19 @@ describe('Metacritic Chrome runner', () => {
     }).cpuRecovered).toBe(false);
   });
 
-  it('does not use cleanup samples in the scenario-immediate recovery window', async () => {
+  it('allows a responsive five-second CPU spike when a rolling window recovers', async () => {
     vi.useFakeTimers();
     const cpuValues = [
       20,
       ...Array.from({length: 8}, () => 20),
-      ...Array.from({length: 8}, () => 90),
+      ...Array.from({length: 20}, () => 100),
+      ...Array.from({length: 8}, () => 20),
       ...Array.from({length: 3}, () => 5)
     ];
     try {
       const sampler = new ProcessSampler(123, {
         sampleIntervalMs: 250,
+        now: () => Date.now(),
         readProcesses: async () => [{
           pid: 123,
           ppid: 1,
@@ -107,18 +110,103 @@ describe('Metacritic Chrome runner', () => {
       await vi.advanceTimersByTimeAsync(250 * 8);
       await baseline;
       const recovery = sampler.captureRecovery();
-      await vi.advanceTimersByTimeAsync(250 * 8);
+      let recoveryDone = false;
+      recovery.then(() => {
+        recoveryDone = true;
+      });
+      for (let tick = 0; tick < 40 && !recoveryDone; tick += 1) {
+        await vi.advanceTimersByTimeAsync(250);
+      }
       await recovery;
       const result = await sampler.stop();
 
-      expect(result.sampleCount).toBe(17);
+      expect(result.sampleCount).toBe(35);
       expect(result.baselineSampleCount).toBe(8);
-      expect(result.recoverySampleCount).toBe(8);
-      expect(result.recoveryAverageTotalCpu).toBe(90);
+      expect(result.recoverySampleCount).toBe(26);
+      expect(result.recoveryWindowCount).toBe(19);
+      expect(result.recoveryWindowFound).toBe(true);
+      expect(result.recoveryTimeMs).toBe(6500);
+      expect(result.recoveryAverageTotalCpu).toBe(40);
+      expect(result.cpuRecovered).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('fails CPU recovery when the rolling window never recovers before timeout', async () => {
+    vi.useFakeTimers();
+    const cpuValues = [
+      20,
+      ...Array.from({length: 8}, () => 20),
+      ...Array.from({length: 40}, () => 100)
+    ];
+    try {
+      const sampler = new ProcessSampler(123, {
+        sampleIntervalMs: 250,
+        now: () => Date.now(),
+        readProcesses: async () => [{
+          pid: 123,
+          ppid: 1,
+          cpu: cpuValues.shift(),
+          rssKb: 1,
+          command: 'Chrome'
+        }]
+      });
+
+      await sampler.start();
+      const baseline = sampler.captureBaseline();
+      await vi.advanceTimersByTimeAsync(250 * 8);
+      await baseline;
+      const recovery = sampler.captureRecovery();
+      let recoveryDone = false;
+      recovery.then(() => {
+        recoveryDone = true;
+      });
+      for (let tick = 0; tick < 40 && !recoveryDone; tick += 1) {
+        await vi.advanceTimersByTimeAsync(250);
+      }
+      await recovery;
+      const result = await sampler.stop();
+
+      expect(result.recoverySampleCount).toBe(40);
+      expect(result.recoveryTimedOut).toBe(true);
+      expect(result.recoveryWindowFound).toBe(false);
+      expect(result.recoveryTimeMs).toBeNull();
+      expect(result.supported).toBe(true);
       expect(result.cpuRecovered).toBe(false);
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('fails recovery responsiveness when a ping or long-task budget is exceeded', () => {
+    const cpuRecovery = evaluateCpuRecovery({
+      supported: true,
+      baselineSamples: Array.from({length: 8}, () => ({totalCpu: 20})),
+      recoverySamples: Array.from({length: 8}, () => ({totalCpu: 20}))
+    });
+    expect(cpuRecovery.cpuRecovered).toBe(true);
+
+    expect(summarizeRecoveryResponsiveness({
+      pings: [10, 251],
+      probe: {supported: true, maxLongTaskMs: 100}
+    })).toMatchObject({
+      cdpPingPass: false,
+      longTaskPass: true,
+      responsivenessPass: false
+    });
+    expect(summarizeRecoveryResponsiveness({
+      pings: [10],
+      probe: {supported: true, maxLongTaskMs: 501}
+    })).toMatchObject({
+      cdpPingPass: true,
+      longTaskPass: false,
+      responsivenessPass: false
+    });
+    expect(summarizeRecoveryResponsiveness({
+      pings: [],
+      probe: {supported: true, maxLongTaskMs: 100}
+    }).responsivenessPass).toBe(false);
   });
 
   it('marks failed process sampling unsupported for performance validation', async () => {

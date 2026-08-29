@@ -44,6 +44,8 @@ const MAX_LONG_TASK_MS = 500;
 const CPU_TAIL_SAMPLE_COUNT = 8;
 const CPU_TAIL_MARGIN = 25;
 const CPU_SAMPLE_WINDOW_TIMEOUT_MS = 15_000;
+const CPU_RECOVERY_TIMEOUT_MS = 10_000;
+const CPU_RECOVERY_CDP_PING_TIMEOUT_MS = 1_000;
 const SETTINGS_KEY = 'translight.settings.v1';
 
 function usage() {
@@ -535,33 +537,80 @@ function roundCpu(value) {
   return value == null ? null : Math.round(value * 100) / 100;
 }
 
-function evaluateCpuRecovery({supported, baselineSamples, recoverySamples}) {
+function findRecoveredCpuWindow({baselineAverage, recoverySamples, recoveryStartedAt = null}) {
+  let recoveryAverage = null;
+  for (let index = 0; index <= recoverySamples.length - CPU_TAIL_SAMPLE_COUNT; index += 1) {
+    const window = recoverySamples.slice(index, index + CPU_TAIL_SAMPLE_COUNT);
+    recoveryAverage = averageCpu(window);
+    if (baselineAverage != null && recoveryAverage != null &&
+      recoveryAverage <= baselineAverage + CPU_TAIL_MARGIN) {
+      const endSample = window.at(-1);
+      return {
+        found: true,
+        recoveryAverage,
+        recoveryTimeMs: recoveryStartedAt == null || endSample?.elapsedMs == null
+          ? null
+          : roundCpu(endSample.elapsedMs - recoveryStartedAt),
+        windowStartIndex: index
+      };
+    }
+  }
+  return {
+    found: false,
+    recoveryAverage,
+    recoveryTimeMs: null,
+    windowStartIndex: null
+  };
+}
+
+function evaluateCpuRecovery({
+  supported,
+  baselineSamples,
+  recoverySamples,
+  recoveryStartedAt = null,
+  recoveryTimedOut = false
+}) {
   const baselineAverage = averageCpu(baselineSamples);
-  const recoveryAverage = averageCpu(recoverySamples);
+  const recoveryWindow = findRecoveredCpuWindow({
+    baselineAverage,
+    recoverySamples,
+    recoveryStartedAt
+  });
   const windowsComplete = baselineSamples.length >= CPU_TAIL_SAMPLE_COUNT &&
     recoverySamples.length >= CPU_TAIL_SAMPLE_COUNT;
   return {
     baselineSampleCount: baselineSamples.length,
     recoverySampleCount: recoverySamples.length,
     baselineAverageTotalCpu: roundCpu(baselineAverage),
-    recoveryAverageTotalCpu: roundCpu(recoveryAverage),
+    recoveryAverageTotalCpu: roundCpu(recoveryWindow.recoveryAverage),
+    recoveryWindowCount: Math.max(0, recoverySamples.length - CPU_TAIL_SAMPLE_COUNT + 1),
+    recoveryWindowFound: recoveryWindow.found,
+    recoveryTimeoutMs: CPU_RECOVERY_TIMEOUT_MS,
+    recoveryTimeMs: recoveryWindow.recoveryTimeMs,
+    recoveryTimedOut,
     cpuRecovered: supported === true && windowsComplete &&
-      baselineAverage != null && recoveryAverage != null &&
-      recoveryAverage <= baselineAverage + CPU_TAIL_MARGIN
+      baselineAverage != null && recoveryWindow.found
   };
 }
 
 class ProcessSampler {
-  constructor(rootPid, {readProcesses = readChromeProcesses, sampleIntervalMs = PROCESS_SAMPLE_INTERVAL_MS} = {}) {
+  constructor(rootPid, {
+    readProcesses = readChromeProcesses,
+    sampleIntervalMs = PROCESS_SAMPLE_INTERVAL_MS,
+    now = () => performance.now()
+  } = {}) {
     this.rootPid = rootPid;
     this.readProcesses = readProcesses;
     this.sampleIntervalMs = sampleIntervalMs;
+    this.now = now;
     this.samples = [];
     this.timer = null;
     this.inFlight = false;
     this.error = null;
     this.baselineSamples = [];
     this.recoverySamples = [];
+    this.recoveryStartedAt = null;
+    this.recoveryTimedOut = false;
   }
 
   async start() {
@@ -580,7 +629,7 @@ class ProcessSampler {
         throw new Error(`No Chrome processes found for PID ${this.rootPid}.`);
       }
       this.samples.push({
-        elapsedMs: Math.round(performance.now() * 100) / 100,
+        elapsedMs: Math.round(this.now() * 100) / 100,
         totalCpu: processes.reduce((sum, process) => sum + process.cpu, 0),
         maxProcessCpu: Math.max(...processes.map((process) => process.cpu), 0),
         rssKb: processes.reduce((sum, process) => sum + process.rssKb, 0),
@@ -616,8 +665,39 @@ class ProcessSampler {
     return this.baselineSamples;
   }
 
-  async captureRecovery() {
-    this.recoverySamples = await this.captureWindow(CPU_TAIL_SAMPLE_COUNT);
+  async captureRecovery({onSample = null} = {}) {
+    const startIndex = this.samples.length;
+    this.recoveryStartedAt = this.now();
+    this.recoveryTimedOut = false;
+    let processedIndex = startIndex;
+    let recovered = false;
+    const deadline = Date.now() + CPU_RECOVERY_TIMEOUT_MS;
+    while (!this.error && Date.now() < deadline && !recovered) {
+      if (!this.timer) {
+        this.error = 'CPU sampler was not started.';
+        break;
+      }
+      const remainingMs = deadline - Date.now();
+      await wait(Math.min(this.sampleIntervalMs, remainingMs));
+      const newSamples = this.samples.slice(processedIndex);
+      for (const sample of newSamples) {
+        processedIndex += 1;
+        if (onSample) await onSample(sample);
+        this.recoverySamples = this.samples.slice(startIndex);
+        recovered = evaluateCpuRecovery({
+          supported: true,
+          baselineSamples: this.baselineSamples,
+          recoverySamples: this.recoverySamples,
+          recoveryStartedAt: this.recoveryStartedAt
+        }).cpuRecovered;
+        if (recovered) break;
+      }
+    }
+    this.recoverySamples = this.samples.slice(startIndex);
+    if (!this.error && !recovered && this.recoverySamples.length < CPU_TAIL_SAMPLE_COUNT) {
+      this.error = `Timed out waiting for ${CPU_TAIL_SAMPLE_COUNT} recovery CPU samples.`;
+    }
+    this.recoveryTimedOut = !this.error && !recovered;
     return this.recoverySamples;
   }
 
@@ -635,7 +715,9 @@ class ProcessSampler {
     const cpu = evaluateCpuRecovery({
       supported: !this.error,
       baselineSamples: this.baselineSamples,
-      recoverySamples: this.recoverySamples
+      recoverySamples: this.recoverySamples,
+      recoveryStartedAt: this.recoveryStartedAt,
+      recoveryTimedOut: this.recoveryTimedOut
     });
     return {
       supported: !this.error,
@@ -686,13 +768,13 @@ class PageSampler {
   }
 }
 
-async function evaluate(connection, expression, name = 'page') {
+async function evaluate(connection, expression, name = 'page', timeoutMs = 30_000) {
   const response = await connection.send('Runtime.evaluate', {
     expression,
     awaitPromise: true,
     returnByValue: true,
     userGesture: true
-  });
+  }, timeoutMs);
   if (response.exceptionDetails) {
     const description = response.exceptionDetails.exception?.description ??
       response.exceptionDetails.text ?? 'Runtime evaluation failed.';
@@ -756,9 +838,9 @@ async function readPagePerformanceProbe(page) {
   })()`);
 }
 
-async function measureCdpPing(page) {
+async function measureCdpPing(page, timeoutMs = 30_000) {
   const startedAt = performance.now();
-  await evaluate(page, 'performance.now()', 'page responsiveness probe');
+  await evaluate(page, 'performance.now()', 'page responsiveness probe', timeoutMs);
   return Math.round((performance.now() - startedAt) * 100) / 100;
 }
 
@@ -815,7 +897,7 @@ async function measureAction(page, label, action) {
   };
 }
 
-async function collectPagePerformance(page, actions = []) {
+async function collectPagePerformance(page, actions = [], recoveryPerformance = null) {
   const tailPings = [];
   for (let index = 0; index < 5; index += 1) {
     tailPings.push(await measureCdpPing(page));
@@ -825,7 +907,8 @@ async function collectPagePerformance(page, actions = []) {
   const actionPings = actions
     .map((action) => action.cdpPingMs)
     .filter((value) => Number.isFinite(value));
-  const allPings = [...actionPings, ...tailPings];
+  const recoveryPings = recoveryPerformance?.cdpPingMs ?? [];
+  const allPings = [...actionPings, ...tailPings, ...recoveryPings];
   const maxCdpPingMs = allPings.length ? Math.max(...allPings) : null;
   const responsiveness = evaluateResponsiveness({
     cdpPingSupported: allPings.length > 0,
@@ -833,12 +916,20 @@ async function collectPagePerformance(page, actions = []) {
     longTaskSupported: probe.supported,
     maxLongTaskMs: probe.maxLongTaskMs
   });
+  const recoveryResponsivenessPass = recoveryPerformance
+    ? recoveryPerformance.responsivenessPass === true
+    : true;
   return {
     cdpPingSupported: allPings.length > 0,
     maxCdpPingMs: maxCdpPingMs == null ? null : Math.round(maxCdpPingMs * 100) / 100,
     maxLongTaskMs: probe.supported ? probe.maxLongTaskMs : null,
     longTaskCount: probe.longTaskCount,
     ...responsiveness,
+    responsivenessPass: responsiveness.responsivenessPass && recoveryResponsivenessPass,
+    recoveryCdpPingMs: recoveryPings,
+    recoveryMaxCdpPingMs: recoveryPerformance?.maxCdpPingMs ?? null,
+    recoveryMaxLongTaskMs: recoveryPerformance?.maxLongTaskMs ?? null,
+    recoveryResponsivenessPass,
     tailCdpPingMs: tailPings
   };
 }
@@ -855,6 +946,30 @@ function evaluateResponsiveness({
     cdpPingPass,
     longTaskPass,
     responsivenessPass: cdpPingPass && longTaskPass
+  };
+}
+
+function summarizeRecoveryResponsiveness({pings, probe, error = null}) {
+  const recoveryPings = pings.filter((value) => Number.isFinite(value));
+  const maxCdpPingMs = recoveryPings.length ? Math.max(...recoveryPings) : null;
+  const recoveryProbe = probe ?? {supported: false, maxLongTaskMs: null};
+  const responsiveness = evaluateResponsiveness({
+    cdpPingSupported: recoveryPings.length > 0,
+    maxCdpPingMs,
+    longTaskSupported: recoveryProbe.supported === true,
+    maxLongTaskMs: recoveryProbe.maxLongTaskMs
+  });
+  const cdpPingPass = error == null && recoveryPings.length > 0 && responsiveness.cdpPingPass;
+  return {
+    cdpPingSupported: recoveryPings.length > 0,
+    cdpPingError: error,
+    cdpPingMs: recoveryPings,
+    maxCdpPingMs: maxCdpPingMs == null ? null : Math.round(maxCdpPingMs * 100) / 100,
+    longTaskSupported: recoveryProbe.supported === true,
+    maxLongTaskMs: recoveryProbe.supported === true ? recoveryProbe.maxLongTaskMs : null,
+    ...responsiveness,
+    cdpPingPass,
+    responsivenessPass: cdpPingPass && responsiveness.longTaskPass
   };
 }
 
@@ -1202,7 +1317,7 @@ async function runGalleryScenario({page, worker, options, result, tabId, capture
     stats.translationCount === 0 || stats.emptyTranslationCount > 0
   ).length;
   await wait(1000);
-  result.performance = await collectPagePerformance(page, [...actions, ...toggles]);
+  result.performance = await collectPagePerformance(page, [...actions, ...toggles], result.recoveryPerformance);
   result.scenarioPassed = result.pageSummary.routeChanges > 0 &&
     (options.skipTranslation || result.translationReady?.ready === true) &&
     result.pageSummary.emptyTranslationSamples === 0 &&
@@ -1329,7 +1444,7 @@ async function runNavigationScenario({page, worker, options, result, tabId, capt
     stats.translationCount === 0 || stats.emptyTranslationCount > 0
   ).length;
   await wait(1000);
-  result.performance = await collectPagePerformance(page, [...actions, ...toggles]);
+  result.performance = await collectPagePerformance(page, [...actions, ...toggles], result.recoveryPerformance);
   const allTranslationsReady = options.skipTranslation ||
     result.homepageTranslationSettled?.ready === true &&
     result.translationReadyByRoute.every(({ready}) => ready === true);
@@ -1469,9 +1584,35 @@ async function main() {
     }
     await startTracing(page);
     tracingStarted = true;
+    const recoveryPings = [];
+    let recoveryPingError = null;
     const captureCpuRecovery = processSampler
       ? async () => {
-        await processSampler.captureRecovery();
+        await processSampler.captureRecovery({
+          onSample: async () => {
+            if (recoveryPingError) return;
+            try {
+              const cdpPingMs = await measureCdpPing(page, CPU_RECOVERY_CDP_PING_TIMEOUT_MS);
+              recoveryPings.push(cdpPingMs);
+              if (cdpPingMs > MAX_CDP_PING_MS) {
+                recoveryPingError = `Recovery CDP ping exceeded ${MAX_CDP_PING_MS} ms.`;
+              }
+            } catch (error) {
+              recoveryPingError = error.message;
+            }
+          }
+        });
+        let recoveryProbe = null;
+        try {
+          recoveryProbe = await readPagePerformanceProbe(page);
+        } catch (error) {
+          recoveryPingError ??= error.message;
+        }
+        result.recoveryPerformance = summarizeRecoveryResponsiveness({
+          pings: recoveryPings,
+          probe: recoveryProbe,
+          error: recoveryPingError
+        });
         processResult = await processSampler.stop();
       }
       : null;
@@ -1509,6 +1650,11 @@ async function main() {
         recoverySampleCount: 0,
         baselineAverageTotalCpu: null,
         recoveryAverageTotalCpu: null,
+        recoveryWindowCount: 0,
+        recoveryWindowFound: false,
+        recoveryTimeoutMs: CPU_RECOVERY_TIMEOUT_MS,
+        recoveryTimeMs: null,
+        recoveryTimedOut: false,
         tailAverageTotalCpu: null,
         cpuRecovered: false,
         samples: []
@@ -1558,7 +1704,14 @@ async function main() {
   }
 }
 
-export {ProcessSampler, evaluateCpuRecovery, evaluateResponsiveness, parseArgs, summarizePageSamples};
+export {
+  ProcessSampler,
+  evaluateCpuRecovery,
+  evaluateResponsiveness,
+  parseArgs,
+  summarizePageSamples,
+  summarizeRecoveryResponsiveness
+};
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().catch((error) => {

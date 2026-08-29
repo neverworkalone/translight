@@ -54,11 +54,13 @@ navigation scenario and restores that setting afterward. Pass
 The attached browser must already have Translight loaded; use a
 Translator-capable Chrome profile when the run requires real translation.
 Performance validation records eight timer-driven samples at the 250 ms
-interval before the scenario and another eight samples immediately after the
-scenario (about two seconds per window), before translation OFF, trace/file
-cleanup, or other runner teardown. If attach mode has no `--browser-pid`, the
-run is explicitly a browser-flow smoke test and reports `smokePassed` instead
-of claiming `testPassed`.
+interval before the scenario. After the scenario it keeps translation ON and
+checks rolling eight-sample CPU windows for up to 10 seconds, stopping at the
+first recovered window and recording `recoveryTimeMs`, before translation OFF,
+trace/file cleanup, or other runner teardown. Recovery CDP pings and the page
+Long Task probe are included in the responsiveness gate. If attach mode has no
+`--browser-pid`, the run is explicitly a browser-flow smoke test and reports
+`smokePassed` instead of claiming `testPassed`.
 
 ## Guardian card translation placement
 
