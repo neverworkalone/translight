@@ -46,6 +46,40 @@ describe('PageSession', () => {
     session.stop();
   });
 
+  it('does not pass a Hangul-mixed block to the translation provider', async () => {
+    const mixedText = `${'a'.repeat(18)}가나`; // 2 Hangul / 20 letters.
+    const englishText = 'This is a pure English block.';
+    document.body.innerHTML = `
+      <section lang="en-US">
+        <p id="mixed">${mixedText}</p>
+        <p id="english">${englishText}</p>
+      </section>
+    `;
+    const calls = [];
+    const session = new PageSession({
+      generation: 140,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    try {
+      await session.start();
+
+      expect(calls).toEqual([englishText]);
+      expect(document.querySelector('#mixed translight-translation')).toBeNull();
+      expect([...document.querySelectorAll('translight-translation')].map((node) => node.textContent))
+        .toEqual([`ko:${englishText}`]);
+    } finally {
+      session.stop({notify: false});
+    }
+  });
+
   it.each([
     ['translation-only', TRANSLATION_MODES.TRANSLATION_ONLY],
     ['translation-original', TRANSLATION_MODES.TRANSLATION_ORIGINAL]
