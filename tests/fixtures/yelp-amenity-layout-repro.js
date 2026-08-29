@@ -5,6 +5,7 @@ const content = document.querySelector('#content');
 const amenitySources = [...document.querySelectorAll('[data-amenity]')];
 const originalContent = content.innerHTML;
 const labels = amenitySources.map((source) => source.dataset.amenity);
+const LAYOUT_TOLERANCE = 1;
 
 function rect(element) {
   const value = element?.getBoundingClientRect?.();
@@ -39,6 +40,49 @@ function snapshot() {
   });
 }
 
+function compareLayoutToBaseline(baseline, current, snapshotCount) {
+  const failures = [];
+  const metrics = [
+    ['source', 'x'],
+    ['source', 'width'],
+    ['item', 'x'],
+    ['item', 'width'],
+    ['wrap', 'x'],
+    ['wrap', 'width']
+  ];
+  for (const [index, expected] of baseline.entries()) {
+    const actual = current[index];
+    if (!actual) {
+      failures.push({label: expected.label, snapshotCount, property: 'missing'});
+      continue;
+    }
+    for (const [region, property] of metrics) {
+      const expectedValue = expected[region]?.[property];
+      const actualValue = actual[region]?.[property];
+      if (expectedValue == null || actualValue == null ||
+          Math.abs(actualValue - expectedValue) > LAYOUT_TOLERANCE) {
+        failures.push({
+          label: expected.label,
+          snapshotCount,
+          property: `${region}.${property}`,
+          expected: expectedValue,
+          actual: actualValue
+        });
+      }
+    }
+    if (actual.sourceParentChildCount !== expected.sourceParentChildCount) {
+      failures.push({
+        label: expected.label,
+        snapshotCount,
+        property: 'sourceParentChildCount',
+        expected: expected.sourceParentChildCount,
+        actual: actual.sourceParentChildCount
+      });
+    }
+  }
+  return failures;
+}
+
 async function waitForNextFrame() {
   await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 }
@@ -46,6 +90,7 @@ async function waitForNextFrame() {
 async function run() {
   const calls = [];
   const snapshots = [];
+  const baseline = snapshot();
   const session = new PageSession({
     generation: 9701,
     document,
@@ -73,6 +118,9 @@ async function run() {
   await waitForNextFrame();
   const translationCount = document.querySelectorAll('translight-translation').length;
   snapshots.push({count: translationCount, layout: snapshot()});
+  const layoutStabilityFailures = snapshots.flatMap(({count, layout}) =>
+    compareLayoutToBaseline(baseline, layout, count)
+  );
 
   const records = amenitySources.map((source) => session.renderer?.getRecordForElement(source));
   const placement = records.map((record) => {
@@ -95,8 +143,11 @@ async function run() {
     labels,
     providerCalls: calls,
     translationCount,
+    baseline,
     placement,
     snapshots,
+    layoutStabilityFailures,
+    layoutStableAcrossSnapshots: layoutStabilityFailures.length === 0,
     amenityTranslationCount,
     allAmenitiesInsideSource,
     restoredAfterStop,
@@ -106,6 +157,7 @@ async function run() {
       calls.includes('ADA-compliant main entrance') &&
       amenityTranslationCount === 4 &&
       allAmenitiesInsideSource &&
+      layoutStabilityFailures.length === 0 &&
       restoredAfterStop
   }, null, 2);
 }

@@ -204,7 +204,11 @@ and causes the translated labels to reflow or appear vertically.
 
 The repaired case must report `placement: ["inside", "inside", "inside", "inside"]`,
 `amenityTranslationCount: 4`, `allAmenitiesInsideSource: true`,
-`restoredAfterStop: true`, and `testPassed: true`.
+`layoutStableAcrossSnapshots: true`, `layoutStabilityFailures: []`,
+`restoredAfterStop: true`, and `testPassed: true`. The layout check captures
+the baseline before translation starts and compares each observed incremental
+and final snapshot within a 1px tolerance for the source, item, and wrapper
+positions/widths, plus the existing table child count.
 
 ## Goodreads review paragraph placement
 
