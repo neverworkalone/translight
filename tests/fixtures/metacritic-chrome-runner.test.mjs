@@ -1,5 +1,7 @@
 import {existsSync} from 'node:fs';
-import {mkdir, rm} from 'node:fs/promises';
+import {mkdtemp, rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {describe, expect, it, vi} from 'vitest';
 import {
   cleanupRunnerResources,
@@ -162,7 +164,8 @@ describe('Metacritic Chrome runner', () => {
         throw new Error('forced process-discovery failure');
       }),
       readProcesses: vi.fn(async () => processRows),
-      signalProcess
+      signalProcess,
+      platform: 'darwin'
     })).rejects.toThrow('forced process-discovery failure');
 
     expect(signalProcess).toHaveBeenCalledWith(203, 'SIGKILL');
@@ -172,9 +175,8 @@ describe('Metacritic Chrome runner', () => {
   });
 
   it('cleans outer resources when launch setup fails', async () => {
-    const profileDir = `/private/tmp/translight-cft-cleanup-test-${process.pid}-${Date.now()}`;
+    const profileDir = await mkdtemp(join(tmpdir(), 'translight-cft-cleanup-test-'));
     const localServer = {kill: vi.fn()};
-    await mkdir(profileDir, {recursive: true});
     try {
       await cleanupRunnerResources({
         chrome: null,

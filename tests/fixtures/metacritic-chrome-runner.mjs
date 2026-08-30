@@ -2012,7 +2012,8 @@ async function launchChrome(options, port, profileDir, {
   spawnProcess = spawn,
   waitForProcess = waitForChromeBrowserProcess,
   readProcesses = readProcessRows,
-  signalProcess = (pid, signal) => process.kill(pid, signal)
+  signalProcess = (pid, signal) => process.kill(pid, signal),
+  platform = process.platform
 } = {}) {
   const args = [
     `--remote-debugging-port=${port}`,
@@ -2029,7 +2030,8 @@ async function launchChrome(options, port, profileDir, {
   const launchSpec = createChromeLaunchSpec({
     chromePath: options.chromePath,
     args,
-    background: options.background
+    background: options.background,
+    platform
   });
   let launcher;
   try {
