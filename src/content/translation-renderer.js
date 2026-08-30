@@ -380,6 +380,19 @@ function getMixedContentDirectChildren(element, sourceTextNodes) {
   return directChildren;
 }
 
+function hasDirectTextBeforeNestedBlock(element, sourceTextNodes) {
+  const childNodes = Array.from(element?.childNodes ?? []);
+  const firstNestedBlockIndex = childNodes.findIndex(isNestedBlockNode);
+  if (firstNestedBlockIndex < 0) return false;
+
+  const directChildren = getMixedContentDirectChildren(element, sourceTextNodes);
+  const directChildIndexes = childNodes
+    .map((child, index) => directChildren.has(child) ? index : -1)
+    .filter((index) => index >= 0);
+  return directChildIndexes.length > 0 &&
+    Math.max(...directChildIndexes) < firstNestedBlockIndex;
+}
+
 function placeMixedContentTranslation(element, translation, sourceTextNodes) {
   const childNodes = Array.from(element.childNodes ?? []);
   const firstNestedBlockIndex = childNodes.findIndex(isNestedBlockNode);
@@ -1313,6 +1326,14 @@ function restorePlacement(record) {
 function placeTranslationAfterSource(record) {
   if (record?.placement === 'inside-before-first-block') {
     const {element, translation} = record;
+    if (hasDirectTextBeforeNestedBlock(element, record.sourceTextNodes)) {
+      const firstNestedBlock = Array.from(element.childNodes ?? []).find(isNestedBlockNode);
+      if (firstNestedBlock) {
+        markTranslationAttached(record);
+        insertBeforeIfNeeded(element, translation, firstNestedBlock);
+        return;
+      }
+    }
     markTranslationAttached(record);
     if (element?.parentNode && translation) appendIfNeeded(element, translation);
     return;
