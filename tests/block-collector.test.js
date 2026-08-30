@@ -109,6 +109,28 @@ describe('collectTranslationBlocks', () => {
     ]);
   });
 
+  it('keeps linked table values translatable while excluding a real navigation container', () => {
+    document.body.innerHTML = `
+      <table class="trophy-overview">
+        <tbody>
+          <tr><td><nobr><a href="#interactive-drama">Interactive Drama</a></nobr></td></tr>
+          <tr><th>
+            <nobr><a href="#fbi-investigator">FBI Investigator</a></nobr>
+            <nobr><a href="#nerd">Nerd</a></nobr>
+          </th></tr>
+        </tbody>
+      </table>
+      <nav aria-label="Guide navigation">
+        <div><a href="#overview">Overview</a><a href="#roadmap">Roadmap</a></div>
+      </nav>
+    `;
+
+    expect(collectTranslationBlocks(document.body).map((block) => block.text)).toEqual([
+      'Interactive Drama',
+      'FBI Investigator Nerd'
+    ]);
+  });
+
   it('does not let PSNProfiles TOC segmentation wrappers hide the source link', () => {
     document.head.innerHTML = `
       <style>

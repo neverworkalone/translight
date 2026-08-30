@@ -173,6 +173,10 @@ function isNavigationLike(element, text, {directContentOnly = false} = {}) {
   // Figure captions commonly link to the referenced films, but the links are
   // part of the caption content rather than a navigation list.
   if (element.matches('figcaption')) return false;
+  // Table cells commonly contain linked data values (for example, multiple
+  // trophies in one row), so link density is not enough to classify them as
+  // navigation. The semantic/known navigation checks above still apply.
+  if (element.matches('td,th')) return false;
   const links = Array.from(element.querySelectorAll('a'))
     .filter((link) => !directContentOnly || isDirectContentLink(element, link));
   if (links.length < 2 || text.length === 0) return false;
