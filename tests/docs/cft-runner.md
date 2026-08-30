@@ -21,8 +21,14 @@ npm run test:metacritic:chrome
 Use `--scenario=navigation` for the homepage → Latest News → New and Notable
 → back flow, `--cycles=5` for more repetitions, or `--skip-translation` to
 smoke-test browser control without requiring Chrome's Translator model. The
-runner auto-detects Chrome for Testing or Chromium; pass
-`--chrome=/path/to/browser` when it is installed elsewhere. A temporary Chrome
+runner auto-detects Chrome for Testing in the repository's sibling
+`../codex/chrome-mac-arm64` directory, as well as the usual application and
+system locations. Pass `--chrome=/path/to/browser` when it is installed
+elsewhere. On macOS, a launched app-bundled browser is visible but starts with
+`open -n -g`, so it gets a distinct app instance while the current app keeps
+focus; use `--foreground` to opt into the old activating behavior. The runner
+claims its browser by matching both the temporary profile and debugging port,
+and removes a partially launched browser if startup fails. A temporary Chrome
 profile is removed after the run unless `--keep-profile` is supplied.
 
 The runner verifies the extension service worker's test-build marker before
