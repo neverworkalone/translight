@@ -270,7 +270,7 @@ function createChromeLaunchSpec({chromePath, args, background, platform = proces
   if (!appBundlePath) return {command: chromePath, args, background: false};
   return {
     command: 'open',
-    args: ['-g', '-a', appBundlePath, '--args', ...args],
+    args: ['-n', '-g', '-a', appBundlePath, '--args', ...args],
     background: true
   };
 }
@@ -598,30 +598,104 @@ async function readChromeProcesses(rootPid) {
   return [...selected.values()];
 }
 
-function isChromeBrowserProcess(row, executablePath, profileDir) {
+function hasProcessArgument(command, name, value) {
+  const escapedValue = String(value).replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+  return new RegExp(`(?:^|\\s)${name}=${escapedValue}(?=\\s|$)`, 'u').test(command);
+}
+
+function isChromeBrowserProcess(row, executablePath, profileDir, debuggingPort) {
   const executablePrefix = `${executablePath} `;
   return (row.command === executablePath || row.command.startsWith(executablePrefix)) &&
-    row.command.includes(`--user-data-dir=${profileDir}`) &&
+    hasProcessArgument(row.command, '--user-data-dir', profileDir) &&
+    hasProcessArgument(row.command, '--remote-debugging-port', debuggingPort) &&
     !/\s--type=/u.test(row.command);
 }
 
-async function waitForChromeBrowserProcess(executablePath, profileDir, timeoutMs = 15_000) {
+function findChromeBrowserProcesses(rows, executablePath, profileDir, debuggingPort) {
+  return rows.filter((row) => isChromeBrowserProcess(row, executablePath, profileDir, debuggingPort));
+}
+
+function findProcessTreePids(rows, rootPids) {
+  const children = new Map();
+  for (const row of rows) {
+    const siblings = children.get(row.ppid) ?? [];
+    siblings.push(row.pid);
+    children.set(row.ppid, siblings);
+  }
+  const rowsByPid = new Map(rows.map((row) => [row.pid, row]));
+  const selected = [];
+  const visited = new Set();
+  const visit = (pid) => {
+    if (visited.has(pid)) return;
+    visited.add(pid);
+    for (const childPid of children.get(pid) ?? []) visit(childPid);
+    if (rowsByPid.has(pid)) selected.push(pid);
+  };
+  for (const rootPid of rootPids) visit(rootPid);
+  return selected;
+}
+
+async function waitForChromeBrowserProcess(
+  executablePath,
+  profileDir,
+  debuggingPort,
+  timeoutMs = 15_000,
+  {readProcesses = readProcessRows, sleep = wait} = {}
+) {
   const deadline = Date.now() + timeoutMs;
   let lastError;
+  let lastRows = [];
   while (Date.now() < deadline) {
     try {
-      const rows = await readProcessRows();
-      const browser = rows.find((row) => isChromeBrowserProcess(row, executablePath, profileDir));
+      lastRows = await readProcesses();
+      const browser = findChromeBrowserProcesses(
+        lastRows,
+        executablePath,
+        profileDir,
+        debuggingPort
+      )[0];
       if (browser) return browser.pid;
     } catch (error) {
       lastError = error;
     }
-    await wait(100);
+    await sleep(100);
   }
-  throw new Error(
+  const error = new Error(
     `Chrome browser process did not start for ${executablePath}. ` +
     `${lastError?.message ?? 'timeout'}`
   );
+  error.processRows = lastRows;
+  throw error;
+}
+
+async function terminateChromeBrowserProcesses(
+  executablePath,
+  profileDir,
+  debuggingPort,
+  {
+    readProcesses = readProcessRows,
+    processRows = null,
+    signalProcess = (pid, signal) => process.kill(pid, signal),
+    signal = 'SIGKILL'
+  } = {}
+) {
+  let rows = processRows ?? [];
+  try {
+    rows = await readProcesses();
+  } catch (error) {
+    if (rows.length === 0) throw error;
+  }
+  const browserPids = findChromeBrowserProcesses(rows, executablePath, profileDir, debuggingPort)
+    .map((row) => row.pid);
+  const pids = findProcessTreePids(rows, browserPids);
+  for (const pid of pids) {
+    try {
+      signalProcess(pid, signal);
+    } catch (error) {
+      if (error.code !== 'ESRCH') throw error;
+    }
+  }
+  return pids;
 }
 
 function averageCpu(samples) {
@@ -1934,7 +2008,12 @@ function createChromeProcessHandle(launcher, pid, background) {
   };
 }
 
-async function launchChrome(options, port, profileDir) {
+async function launchChrome(options, port, profileDir, {
+  spawnProcess = spawn,
+  waitForProcess = waitForChromeBrowserProcess,
+  readProcesses = readProcessRows,
+  signalProcess = (pid, signal) => process.kill(pid, signal)
+} = {}) {
   const args = [
     `--remote-debugging-port=${port}`,
     '--remote-debugging-address=127.0.0.1',
@@ -1952,14 +2031,56 @@ async function launchChrome(options, port, profileDir) {
     args,
     background: options.background
   });
-  const launcher = spawn(launchSpec.command, launchSpec.args, {
-    cwd: REPOSITORY_ROOT,
-    stdio: 'ignore'
-  });
-  const pid = launchSpec.background
-    ? await waitForChromeBrowserProcess(options.chromePath, profileDir)
-    : launcher.pid;
-  return createChromeProcessHandle(launcher, pid, launchSpec.background);
+  let launcher;
+  try {
+    launcher = spawnProcess(launchSpec.command, launchSpec.args, {
+      cwd: REPOSITORY_ROOT,
+      stdio: 'ignore'
+    });
+    const pid = launchSpec.background
+      ? await waitForProcess(options.chromePath, profileDir, port, 15_000, {readProcesses})
+      : launcher.pid;
+    if (!pid) throw new Error('Chrome launcher did not provide a process ID.');
+    return createChromeProcessHandle(launcher, pid, launchSpec.background);
+  } catch (error) {
+    if (launchSpec.background) {
+      await terminateChromeBrowserProcesses(
+        options.chromePath,
+        profileDir,
+        port,
+        {readProcesses, processRows: error.processRows, signalProcess}
+      ).catch((cleanupError) => {
+        error.cleanupError ??= cleanupError.message;
+      });
+    }
+    if (launcher && launcher.exitCode == null && launcher.signalCode == null) {
+      try {
+        launcher.kill('SIGKILL');
+      } catch (cleanupError) {
+        error.cleanupError ??= cleanupError.message;
+      }
+    }
+    throw error;
+  }
+}
+
+async function cleanupRunnerResources({
+  chrome,
+  localServer,
+  ownsProfile,
+  profileDir,
+  keepBrowser,
+  keepProfile
+}) {
+  if (chrome && !keepBrowser) {
+    chrome.kill('SIGTERM');
+    await wait(500);
+    if (chrome.isRunning()) chrome.kill('SIGKILL');
+  } else chrome?.unref?.();
+  if (localServer) localServer.kill('SIGTERM');
+  if (ownsProfile && !keepProfile) {
+    await rm(profileDir, {recursive: true, force: true});
+  }
 }
 
 async function main() {
@@ -1991,12 +2112,31 @@ async function main() {
     }
   }
   await mkdir(options.outputDir, {recursive: true});
-  const localServer = await ensureLocalServer(options.url);
-  const port = options.debuggingPort ?? await getFreePort();
   const ownsProfile = !attachMode && !options.profileDir;
   const profileDir = options.profileDir ?? `/private/tmp/translight-chrome-${process.pid}-${Date.now()}`;
-  if (!attachMode) await mkdir(profileDir, {recursive: true});
-  const chrome = attachMode ? null : await launchChrome(options, port, profileDir);
+  let localServer = null;
+  let port = options.debuggingPort;
+  let chrome = null;
+  try {
+    localServer = await ensureLocalServer(options.url);
+    port ??= await getFreePort();
+    if (!attachMode) {
+      await mkdir(profileDir, {recursive: true});
+      chrome = await launchChrome(options, port, profileDir);
+    }
+  } catch (error) {
+    await cleanupRunnerResources({
+      chrome,
+      localServer,
+      ownsProfile,
+      profileDir,
+      keepBrowser: options.keepBrowser,
+      keepProfile: options.keepProfile
+    }).catch((cleanupError) => {
+      error.cleanupError ??= cleanupError.message;
+    });
+    throw error;
+  }
   const processSampler = chrome?.pid || options.browserPid
     ? new ProcessSampler(chrome?.pid ?? options.browserPid)
     : null;
@@ -2203,15 +2343,14 @@ async function main() {
     if (settingsSnapshot && worker) await restoreSettings(worker, settingsSnapshot);
     worker?.close();
     page?.close();
-    if (chrome && !options.keepBrowser) {
-      chrome.kill('SIGTERM');
-      await wait(500);
-      if (chrome.isRunning()) chrome.kill('SIGKILL');
-    } else chrome?.unref?.();
-    if (localServer) localServer.kill('SIGTERM');
-    if (ownsProfile && !options.keepProfile) {
-      await rm(profileDir, {recursive: true, force: true});
-    }
+    await cleanupRunnerResources({
+      chrome,
+      localServer,
+      ownsProfile,
+      profileDir,
+      keepBrowser: options.keepBrowser,
+      keepProfile: options.keepProfile
+    });
     result.finishedAt = new Date().toISOString();
     result.profile.cleaned = ownsProfile && !options.keepProfile;
     result.performance ??= {
@@ -2252,6 +2391,8 @@ export {
   evaluateCpuRecovery,
   evaluateResponsiveness,
   finalizeLayoutReport,
+  isChromeBrowserProcess,
+  launchChrome,
   parseArgs,
   resolveTestedCommit,
   summarizePageSamples,

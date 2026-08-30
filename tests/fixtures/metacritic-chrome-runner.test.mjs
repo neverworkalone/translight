@@ -5,6 +5,8 @@ import {
   evaluateCpuRecovery,
   evaluateResponsiveness,
   finalizeLayoutReport,
+  isChromeBrowserProcess,
+  launchChrome,
   parseArgs,
   resolveTestedCommit,
   summarizePageSamples,
@@ -65,6 +67,7 @@ describe('Metacritic Chrome runner', () => {
     })).toEqual({
       command: 'open',
       args: [
+        '-n',
         '-g',
         '-a',
         '/tmp/Google Chrome for Testing.app',
@@ -79,6 +82,90 @@ describe('Metacritic Chrome runner', () => {
       background: true,
       platform: 'linux'
     })).toEqual({command: chromePath, args: browserArgs, background: false});
+  });
+
+  it('requires the run profile and debugging port when identifying its browser', () => {
+    const chromePath = '/tmp/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
+    const profileDir = '/private/tmp/translight-cft-profile';
+    const browserCommand = `${chromePath} --remote-debugging-port=9222 --user-data-dir=${profileDir}`;
+    const makeRow = (command) => ({pid: 123, ppid: 1, cpu: 0, rssKb: 1, command});
+
+    expect(isChromeBrowserProcess(makeRow(browserCommand), chromePath, profileDir, 9222)).toBe(true);
+    expect(isChromeBrowserProcess(
+      makeRow(browserCommand.replace('9222', '9223')),
+      chromePath,
+      profileDir,
+      9222
+    )).toBe(false);
+    expect(isChromeBrowserProcess(
+      makeRow(browserCommand.replace('9222', '92220')),
+      chromePath,
+      profileDir,
+      9222
+    )).toBe(false);
+    expect(isChromeBrowserProcess(
+      makeRow(`${chromePath} --remote-debugging-port=9222 --user-data-dir=/private/tmp/other`),
+      chromePath,
+      profileDir,
+      9222
+    )).toBe(false);
+    expect(isChromeBrowserProcess(
+      makeRow(`${browserCommand} --type=renderer`),
+      chromePath,
+      profileDir,
+      9222
+    )).toBe(false);
+  });
+
+  it('cleans owned browser processes when background launch discovery fails', async () => {
+    const chromePath = '/tmp/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
+    const profileDir = '/private/tmp/translight-cft-profile';
+    const port = 9222;
+    const launcher = {
+      pid: 101,
+      exitCode: null,
+      signalCode: null,
+      kill: vi.fn(),
+      unref: vi.fn()
+    };
+    const processRows = [
+      {
+        pid: 202,
+        ppid: 1,
+        cpu: 0,
+        rssKb: 1,
+        command: `${chromePath} --remote-debugging-port=${port} --user-data-dir=${profileDir}`
+      },
+      {
+        pid: 203,
+        ppid: 202,
+        cpu: 0,
+        rssKb: 1,
+        command: `${chromePath} --type=renderer --user-data-dir=${profileDir}`
+      },
+      {
+        pid: 204,
+        ppid: 1,
+        cpu: 0,
+        rssKb: 1,
+        command: `${chromePath} --remote-debugging-port=9223 --user-data-dir=${profileDir}`
+      }
+    ];
+    const signalProcess = vi.fn();
+
+    await expect(launchChrome({chromePath, background: true, url: 'about:blank'}, port, profileDir, {
+      spawnProcess: vi.fn(() => launcher),
+      waitForProcess: vi.fn(async () => {
+        throw new Error('forced process-discovery failure');
+      }),
+      readProcesses: vi.fn(async () => processRows),
+      signalProcess
+    })).rejects.toThrow('forced process-discovery failure');
+
+    expect(signalProcess).toHaveBeenCalledWith(203, 'SIGKILL');
+    expect(signalProcess).toHaveBeenCalledWith(202, 'SIGKILL');
+    expect(signalProcess).not.toHaveBeenCalledWith(204, 'SIGKILL');
+    expect(launcher.kill).toHaveBeenCalledWith('SIGKILL');
   });
 
   it('rejects invalid dummy provider settings', () => {
