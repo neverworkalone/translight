@@ -390,26 +390,52 @@ describe('TranslationRenderer', () => {
     expect(window.getComputedStyle(generatedText).display).toBe('inline-block');
   });
 
-  it('adds spacing between PSNProfiles overview items without matching generic overview blocks', () => {
+  it('translates PSNProfiles overview labels inside their badges without repeating values', () => {
     document.body.innerHTML = `
       <div id="header"><div class="navigation"></div></div>
       <div id="banner"><div class="guide-info"></div></div>
       <div class="overview-info">
-        <span class="tag">3/10<br>Difficulty</span>
-        <span class="tag">1<br>Playthrough</span>
-        <span class="tag">20<br>Hours</span>
+        <span class="tag">
+          <span class="typo-top">3/10</span><br>
+          <span class="typo-bottom">Difficulty</span>
+        </span>
+        <span class="tag">
+          <span class="typo-top">1</span><br>
+          <span class="typo-bottom">Playthrough</span>
+        </span>
+        <span class="tag">
+          <span class="typo-top">20</span><br>
+          <span class="typo-bottom">Hours</span>
+        </span>
       </div>
     `;
     const renderer = new TranslationRenderer({document, sessionId: 'psnprofiles-overview-session'});
-    const [block] = collectTranslationBlocks(document.body);
-    const translation = renderer.insert({
+    const blocks = collectTranslationBlocks(document.body);
+    const translations = blocks.map((block, index) => renderer.insert({
       ...block,
-      translatedText: '3/10 난이도 1 플레이 20시간'
-    });
-    const generatedText = translation.querySelector('[data-translight-text="true"]');
+      translatedText: ['난이도', '플레이스루', '시간'][index]
+    }));
+    const firstTranslation = translations[0];
+    const overview = document.querySelector('.overview-info');
 
-    expect(translation.getAttribute(PSNPROFILES_OVERVIEW_ATTRIBUTE)).toBe('true');
-    expect(renderer.style.textContent).toContain('word-spacing: 0.35em !important');
+    expect(blocks.map((block) => block.text)).toEqual(['Difficulty', 'Playthrough', 'Hours']);
+    expect(translations).toHaveLength(3);
+    expect(translations.every((translation) =>
+      translation.getAttribute(PSNPROFILES_OVERVIEW_ATTRIBUTE) === 'true'
+    )).toBe(true);
+    expect(translations.map((translation) => translation.textContent)).toEqual([
+      '난이도',
+      '플레이스루',
+      '시간'
+    ]);
+    expect(overview.querySelectorAll(':scope > .tag > translight-translation')).toHaveLength(3);
+    expect(overview.querySelector(':scope > translight-translation')).toBeNull();
+    expect(overview.querySelectorAll('.typo-top')).toHaveLength(3);
+    expect(overview.querySelectorAll('.typo-top')[0].textContent).toBe('3/10');
+    expect(overview.querySelectorAll('.typo-top')[1].textContent).toBe('1');
+    expect(overview.querySelectorAll('.typo-top')[2].textContent).toBe('20');
+    expect(renderer.style.textContent).toContain('display: inline !important');
+    expect(renderer.style.textContent).toContain('margin: 0 0 0 0.35em !important');
 
     renderer.removeAll();
     document.body.innerHTML = `
@@ -423,7 +449,7 @@ describe('TranslationRenderer', () => {
       translatedText: '일반 개요 텍스트'
     });
 
-    expect(generatedText.isConnected).toBe(false);
+    expect(firstTranslation.isConnected).toBe(false);
     expect(genericTranslation.hasAttribute(PSNPROFILES_OVERVIEW_ATTRIBUTE)).toBe(false);
     expect(genericTranslation.previousElementSibling).toBe(genericOverview);
 

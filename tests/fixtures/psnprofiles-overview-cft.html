@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>PSNProfiles overview CFT fixture</title>
+    <style>
+      :root { color: #172033; font: 16px/1.5 system-ui, sans-serif; }
+      body { margin: 0; background: #f5f7fb; }
+      #header { padding: 16px 24px; background: #111; color: #fff; }
+      #header .navigation { max-width: 960px; margin: 0 auto; }
+      #banner { padding: 36px 24px; background: #202020; color: #fff; }
+      #banner .guide-info { max-width: 960px; margin: 0 auto; }
+      #metacritic-root { max-width: 960px; margin: 0 auto; padding: 24px 24px 1200px; }
+      .fixture-card { margin: 0 0 20px; padding: 20px; background: #fff; border: 1px solid #d9dfeb; }
+      h1, h2, h3, p { margin: 0 0 8px; }
+      p { max-width: 720px; }
+      a { color: #164eaa; }
+      .overview-info { text-align: center; margin: 0 0 20px; }
+      .overview-info .tag {
+        width: 106px;
+        display: inline-block;
+        margin: 0 0 0 9px;
+        padding: 2px 8px 4px;
+        box-sizing: border-box;
+        border-radius: 2px;
+        color: #fff;
+        text-align: center;
+        font-size: 12px;
+        line-height: 11px;
+        text-transform: uppercase;
+      }
+      .overview-info .tag:nth-child(1) { background: #b38811; }
+      .overview-info .tag:nth-child(2) { background: #488846; }
+      .overview-info .tag:nth-child(3) { background: #898825; }
+      .overview-info .tag > span { color: #fff; }
+      .typo-top { font-weight: 700; }
+      .typo-bottom { font-weight: 400; }
+      #fixture-status { position: fixed; right: 12px; bottom: 12px; z-index: 2; padding: 8px 12px; background: #172033; color: #fff; font: 12px ui-monospace, monospace; }
+    </style>
+  </head>
+  <body>
+    <div id="header"><div class="navigation">Guides</div></div>
+    <div id="banner"><div class="guide-info">PSNProfiles guide shell</div></div>
+    <div id="fixture-status">home</div>
+    <main id="metacritic-root"></main>
+    <script type="module" src="/tests/fixtures/psnprofiles-overview-cft.js"></script>
+  </body>
+</html>

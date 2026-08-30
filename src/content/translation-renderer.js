@@ -11,7 +11,8 @@ import {
   hasVisibleBlockDescendant,
   isExcluded,
   isHidden,
-  isPsnProfilesPage
+  isPsnProfilesPage,
+  PSNPROFILES_OVERVIEW_LABEL_SELECTOR
 } from './block-collector.js';
 import {isTranslatableBlock} from './language.js';
 import {hashSourceText} from './translation-queue.js';
@@ -151,9 +152,11 @@ function syncPsnProfilesOverview(record) {
   const {element, translation, placement} = record ?? {};
   if (!translation) return;
   const overview = element?.closest?.('.overview-info');
+  const isOverviewLabel = element?.matches?.(PSNPROFILES_OVERVIEW_LABEL_SELECTOR);
   const isOverview = Boolean(overview &&
     (placement === 'inside' || placement === 'sibling') &&
-    (element === overview || element.matches?.(SEGMENT_SELECTOR) || element.parentElement === overview) &&
+    (element === overview || element.matches?.(SEGMENT_SELECTOR) ||
+      element.parentElement === overview || isOverviewLabel) &&
     isPsnProfilesPage(element.ownerDocument));
   if (isOverview) translation.setAttribute(PSNPROFILES_OVERVIEW_ATTRIBUTE, GENERATED_VALUE);
   else translation.removeAttribute(PSNPROFILES_OVERVIEW_ATTRIBUTE);
@@ -1590,7 +1593,7 @@ function styleText(sessionId, presentation) {
   const tableLinkTranslationSelector = `${tableLinkGroupSelector} > ${selector}`;
   const translationTextSelector = `${selector} > [${TRANSLATION_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"]`;
   const styledTranslationTextSelector = `${styledSelector} > [${TRANSLATION_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"]`;
-  const psnProfilesOverviewTextSelector = `${styledSelector}[${PSNPROFILES_OVERVIEW_ATTRIBUTE}="${GENERATED_VALUE}"] > [${TRANSLATION_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"]`;
+  const psnProfilesOverviewTranslationSelector = `${styledSelector}[${PSNPROFILES_OVERVIEW_ATTRIBUTE}="${GENERATED_VALUE}"]`;
   const textStyleSelector = (style) =>
     `${styledSelector}[${STYLE_ATTRIBUTE}="${style}"], ${replacementTextSelector}[${STYLE_ATTRIBUTE}="${style}"]`;
   const hiddenSelector = `[${HIDDEN_ATTRIBUTE}="true"][${SESSION_ATTRIBUTE}="${escapeAttribute(sessionId)}"]`;
@@ -1755,8 +1758,11 @@ function styleText(sessionId, presentation) {
       margin-left: ${TABLE_LINK_ITEM_GAP} !important;
     }
 
-    ${psnProfilesOverviewTextSelector} {
-      word-spacing: ${TABLE_LINK_ITEM_GAP} !important;
+    ${psnProfilesOverviewTranslationSelector} {
+      display: inline !important;
+      margin: 0 0 0 ${TABLE_LINK_ITEM_GAP} !important;
+      font-size: inherit !important;
+      white-space: normal !important;
     }
 
     ${styleSelector(TRANSLATION_STYLES.LEFT_BORDER)} {
