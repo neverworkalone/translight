@@ -1,6 +1,7 @@
 import {describe, expect, it, vi} from 'vitest';
 import {
   ProcessSampler,
+  createChromeLaunchSpec,
   evaluateCpuRecovery,
   evaluateResponsiveness,
   finalizeLayoutReport,
@@ -44,6 +45,40 @@ describe('Metacritic Chrome runner', () => {
       dummyDelayMs: 37,
       cycles: 2
     });
+  });
+
+  it('defaults to background browser launch on macOS and supports explicit overrides', () => {
+    expect(parseArgs([]).background).toBe(process.platform === 'darwin');
+    expect(parseArgs(['--background']).background).toBe(true);
+    expect(parseArgs(['--foreground']).background).toBe(false);
+  });
+
+  it('uses macOS open -g for an app-bundled browser while preserving browser arguments', () => {
+    const chromePath = '/tmp/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
+    const browserArgs = ['--remote-debugging-port=1234', 'about:blank'];
+
+    expect(createChromeLaunchSpec({
+      chromePath,
+      args: browserArgs,
+      background: true,
+      platform: 'darwin'
+    })).toEqual({
+      command: 'open',
+      args: [
+        '-g',
+        '-a',
+        '/tmp/Google Chrome for Testing.app',
+        '--args',
+        ...browserArgs
+      ],
+      background: true
+    });
+    expect(createChromeLaunchSpec({
+      chromePath,
+      args: browserArgs,
+      background: true,
+      platform: 'linux'
+    })).toEqual({command: chromePath, args: browserArgs, background: false});
   });
 
   it('rejects invalid dummy provider settings', () => {

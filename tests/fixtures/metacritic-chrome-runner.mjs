@@ -16,7 +16,18 @@ const DEFAULT_ARTICLE_URL =
   'https://www.metacritic.com/pictures/august-september-2026-game-preview-wolverine-silent-hill-townfall-control-resonant/5';
 const DEFAULT_HOMEPAGE_URL = 'https://www.metacritic.com/';
 const DEFAULT_OUTPUT_DIRECTORY = resolve(REPOSITORY_ROOT, 'artifacts/metacritic-chrome');
+const LOCAL_CFT_BROWSER = resolve(
+  REPOSITORY_ROOT,
+  '..',
+  'codex',
+  'chrome-mac-arm64',
+  'Google Chrome for Testing.app',
+  'Contents',
+  'MacOS',
+  'Google Chrome for Testing'
+);
 const BROWSER_CANDIDATES = [
+  LOCAL_CFT_BROWSER,
   '/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',
   '/Applications/Chromium.app/Contents/MacOS/Chromium',
   '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
@@ -52,6 +63,7 @@ const CPU_SAMPLE_WINDOW_TIMEOUT_MS = 15_000;
 const CPU_RECOVERY_TIMEOUT_MS = 10_000;
 const CPU_RECOVERY_CDP_PING_TIMEOUT_MS = 1_000;
 const SETTINGS_KEY = 'translight.settings.v1';
+const DEFAULT_BACKGROUND = process.platform === 'darwin';
 
 function usage() {
   return `Usage:
@@ -71,6 +83,8 @@ Options:
   --profile-dir=<path>            Keep/use an explicit Chrome user-data directory
   --debugging-port=<number>       Attach to an existing browser DevTools endpoint
   --browser-pid=<number>          Optional browser PID for CPU sampling in attach mode
+  --background                    Show the launched window without activating it (default on macOS)
+  --foreground                    Activate the launched browser window
   --skip-build                    Do not run npm run build before launching Chrome
   --skip-translation              Do not toggle translation; test browser flow only
   --keep-browser                  Leave the launched Chrome running after the run
@@ -116,6 +130,7 @@ function parseArgs(argv) {
     debuggingPort: null,
     browserPid: null,
     urlProvided: false,
+    background: DEFAULT_BACKGROUND,
     skipBuild: false,
     skipTranslation: false,
     keepBrowser: false,
@@ -141,6 +156,14 @@ function parseArgs(argv) {
     }
     if (argument === '--keep-profile') {
       options.keepProfile = true;
+      continue;
+    }
+    if (argument === '--background') {
+      options.background = true;
+      continue;
+    }
+    if (argument === '--foreground') {
+      options.background = false;
       continue;
     }
 
@@ -232,6 +255,24 @@ async function fetchJson(url) {
 
 function isOfficialGoogleChrome(path) {
   return /\/Google Chrome\.app\/Contents\/MacOS\/Google Chrome$/u.test(path);
+}
+
+function getChromeAppBundlePath(executablePath) {
+  const marker = '.app/Contents/MacOS/';
+  const markerIndex = executablePath.indexOf(marker);
+  return markerIndex < 0 ? null : executablePath.slice(0, markerIndex + '.app'.length);
+}
+
+function createChromeLaunchSpec({chromePath, args, background, platform = process.platform}) {
+  const appBundlePath = background && platform === 'darwin'
+    ? getChromeAppBundlePath(chromePath)
+    : null;
+  if (!appBundlePath) return {command: chromePath, args, background: false};
+  return {
+    command: 'open',
+    args: ['-g', '-a', appBundlePath, '--args', ...args],
+    background: true
+  };
 }
 
 async function resolveBrowserPath(requestedPath) {
@@ -532,9 +573,13 @@ function parsePsRow(line) {
   };
 }
 
-async function readChromeProcesses(rootPid) {
+async function readProcessRows() {
   const {stdout} = await execFileAsync('ps', ['-axo', 'pid=,ppid=,pcpu=,rss=,command=']);
-  const rows = stdout.split('\n').map(parsePsRow).filter(Boolean);
+  return stdout.split('\n').map(parsePsRow).filter(Boolean);
+}
+
+async function readChromeProcesses(rootPid) {
+  const rows = await readProcessRows();
   const children = new Map();
   for (const row of rows) {
     const siblings = children.get(row.ppid) ?? [];
@@ -551,6 +596,32 @@ async function readChromeProcesses(rootPid) {
     for (const child of children.get(pid) ?? []) pending.push(child.pid);
   }
   return [...selected.values()];
+}
+
+function isChromeBrowserProcess(row, executablePath, profileDir) {
+  const executablePrefix = `${executablePath} `;
+  return (row.command === executablePath || row.command.startsWith(executablePrefix)) &&
+    row.command.includes(`--user-data-dir=${profileDir}`) &&
+    !/\s--type=/u.test(row.command);
+}
+
+async function waitForChromeBrowserProcess(executablePath, profileDir, timeoutMs = 15_000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError;
+  while (Date.now() < deadline) {
+    try {
+      const rows = await readProcessRows();
+      const browser = rows.find((row) => isChromeBrowserProcess(row, executablePath, profileDir));
+      if (browser) return browser.pid;
+    } catch (error) {
+      lastError = error;
+    }
+    await wait(100);
+  }
+  throw new Error(
+    `Chrome browser process did not start for ${executablePath}. ` +
+    `${lastError?.message ?? 'timeout'}`
+  );
 }
 
 function averageCpu(samples) {
@@ -1827,6 +1898,42 @@ async function runNavigationScenario({page, worker, options, result, tabId, capt
   result.scenario.completed = true;
 }
 
+function isProcessRunning(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code !== 'ESRCH';
+  }
+}
+
+function createChromeProcessHandle(launcher, pid, background) {
+  return {
+    pid,
+    background,
+    kill(signal = 'SIGTERM') {
+      if (background) {
+        try {
+          process.kill(pid, signal);
+        } catch (error) {
+          if (error.code !== 'ESRCH') throw error;
+        }
+        if (launcher.exitCode == null) launcher.kill(signal);
+        return true;
+      }
+      return launcher.kill(signal);
+    },
+    isRunning() {
+      return background
+        ? isProcessRunning(pid)
+        : launcher.exitCode == null && launcher.signalCode == null;
+    },
+    unref() {
+      launcher.unref?.();
+    }
+  };
+}
+
 async function launchChrome(options, port, profileDir) {
   const args = [
     `--remote-debugging-port=${port}`,
@@ -1840,7 +1947,19 @@ async function launchChrome(options, port, profileDir) {
     '--window-size=1440,1000',
     options.url
   ];
-  return spawn(options.chromePath, args, {cwd: REPOSITORY_ROOT, stdio: 'ignore'});
+  const launchSpec = createChromeLaunchSpec({
+    chromePath: options.chromePath,
+    args,
+    background: options.background
+  });
+  const launcher = spawn(launchSpec.command, launchSpec.args, {
+    cwd: REPOSITORY_ROOT,
+    stdio: 'ignore'
+  });
+  const pid = launchSpec.background
+    ? await waitForChromeBrowserProcess(options.chromePath, profileDir)
+    : launcher.pid;
+  return createChromeProcessHandle(launcher, pid, launchSpec.background);
 }
 
 async function main() {
@@ -1915,7 +2034,8 @@ async function main() {
       path: options.chromePath,
       pid: chrome?.pid ?? options.browserPid ?? null,
       debuggingPort: port,
-      attached: attachMode
+      attached: attachMode,
+      background: chrome?.background === true
     },
     profile: {
       path: profileDir,
@@ -2086,7 +2206,7 @@ async function main() {
     if (chrome && !options.keepBrowser) {
       chrome.kill('SIGTERM');
       await wait(500);
-      if (!chrome.killed) chrome.kill('SIGKILL');
+      if (chrome.isRunning()) chrome.kill('SIGKILL');
     } else chrome?.unref?.();
     if (localServer) localServer.kill('SIGTERM');
     if (ownsProfile && !options.keepProfile) {
@@ -2128,6 +2248,7 @@ async function main() {
 
 export {
   ProcessSampler,
+  createChromeLaunchSpec,
   evaluateCpuRecovery,
   evaluateResponsiveness,
   finalizeLayoutReport,
