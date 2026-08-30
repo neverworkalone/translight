@@ -435,7 +435,7 @@ describe('TranslationRenderer', () => {
     expect(overview.querySelectorAll('.typo-top')[1].textContent).toBe('1');
     expect(overview.querySelectorAll('.typo-top')[2].textContent).toBe('20');
     expect(renderer.style.textContent).toContain('display: block !important');
-    expect(renderer.style.textContent).toContain('margin: 0 !important');
+    expect(renderer.style.textContent).toContain('margin: 0.2em 0 0 !important');
 
     renderer.removeAll();
     document.body.innerHTML = `

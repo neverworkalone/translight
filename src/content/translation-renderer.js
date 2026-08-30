@@ -1760,7 +1760,7 @@ function styleText(sessionId, presentation) {
 
     ${psnProfilesOverviewTranslationSelector} {
       display: block !important;
-      margin: 0 !important;
+      margin: 0.2em 0 0 !important;
       font-size: inherit !important;
       white-space: normal !important;
     }
