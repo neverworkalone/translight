@@ -14,7 +14,7 @@ permissions:
 concurrency:
   # Keep every replacement commit for one pull request in the same group.
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: true # A newer commit supersedes the older run.
 
 jobs:
   check:
