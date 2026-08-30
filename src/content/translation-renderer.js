@@ -30,6 +30,7 @@ export const REPLACED_ATTRIBUTE = 'data-translight-replaced';
 export const STYLED_REPLACEMENT_ATTRIBUTE = 'data-translight-styled-replacement';
 export const REPLACEMENT_TEXT_ATTRIBUTE = 'data-translight-replacement-text';
 export const TABLE_LINK_GROUP_ATTRIBUTE = 'data-translight-table-link-group';
+export const PSNPROFILES_OVERVIEW_ATTRIBUTE = 'data-translight-psnprofiles-overview';
 
 const GENERATED_VALUE = 'true';
 const STYLE_ATTRIBUTE = 'data-translight-style';
@@ -144,6 +145,18 @@ function syncFixedHeightHeadingText(record) {
   // highlight than its own text. Keep the generated heading highlight tight
   // without changing the normal inline behavior elsewhere.
   setStyleValue(text.style, 'display', isFixedHeightHeading ? 'inline-block' : '');
+}
+
+function syncPsnProfilesOverview(record) {
+  const {element, translation, placement} = record ?? {};
+  if (!translation) return;
+  const overview = element?.closest?.('.overview-info');
+  const isOverview = Boolean(overview &&
+    (placement === 'inside' || placement === 'sibling') &&
+    (element === overview || element.matches?.(SEGMENT_SELECTOR) || element.parentElement === overview) &&
+    isPsnProfilesPage(element.ownerDocument));
+  if (isOverview) translation.setAttribute(PSNPROFILES_OVERVIEW_ATTRIBUTE, GENERATED_VALUE);
+  else translation.removeAttribute(PSNPROFILES_OVERVIEW_ATTRIBUTE);
 }
 
 function setStyleValue(style, property, value) {
@@ -1577,6 +1590,7 @@ function styleText(sessionId, presentation) {
   const tableLinkTranslationSelector = `${tableLinkGroupSelector} > ${selector}`;
   const translationTextSelector = `${selector} > [${TRANSLATION_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"]`;
   const styledTranslationTextSelector = `${styledSelector} > [${TRANSLATION_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"]`;
+  const psnProfilesOverviewTextSelector = `${styledSelector}[${PSNPROFILES_OVERVIEW_ATTRIBUTE}="${GENERATED_VALUE}"] > [${TRANSLATION_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"]`;
   const textStyleSelector = (style) =>
     `${styledSelector}[${STYLE_ATTRIBUTE}="${style}"], ${replacementTextSelector}[${STYLE_ATTRIBUTE}="${style}"]`;
   const hiddenSelector = `[${HIDDEN_ATTRIBUTE}="true"][${SESSION_ATTRIBUTE}="${escapeAttribute(sessionId)}"]`;
@@ -1739,6 +1753,10 @@ function styleText(sessionId, presentation) {
     }
     ${tableLinkTranslationSelector}:not(:first-of-type) {
       margin-left: ${TABLE_LINK_ITEM_GAP} !important;
+    }
+
+    ${psnProfilesOverviewTextSelector} {
+      word-spacing: ${TABLE_LINK_ITEM_GAP} !important;
     }
 
     ${styleSelector(TRANSLATION_STYLES.LEFT_BORDER)} {
@@ -2362,6 +2380,7 @@ export class TranslationRenderer {
     this.observeSourceLayout(record);
     syncSourceLayout(record);
     syncSourceTypography(record);
+    syncPsnProfilesOverview(record);
     this.clearFallbackPresentation(record);
     translation.setAttribute(MODE_ATTRIBUTE, mode);
     if (mode === TRANSLATION_MODES.ORIGINAL_TRANSLATION) {

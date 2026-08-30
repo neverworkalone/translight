@@ -5,6 +5,7 @@ import {
   GENERATED_ATTRIBUTE,
   HIDDEN_ATTRIBUTE,
   HIDDEN_PLACEMENT_ATTRIBUTE,
+  PSNPROFILES_OVERVIEW_ATTRIBUTE,
   PRESENTATION_HASH_ATTRIBUTE,
   REPLACED_ATTRIBUTE,
   REPLACEMENT_TEXT_ATTRIBUTE,
@@ -387,6 +388,46 @@ describe('TranslationRenderer', () => {
     const generatedText = translation.querySelector('[data-translight-text="true"]');
     expect(generatedText.style.getPropertyValue('display')).toBe('inline-block');
     expect(window.getComputedStyle(generatedText).display).toBe('inline-block');
+  });
+
+  it('adds spacing between PSNProfiles overview items without matching generic overview blocks', () => {
+    document.body.innerHTML = `
+      <div id="header"><div class="navigation"></div></div>
+      <div id="banner"><div class="guide-info"></div></div>
+      <div class="overview-info">
+        <span class="tag">3/10<br>Difficulty</span>
+        <span class="tag">1<br>Playthrough</span>
+        <span class="tag">20<br>Hours</span>
+      </div>
+    `;
+    const renderer = new TranslationRenderer({document, sessionId: 'psnprofiles-overview-session'});
+    const [block] = collectTranslationBlocks(document.body);
+    const translation = renderer.insert({
+      ...block,
+      translatedText: '3/10 난이도 1 플레이 20시간'
+    });
+    const generatedText = translation.querySelector('[data-translight-text="true"]');
+
+    expect(translation.getAttribute(PSNPROFILES_OVERVIEW_ATTRIBUTE)).toBe('true');
+    expect(renderer.style.textContent).toContain('word-spacing: 0.35em !important');
+
+    renderer.removeAll();
+    document.body.innerHTML = `
+      <div class="overview-info">Generic overview text</div>
+    `;
+    const genericOverview = document.querySelector('.overview-info');
+    const genericRenderer = new TranslationRenderer({document, sessionId: 'generic-overview-session'});
+    const [genericBlock] = collectTranslationBlocks(document.body);
+    const genericTranslation = genericRenderer.insert({
+      ...genericBlock,
+      translatedText: '일반 개요 텍스트'
+    });
+
+    expect(generatedText.isConnected).toBe(false);
+    expect(genericTranslation.hasAttribute(PSNPROFILES_OVERVIEW_ATTRIBUTE)).toBe(false);
+    expect(genericTranslation.previousElementSibling).toBe(genericOverview);
+
+    genericRenderer.removeAll();
   });
 
   it.each(['flex', 'grid'])('does not treat resolved auto-height %s headings as fixed outside PSNProfiles', (display) => {
