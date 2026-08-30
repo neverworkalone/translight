@@ -18,6 +18,8 @@ const NAVIGATION_SELECTOR = [
   '.MainNavigation'
 ].join(',');
 const PSNPROFILES_SHELL_SELECTOR = '#header,#banner';
+const PSNPROFILES_HEADER_NAV_SELECTOR = '#header .navigation';
+const PSNPROFILES_GUIDE_INFO_SELECTOR = '#banner .guide-info';
 const PSNPROFILES_TOC_ITEM_SELECTOR = '.tableofcontents li';
 const LINK_RATIO_LIMIT = 0.65;
 const DOUBLE_LINE_BREAK_PATTERN = /\r?\n[ \t\f]*(?:\r?\n)+/;
@@ -53,6 +55,11 @@ export function isExcluded(element) {
   if (element.matches(EXCLUDED_ANCESTOR_SELECTOR) || element.closest(EXCLUDED_ANCESTOR_SELECTOR)) return true;
   if (element.isContentEditable || element.closest('[contenteditable="true"],[contenteditable=""]')) return true;
   return false;
+}
+
+export function isPsnProfilesPage(root) {
+  return Boolean(root?.querySelector?.(PSNPROFILES_HEADER_NAV_SELECTOR) &&
+    root.querySelector?.(PSNPROFILES_GUIDE_INFO_SELECTOR));
 }
 
 function isVisuallyHiddenStyle(style) {
@@ -161,15 +168,11 @@ function isDirectContentLink(element, link) {
 function isNavigationLike(element, text, {directContentOnly = false} = {}) {
   if (element.closest(NAVIGATION_SELECTOR)) return true;
   const shell = element.closest(PSNPROFILES_SHELL_SELECTOR);
-  if (shell) {
-    const root = element.ownerDocument;
-    // PSNProfiles puts the guide title, statistics, and navigation in fixed
-    // shell regions. Adding block translations there expands a bottom-anchored
-    // banner and moves its title out of the viewport, so keep that chrome in
-    // its native layout while translating the guide body below it.
-    if (root?.querySelector?.('#header .navigation') &&
-        root.querySelector?.('#banner .guide-info')) return true;
-  }
+  // PSNProfiles puts the guide title, statistics, and navigation in fixed
+  // shell regions. Adding block translations there expands a bottom-anchored
+  // banner and moves its title out of the viewport, so keep that chrome in
+  // its native layout while translating the guide body below it.
+  if (shell && isPsnProfilesPage(element.ownerDocument)) return true;
   // Figure captions commonly link to the referenced films, but the links are
   // part of the caption content rather than a navigation list.
   if (element.matches('figcaption')) return false;

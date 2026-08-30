@@ -366,6 +366,8 @@ describe('TranslationRenderer', () => {
       </style>
     `;
     document.body.innerHTML = `
+      <div id="header"><div class="navigation"></div></div>
+      <div id="banner"><div class="guide-info"></div></div>
       <div class="title flex v-align">
         <h3 class="grow" id="source">Roadmap</h3>
       </div>
@@ -385,6 +387,52 @@ describe('TranslationRenderer', () => {
     const generatedText = translation.querySelector('[data-translight-text="true"]');
     expect(generatedText.style.getPropertyValue('display')).toBe('inline-block');
     expect(window.getComputedStyle(generatedText).display).toBe('inline-block');
+  });
+
+  it.each(['flex', 'grid'])('does not treat resolved auto-height %s headings as fixed outside PSNProfiles', (display) => {
+    document.head.innerHTML = `
+      <style>
+        .title { display: ${display}; height: auto; }
+        .title h3 { display: block; font-size: 14px; line-height: 16px; }
+      </style>
+    `;
+    document.body.innerHTML = `
+      <div class="title" id="auto-title">
+        <h3 id="source">Auto-height heading</h3>
+      </div>
+    `;
+    const source = document.querySelector('#source');
+    const parent = document.querySelector('#auto-title');
+    const originalGetComputedStyle = window.getComputedStyle.bind(window);
+    const getComputedStyleSpy = vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => {
+      const style = originalGetComputedStyle(element);
+      if (element !== parent) return style;
+      return new Proxy(style, {
+        get(target, property, receiver) {
+          if (property === 'height') return '40px';
+          if (property === 'getPropertyValue') {
+            return (name) => name === 'height' ? '40px' : target.getPropertyValue(name);
+          }
+          return Reflect.get(target, property, receiver);
+        }
+      });
+    });
+    const renderer = new TranslationRenderer({document, sessionId: `auto-height-${display}-session`});
+
+    try {
+      const translation = renderer.insert({
+        element: source,
+        sourceId: `auto-height-${display}-source`,
+        translatedText: '자동 높이 제목'
+      });
+
+      expect(translation.style.getPropertyValue('margin')).toBe('');
+      const generatedText = translation.querySelector('[data-translight-text="true"]');
+      expect(generatedText.style.getPropertyValue('display')).toBe('');
+    } finally {
+      renderer.removeAll();
+      getComputedStyleSpy.mockRestore();
+    }
   });
 
   it('does not copy host layout dimensions from generated segment wrappers', () => {

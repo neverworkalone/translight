@@ -10,7 +10,8 @@ import {
   SEGMENT_SELECTOR,
   hasVisibleBlockDescendant,
   isExcluded,
-  isHidden
+  isHidden,
+  isPsnProfilesPage
 } from './block-collector.js';
 import {isTranslatableBlock} from './language.js';
 import {hashSourceText} from './translation-queue.js';
@@ -128,9 +129,10 @@ function isFixedHeightLayoutHeading(element) {
   const tagName = element?.tagName?.toLowerCase();
   if (!/^h[1-6]$/u.test(tagName ?? '')) return false;
   const parent = element.parentElement;
+  if (!parent?.matches?.('div.title,th.title')) return false;
+  if (!isPsnProfilesPage(element.ownerDocument)) return false;
   if (!LAYOUT_DISPLAYS.has(getDisplay(parent))) return false;
-  const height = Number.parseFloat(getComputedStyleValue(parent, 'height'));
-  return Number.isFinite(height) && height > 0;
+  return true;
 }
 
 function syncFixedHeightHeadingText(record) {
