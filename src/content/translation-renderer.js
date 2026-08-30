@@ -1759,8 +1759,8 @@ function styleText(sessionId, presentation) {
     }
 
     ${psnProfilesOverviewTranslationSelector} {
-      display: inline !important;
-      margin: 0 0 0 ${TABLE_LINK_ITEM_GAP} !important;
+      display: block !important;
+      margin: 0 !important;
       font-size: inherit !important;
       white-space: normal !important;
     }

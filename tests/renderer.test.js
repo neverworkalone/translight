@@ -434,8 +434,8 @@ describe('TranslationRenderer', () => {
     expect(overview.querySelectorAll('.typo-top')[0].textContent).toBe('3/10');
     expect(overview.querySelectorAll('.typo-top')[1].textContent).toBe('1');
     expect(overview.querySelectorAll('.typo-top')[2].textContent).toBe('20');
-    expect(renderer.style.textContent).toContain('display: inline !important');
-    expect(renderer.style.textContent).toContain('margin: 0 0 0 0.35em !important');
+    expect(renderer.style.textContent).toContain('display: block !important');
+    expect(renderer.style.textContent).toContain('margin: 0 !important');
 
     renderer.removeAll();
     document.body.innerHTML = `
