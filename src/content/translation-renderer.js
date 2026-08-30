@@ -28,7 +28,7 @@ export const HIDDEN_PLACEMENT_ATTRIBUTE = 'data-translight-hidden-placement';
 export const REPLACED_ATTRIBUTE = 'data-translight-replaced';
 export const STYLED_REPLACEMENT_ATTRIBUTE = 'data-translight-styled-replacement';
 export const REPLACEMENT_TEXT_ATTRIBUTE = 'data-translight-replacement-text';
-export const MULTI_LINK_TABLE_ATTRIBUTE = 'data-translight-multi-link';
+export const TABLE_LINK_GROUP_ATTRIBUTE = 'data-translight-table-link-group';
 
 const GENERATED_VALUE = 'true';
 const STYLE_ATTRIBUTE = 'data-translight-style';
@@ -41,7 +41,8 @@ const BLOCK_SELECTOR = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,figcaption,div,section
 const GENERATED_SELECTOR = 'translight-translation,[data-translight-generated="true"]';
 const LAYOUT_DISPLAYS = new Set(['flex', 'inline-flex', 'grid', 'inline-grid']);
 const TABLE_CELL_TAGS = new Set(['td', 'th']);
-const MULTI_LINK_TABLE_WORD_SPACING = '0.35em';
+const TABLE_LINKED_PLACEMENT = 'table-linked-group';
+const TABLE_LINK_ITEM_GAP = '0.35em';
 const MAX_RECOVERY_ATTEMPTS = 1;
 const STABLE_LIST_SIBLING_PLACEMENT = 'stable-list-sibling';
 const GRID_LAYOUT_ANCHORED_PLACEMENT = 'grid-layout-anchored';
@@ -1150,6 +1151,50 @@ function insertAtSafeLocation(element, translation, mixedContent = false, source
   return 'inside';
 }
 
+function isTableLinkedPlacement(placement) {
+  return placement?.kind === TABLE_LINKED_PLACEMENT;
+}
+
+function tableLinkedRecordIndex(record) {
+  const index = Number(record?.tableLinked?.index);
+  return Number.isFinite(index) ? index : Number.MAX_SAFE_INTEGER;
+}
+
+function placeTableLinkedGroup(group) {
+  const {cell, element} = group ?? {};
+  if (!cell || !element || !cell.isConnected) return;
+  const items = (group.items ?? []).filter((item) => item?.parentNode === cell);
+  const lastItem = items.at(-1);
+  insertBeforeIfNeeded(cell, element, lastItem?.nextSibling ?? null);
+}
+
+function placeTableLinkedRecord(group, record) {
+  if (!group?.element || !record?.translation) return;
+  placeTableLinkedGroup(group);
+  const index = tableLinkedRecordIndex(record);
+  const reference = group.markers?.get(index);
+  insertBeforeIfNeeded(
+    group.element,
+    record.translation,
+    reference?.parentNode === group.element ? reference : null
+  );
+}
+
+function removeEmptyTableLinkedGroup(group) {
+  if (!group?.element?.querySelector?.(TRANSLATION_TAG)) {
+    group.element?.parentNode?.removeChild(group.element);
+  }
+}
+
+function unregisterTableLinkedRecord(record) {
+  const group = record?.placement?.group;
+  if (!group) return;
+  for (const [sourceId, candidate] of group.records ?? []) {
+    if (candidate === record) group.records.delete(sourceId);
+  }
+  removeEmptyTableLinkedGroup(group);
+}
+
 function hasNestedBlocks(element) {
   return hasVisibleBlockDescendant(element);
 }
@@ -1161,6 +1206,12 @@ function markTranslationAttached(record) {
 function detachTranslationForPresentation(record) {
   const translation = record?.translation;
   if (!translation) return;
+  if (isTableLinkedPlacement(record.placement)) {
+    translation.parentNode?.removeChild(translation);
+    removeEmptyTableLinkedGroup(record.placement.group);
+    record.translationSuppressed = true;
+    return;
+  }
   // A translation-only replacement is intentionally represented by the
   // source text. Remove its external order entry along with the DOM node so a
   // later grid mutation cannot infer that it should be visible again.
@@ -1173,6 +1224,17 @@ function restorePlacement(record) {
   const {element, translation, placement} = record;
   if (!translation) return;
   markTranslationAttached(record);
+  if (isTableLinkedPlacement(placement)) {
+    const group = placement.group;
+    if (!group?.element) return;
+    for (const [sourceId, candidate] of group.records ?? []) {
+      if (candidate === record && sourceId !== record.sourceId) group.records.delete(sourceId);
+    }
+    group.records.set(record.sourceId, record);
+    if (translation.parentNode !== group.element) group.element.appendChild(translation);
+    placeTableLinkedRecord(group, record);
+    return;
+  }
   if (placement?.kind === STABLE_LIST_SIBLING_PLACEMENT) {
     const anchor = placement.anchor;
     if (anchor?.parentNode) insertBeforeIfNeeded(anchor.parentNode, translation, anchor.nextSibling);
@@ -1509,9 +1571,9 @@ function styleText(sessionId, presentation) {
   const styleSelector = (style) =>
     `${styledSelector}[${STYLE_ATTRIBUTE}="${style}"], ${replacementTextSelector}[${STYLE_ATTRIBUTE}="${style}"]`;
   const tableCellSelector = `td > ${selector}, th > ${selector}`;
-  const multiLinkTableSelector = `td > ${styledSelector}[${MULTI_LINK_TABLE_ATTRIBUTE}="${GENERATED_VALUE}"], th > ${styledSelector}[${MULTI_LINK_TABLE_ATTRIBUTE}="${GENERATED_VALUE}"]`;
+  const tableLinkGroupSelector = `[${TABLE_LINK_GROUP_ATTRIBUTE}="${GENERATED_VALUE}"][${SESSION_ATTRIBUTE}="${escapeAttribute(sessionId)}"]`;
+  const tableLinkTranslationSelector = `${tableLinkGroupSelector} > ${selector}`;
   const translationTextSelector = `${selector} > [${TRANSLATION_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"]`;
-  const multiLinkTableTextSelector = `${multiLinkTableSelector} > [${TRANSLATION_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"]`;
   const styledTranslationTextSelector = `${styledSelector} > [${TRANSLATION_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"]`;
   const textStyleSelector = (style) =>
     `${styledSelector}[${STYLE_ATTRIBUTE}="${style}"], ${replacementTextSelector}[${STYLE_ATTRIBUTE}="${style}"]`;
@@ -1646,8 +1708,35 @@ function styleText(sessionId, presentation) {
       margin: 0.25em 0 0 !important;
     }
 
-    ${multiLinkTableTextSelector} {
-      word-spacing: ${MULTI_LINK_TABLE_WORD_SPACING} !important;
+    ${tableLinkGroupSelector} {
+      display: block !important;
+      position: static !important;
+      width: auto !important;
+      min-width: 0 !important;
+      max-width: none !important;
+      margin: 0.25em 0 0 !important;
+      padding: 0 !important;
+      border: 0 !important;
+      outline: 0 !important;
+      background: transparent !important;
+      color: inherit !important;
+      font: inherit !important;
+      line-height: inherit !important;
+      text-align: inherit !important;
+      white-space: normal !important;
+      vertical-align: baseline !important;
+    }
+    ${tableLinkTranslationSelector} {
+      display: inline !important;
+      width: auto !important;
+      min-width: 0 !important;
+      max-width: none !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      vertical-align: baseline !important;
+    }
+    ${tableLinkTranslationSelector}:not(:first-of-type) {
+      margin-left: ${TABLE_LINK_ITEM_GAP} !important;
     }
 
     ${styleSelector(TRANSLATION_STYLES.LEFT_BORDER)} {
@@ -1750,6 +1839,7 @@ export class TranslationRenderer {
     this.sessionId = sessionId;
     this.records = new Map();
     this.recordsByElement = new WeakMap();
+    this.tableLinkedGroups = new WeakMap();
     const ResizeObserverClass = document.defaultView?.ResizeObserver ?? globalThis.ResizeObserver;
     this.layoutRecordsByTarget = new Map();
     this.layoutTargetWidths = new Map();
@@ -1767,6 +1857,44 @@ export class TranslationRenderer {
     this.style.setAttribute(STYLE_ATTRIBUTE, GENERATED_VALUE);
     (document.head ?? document.documentElement ?? document.body).appendChild(this.style);
     this.updateStyleSheet();
+  }
+
+  getTableLinkedGroup(tableLinked) {
+    const sourceGroup = tableLinked?.group;
+    const cell = sourceGroup?.cell;
+    if (!cell || !TABLE_CELL_TAGS.has(cell.tagName?.toLowerCase())) return null;
+
+    let group = this.tableLinkedGroups.get(cell);
+    if (!group) {
+      const element = this.document.createElement('span');
+      element.setAttribute('translate', 'no');
+      element.setAttribute(GENERATED_ATTRIBUTE, GENERATED_VALUE);
+      element.setAttribute(SESSION_ATTRIBUTE, this.sessionId);
+      element.setAttribute(TABLE_LINK_GROUP_ATTRIBUTE, GENERATED_VALUE);
+      const markers = new Map();
+      for (let index = 0; index < (sourceGroup.items ?? []).length; index += 1) {
+        const marker = this.document.createComment('translight-table-link-item');
+        markers.set(index, marker);
+        element.appendChild(marker);
+      }
+      group = {
+        cell,
+        items: sourceGroup.items ?? [],
+        element,
+        markers,
+        records: new Map()
+      };
+      this.tableLinkedGroups.set(cell, group);
+    } else if (sourceGroup.items?.length) {
+      group.items = sourceGroup.items;
+      group.markers ??= new Map();
+      for (let index = group.markers.size; index < sourceGroup.items.length; index += 1) {
+        const marker = this.document.createComment('translight-table-link-item');
+        group.markers.set(index, marker);
+        group.element.appendChild(marker);
+      }
+    }
+    return group;
   }
 
   updateStyleSheet() {
@@ -2224,30 +2352,9 @@ export class TranslationRenderer {
     restoreAttribute(element, HIDDEN_PLACEMENT_ATTRIBUTE, record.originalAttributes?.[HIDDEN_PLACEMENT_ATTRIBUTE]);
   }
 
-  syncMultiLinkTableAttribute(record) {
-    const {element, translation} = record ?? {};
-    if (!translation) return;
-    const tagName = element?.tagName?.toLowerCase();
-    if (!TABLE_CELL_TAGS.has(tagName)) {
-      translation.removeAttribute(MULTI_LINK_TABLE_ATTRIBUTE);
-      return;
-    }
-    let linkedValueCount = 0;
-    for (const link of element.querySelectorAll('a')) {
-      if (link.closest('td,th') !== element) continue;
-      linkedValueCount += 1;
-      if (linkedValueCount > 1) {
-        translation.setAttribute(MULTI_LINK_TABLE_ATTRIBUTE, GENERATED_VALUE);
-        return;
-      }
-    }
-    translation.removeAttribute(MULTI_LINK_TABLE_ATTRIBUTE);
-  }
-
   applyRecordPresentation(record) {
     const {element, translation} = record;
     if (!element || !translation) return;
-    this.syncMultiLinkTableAttribute(record);
     const mode = this.presentation.translationMode;
     this.reconcileGridLayoutPlacement(record);
     this.observeSourceLayout(record);
@@ -2322,6 +2429,10 @@ export class TranslationRenderer {
     if (descendant) return descendant;
     const sourceSibling = Array.from(record?.element?.parentElement?.children ?? []).find(isMatchingTranslation);
     if (sourceSibling) return sourceSibling;
+    const tableLinkedTranslation = Array.from(
+      record?.placement?.group?.element?.children ?? []
+    ).find(isMatchingTranslation);
+    if (tableLinkedTranslation) return tableLinkedTranslation;
     const placedTranslation = record?.placement?.anchor?.querySelector?.(TRANSLATION_TAG);
     if (placedTranslation && isMatchingTranslation(placedTranslation)) return placedTranslation;
     return Array.from(record?.placement?.anchor?.parentElement?.children ?? []).find(isMatchingTranslation) ?? null;
@@ -2418,7 +2529,7 @@ export class TranslationRenderer {
     return {restored, invalid};
   }
 
-  insert({element, sourceId, sourceHash, translatedText, text, mixedContent = false}) {
+  insert({element, sourceId, sourceHash, translatedText, text, mixedContent = false, tableLinked = null}) {
     if (!element?.parentNode || !sourceId) return null;
     const existing = this.recordsByElement.get(element);
     const pendingHash = element.getAttribute(PENDING_SOURCE_HASH_ATTRIBUTE);
@@ -2426,10 +2537,17 @@ export class TranslationRenderer {
     const currentHash = element.getAttribute(SOURCE_HASH_ATTRIBUTE);
     if (existing && currentHash && sourceHash && currentHash !== sourceHash && !pendingHash) return null;
     if (existing) {
+      const previousSourceId = existing.sourceId;
+      const nextTableGroup = tableLinked ? this.getTableLinkedGroup(tableLinked) : null;
       if (existing.sourceId !== sourceId) {
         this.records.delete(existing.sourceId);
         existing.sourceId = sourceId;
         this.records.set(sourceId, existing);
+        const currentTableGroup = existing.placement?.group;
+        if (currentTableGroup?.records?.get(previousSourceId) === existing) {
+          currentTableGroup.records.delete(previousSourceId);
+          currentTableGroup.records.set(sourceId, existing);
+        }
       }
       element.setAttribute(SOURCE_ATTRIBUTE, sourceId);
       element.setAttribute(TRANSLATED_ATTRIBUTE, GENERATED_VALUE);
@@ -2437,12 +2555,21 @@ export class TranslationRenderer {
       existing.translation.setAttribute(SOURCE_ATTRIBUTE, sourceId);
       const nextMixedContent = Boolean(mixedContent);
       const sourceChanged = Boolean(sourceHash && sourceHash !== existing.sourceHash) || Boolean(pendingHash);
-      const structureChanged = existing.mixedContent !== nextMixedContent;
-      if (existing.mixedContent !== nextMixedContent) {
+      const previousTableGroup = existing.placement?.group;
+      const structureChanged = existing.mixedContent !== nextMixedContent ||
+        previousTableGroup !== nextTableGroup;
+      if (structureChanged) {
         cleanupGridLayoutPlacement(existing);
         existing.translation.parentNode?.removeChild(existing.translation);
+        if (previousTableGroup) unregisterTableLinkedRecord(existing);
         existing.mixedContent = nextMixedContent;
-        existing.placement = insertAtSafeLocation(element, existing.translation, nextMixedContent);
+        existing.tableLinked = nextTableGroup ? tableLinked : null;
+        existing.placement = nextTableGroup
+          ? {kind: TABLE_LINKED_PLACEMENT, group: nextTableGroup}
+          : insertAtSafeLocation(element, existing.translation, nextMixedContent);
+        if (nextTableGroup) nextTableGroup.records.set(sourceId, existing);
+      } else {
+        existing.tableLinked = nextTableGroup ? tableLinked : null;
       }
       if (sourceChanged || structureChanged) {
         this.refreshOriginalSnapshot(existing, text);
@@ -2472,6 +2599,7 @@ export class TranslationRenderer {
     translationText.setAttribute(TRANSLATION_TEXT_ATTRIBUTE, GENERATED_VALUE);
     translationText.textContent = String(translatedText ?? '');
     translation.appendChild(translationText);
+    const tableLinkedGroup = tableLinked ? this.getTableLinkedGroup(tableLinked) : null;
     const sourceTextNodes = collectSourceTextNodes(element, Boolean(mixedContent));
     const sourceText = text ?? sourceTextFromNodes(sourceTextNodes);
     const record = {
@@ -2480,6 +2608,7 @@ export class TranslationRenderer {
       sourceId,
       sourceHash: sourceHash ?? '',
       mixedContent: Boolean(mixedContent),
+      tableLinked: tableLinkedGroup ? tableLinked : null,
       placement: null,
       originalAttributes: getOriginalAttributes(element),
       sourceTextNodes,
@@ -2497,7 +2626,9 @@ export class TranslationRenderer {
       renderer: this,
       recoveryAttempts: 0
     };
-    record.placement = insertAtSafeLocation(element, translation, mixedContent, sourceTextNodes);
+    record.placement = tableLinkedGroup
+      ? {kind: TABLE_LINKED_PLACEMENT, group: tableLinkedGroup}
+      : insertAtSafeLocation(element, translation, mixedContent, sourceTextNodes);
 
     element.setAttribute(SOURCE_ATTRIBUTE, sourceId);
     if (sourceHash) element.setAttribute(SOURCE_HASH_ATTRIBUTE, sourceHash);
@@ -2506,6 +2637,7 @@ export class TranslationRenderer {
     element.setAttribute(SESSION_ATTRIBUTE, this.sessionId);
     this.records.set(sourceId, record);
     this.recordsByElement.set(element, record);
+    if (tableLinkedGroup) tableLinkedGroup.records.set(sourceId, record);
     this.observeSourceLayout(record);
     this.applyRecordPresentation(record);
     return translation;
@@ -2517,6 +2649,7 @@ export class TranslationRenderer {
 
     this.unobserveSourceLayout(record);
     record.translation?.parentNode?.removeChild(record.translation);
+    if (isTableLinkedPlacement(record.placement)) unregisterTableLinkedRecord(record);
     if (element?.getAttribute(SESSION_ATTRIBUTE) === this.sessionId) {
       this.restoreSourceText(record);
       for (const name of ATTRIBUTE_NAMES) restoreAttribute(element, name, record.originalAttributes[name]);
@@ -2534,6 +2667,7 @@ export class TranslationRenderer {
       if (this.rebindDisconnectedRecord(record)) continue;
       this.unobserveSourceLayout(record);
       record.translation?.parentNode?.removeChild(record.translation);
+      if (isTableLinkedPlacement(record.placement)) unregisterTableLinkedRecord(record);
       if (record.element?.getAttribute(SESSION_ATTRIBUTE) === this.sessionId) {
         for (const name of ATTRIBUTE_NAMES) restoreAttribute(record.element, name, record.originalAttributes[name]);
       }
@@ -2548,6 +2682,7 @@ export class TranslationRenderer {
       const {element, translation, originalAttributes} = record;
       this.unobserveSourceLayout(record);
       translation?.parentNode?.removeChild(translation);
+      if (isTableLinkedPlacement(record.placement)) unregisterTableLinkedRecord(record);
       cleanupGridLayoutPlacement(record);
       if (element?.getAttribute(SESSION_ATTRIBUTE) !== this.sessionId) continue;
       this.restoreSourceText(record);

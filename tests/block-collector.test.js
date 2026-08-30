@@ -125,10 +125,55 @@ describe('collectTranslationBlocks', () => {
       </nav>
     `;
 
-    expect(collectTranslationBlocks(document.body).map((block) => block.text)).toEqual([
+    const blocks = collectTranslationBlocks(document.body);
+    expect(blocks.map((block) => block.text)).toEqual([
       'Interactive Drama',
-      'FBI Investigator Nerd'
+      'FBI Investigator',
+      'Nerd'
     ]);
+    expect(blocks.slice(1).every((block) => block.tableLinked?.group?.cell.matches('th'))).toBe(true);
+    expect(blocks.slice(1).map((block) => block.tableLinked.index)).toEqual([0, 1]);
+  });
+
+  it('keeps linked table collection within a linear query budget', () => {
+    const measure = (rowCount) => {
+      document.body.innerHTML = `
+        <table><tbody>
+          ${Array.from({length: rowCount}, (_, rowIndex) => `
+            <tr><td>
+              ${Array.from({length: 8}, (_, itemIndex) => `
+                <nobr><a href="#value-${rowIndex}-${itemIndex}">Table value ${rowIndex}-${itemIndex}</a></nobr>
+              `).join('')}
+            </td></tr>
+          `).join('')}
+        </tbody></table>
+      `;
+
+      const originalQuerySelectorAll = Element.prototype.querySelectorAll;
+      let queryCalls = 0;
+      let returnedNodes = 0;
+      Element.prototype.querySelectorAll = function (...args) {
+        queryCalls += 1;
+        const result = originalQuerySelectorAll.apply(this, args);
+        returnedNodes += result.length;
+        return result;
+      };
+
+      try {
+        const blocks = collectTranslationBlocks(document.body);
+        return {blocks, queryCalls, returnedNodes};
+      } finally {
+        Element.prototype.querySelectorAll = originalQuerySelectorAll;
+      }
+    };
+
+    const smaller = measure(10);
+    const larger = measure(20);
+
+    expect(smaller.blocks).toHaveLength(80);
+    expect(larger.blocks).toHaveLength(160);
+    expect(larger.queryCalls).toBeLessThanOrEqual(smaller.queryCalls * 2);
+    expect(larger.returnedNodes).toBeLessThanOrEqual(smaller.returnedNodes * 2);
   });
 
   it('does not let PSNProfiles TOC segmentation wrappers hide the source link', () => {

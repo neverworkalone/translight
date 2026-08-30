@@ -12,6 +12,7 @@ import {
   SOURCE_ATTRIBUTE,
   SOURCE_HASH_ATTRIBUTE,
   STYLED_REPLACEMENT_ATTRIBUTE,
+  TABLE_LINK_GROUP_ATTRIBUTE,
   TRANSLATED_ATTRIBUTE,
   TranslationRenderer
 } from '../src/content/translation-renderer.js';
@@ -2263,7 +2264,7 @@ describe('TranslationRenderer', () => {
     expect(document.body.innerHTML).toBe('<table><tbody><tr><td id="cell">Original cell</td></tr></tbody></table>');
   });
 
-  it('adds spacing to translations for table cells with multiple linked values', () => {
+  it('renders each linked table value as a separate highlighted item', () => {
     document.body.innerHTML = `
       <table><tbody><tr>
         <td id="multi">
@@ -2274,22 +2275,141 @@ describe('TranslationRenderer', () => {
       </tr></tbody></table>
     `;
     const renderer = new TranslationRenderer({document, sessionId: 'multi-link-spacing-session'});
-    const multiTranslation = renderer.insert({
-      element: document.querySelector('#multi'),
-      sourceId: 'multi-link-spacing-source',
-      translatedText: 'FBI 수사관 괴짜'
-    });
-    const singleTranslation = renderer.insert({
-      element: document.querySelector('#single'),
-      sourceId: 'single-link-spacing-source',
-      translatedText: '인터랙티브 드라마'
-    });
+    const blocks = collectTranslationBlocks(document.body);
+    const translated = new Map([
+      ['FBI Investigator', 'FBI 수사관'],
+      ['Nerd', '괴짜'],
+      ['Interactive Drama', '인터랙티브 드라마']
+    ]);
+    for (const block of blocks) {
+      renderer.insert({...block, translatedText: translated.get(block.text)});
+    }
 
-    expect(multiTranslation.getAttribute('data-translight-multi-link')).toBe('true');
-    expect(singleTranslation.hasAttribute('data-translight-multi-link')).toBe(false);
-    expect(renderer.style.textContent).toContain('word-spacing: 0.35em !important');
+    const multiCell = document.querySelector('#multi');
+    const group = multiCell.querySelector(`[${TABLE_LINK_GROUP_ATTRIBUTE}="true"]`);
+    const items = [...group.children];
+    expect(items).toHaveLength(2);
+    expect(items.map((item) => item.textContent)).toEqual(['FBI 수사관', '괴짜']);
+    expect(items[0].nextElementSibling).toBe(items[1]);
+    expect(items.every((item) => item.matches('translight-translation'))).toBe(true);
+    expect(multiCell.querySelectorAll(':scope > translight-translation')).toHaveLength(0);
+    expect(document.querySelector('#single')?.querySelector('translight-translation')?.textContent)
+      .toBe('인터랙티브 드라마');
+    expect(renderer.style.textContent).toContain('margin-left: 0.35em !important');
 
     renderer.removeAll();
+    expect(document.querySelector(`[${TABLE_LINK_GROUP_ATTRIBUTE}]`)).toBeNull();
+  });
+
+  it('keeps linked table translations in source order when results arrive out of order', () => {
+    document.body.innerHTML = `
+      <table><tbody><tr><td id="multi-order">
+        <nobr><a href="#first">First value</a></nobr>
+        <nobr><a href="#second">Second value</a></nobr>
+        <nobr><a href="#third">Third value</a></nobr>
+      </td></tr></tbody></table>
+    `;
+    const renderer = new TranslationRenderer({document, sessionId: 'multi-link-order-session'});
+    const blocks = collectTranslationBlocks(document.body);
+    const byText = new Map(blocks.map((block) => [block.text, block]));
+
+    renderer.insert({...byText.get('Third value'), translatedText: '셋째'});
+    renderer.insert({...byText.get('First value'), translatedText: '첫째'});
+    renderer.insert({...byText.get('Second value'), translatedText: '둘째'});
+
+    const cell = document.querySelector('#multi-order');
+    const group = cell.querySelector(`[${TABLE_LINK_GROUP_ATTRIBUTE}="true"]`);
+    expect([...group.children].map((item) => item.textContent)).toEqual(['첫째', '둘째', '셋째']);
+
+    renderer.remove(byText.get('Second value').element);
+    expect([...group.children].map((item) => item.textContent)).toEqual(['첫째', '셋째']);
+    renderer.remove(byText.get('First value').element);
+    renderer.remove(byText.get('Third value').element);
+    expect(cell.querySelector(`[${TABLE_LINK_GROUP_ATTRIBUTE}="true"]`)).toBeNull();
+  });
+
+  it('keeps linked table placement writes linear as a cell grows', () => {
+    const measure = (itemCount, sessionId) => {
+      document.body.innerHTML = `
+        <table><tbody><tr><td id="multi-scale">
+          ${Array.from({length: itemCount}, (_, index) => `
+            <nobr><a href="#value-${index}">Table value ${index}</a></nobr>
+          `).join('')}
+        </td></tr></tbody></table>
+      `;
+      const renderer = new TranslationRenderer({document, sessionId});
+      const blocks = collectTranslationBlocks(document.body);
+      const nodePrototype = document.defaultView.Node.prototype;
+      const originalInsertBefore = nodePrototype.insertBefore;
+      let groupInsertions = 0;
+      nodePrototype.insertBefore = function(node, reference) {
+        if (this.getAttribute?.(TABLE_LINK_GROUP_ATTRIBUTE) === 'true') groupInsertions += 1;
+        return originalInsertBefore.call(this, node, reference);
+      };
+
+      try {
+        for (const block of [...blocks].reverse()) {
+          renderer.insert({...block, translatedText: `번역 ${block.text}`});
+        }
+        return {blocks, groupInsertions};
+      } finally {
+        nodePrototype.insertBefore = originalInsertBefore;
+        renderer.removeAll();
+      }
+    };
+
+    const smaller = measure(50, 'multi-link-scale-50');
+    const larger = measure(100, 'multi-link-scale-100');
+
+    expect(smaller.blocks).toHaveLength(50);
+    expect(larger.blocks).toHaveLength(100);
+    expect(smaller.groupInsertions).toBeLessThanOrEqual(51);
+    expect(larger.groupInsertions).toBeLessThanOrEqual(smaller.groupInsertions * 2);
+  });
+
+  it('restores linked table presentation when switching translation modes', () => {
+    document.body.innerHTML = `
+      <table><tbody><tr><td id="multi-modes">
+        <nobr><a href="#first">First value</a></nobr>
+        <nobr><a href="#second">Second value</a></nobr>
+      </td></tr></tbody></table>
+    `;
+    const renderer = new TranslationRenderer({
+      document,
+      sessionId: 'multi-link-modes-session',
+      settings: {translationMode: TRANSLATION_MODES.ORIGINAL_TRANSLATION}
+    });
+    const blocks = collectTranslationBlocks(document.body);
+    const translations = new Map([
+      ['First value', '첫째'],
+      ['Second value', '둘째']
+    ]);
+    for (const block of blocks) renderer.insert({...block, translatedText: translations.get(block.text)});
+
+    const cell = document.querySelector('#multi-modes');
+    const groupSelector = `[${TABLE_LINK_GROUP_ATTRIBUTE}="true"]`;
+    const sourceLinks = () => [...cell.querySelectorAll('a')].map((link) => link.textContent);
+    const groupTexts = () => [...cell.querySelector(groupSelector)?.children ?? []]
+      .map((item) => item.textContent);
+
+    expect(sourceLinks()).toEqual(['First value', 'Second value']);
+    expect(groupTexts()).toEqual(['첫째', '둘째']);
+
+    renderer.updatePresentation({translationMode: TRANSLATION_MODES.TRANSLATION_ONLY});
+    expect(sourceLinks()).toEqual(['첫째', '둘째']);
+    expect(cell.querySelector(groupSelector)).toBeNull();
+
+    renderer.updatePresentation({translationMode: TRANSLATION_MODES.ORIGINAL_TRANSLATION});
+    expect(sourceLinks()).toEqual(['First value', 'Second value']);
+    expect(groupTexts()).toEqual(['첫째', '둘째']);
+
+    renderer.updatePresentation({translationMode: TRANSLATION_MODES.TRANSLATION_ORIGINAL});
+    expect(sourceLinks()).toEqual(['첫째', '둘째']);
+    expect(groupTexts()).toEqual(['First value', 'Second value']);
+
+    renderer.removeAll();
+    expect(document.querySelector('#multi-modes')?.textContent.replace(/[\t\r\n ]+/g, ' ').trim())
+      .toBe('First value Second value');
   });
 
   it('places direct-text paragraph translations at each paragraph boundary', () => {

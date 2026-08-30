@@ -194,6 +194,22 @@ function isWhitespaceText(node) {
   return node?.nodeType === 3 && !(node.nodeValue ?? '').trim();
 }
 
+function getLinkedTableItems(element) {
+  if (!element.matches?.('td,th') || element.closest?.(NAVIGATION_SELECTOR)) return [];
+
+  const items = [];
+  for (const node of Array.from(element.childNodes ?? [])) {
+    if (isWhitespaceText(node) || isGenerated(node)) continue;
+    if (!isElement(node)) return [];
+
+    const links = node.matches('a') ? [node] :
+      node.matches('nobr') ? Array.from(node.querySelectorAll('a')) : [];
+    if (links.length !== 1 || links[0].closest('td,th') !== element) return [];
+    items.push(node);
+  }
+  return items.length > 1 ? items : [];
+}
+
 function isPhrasingContent(nodes) {
   return nodes.every((node) => {
     if (!isElement(node)) return true;
@@ -740,6 +756,59 @@ export function collectTranslationBlocks(
     if (isHidden(element) && !isExistingSource) {
       onHidden?.(element);
       return;
+    }
+
+    const linkedTableItems = getLinkedTableItems(element);
+    if (linkedTableItems.length > 1) {
+      // A table cell can contain several independent linked values. Keep the
+      // cell as the shared layout anchor, but translate each value separately
+      // so the renderer can preserve a visible gap between their highlights.
+      if (isExistingSource) excludeExisting();
+      const tableLinkedGroup = {cell: element, items: linkedTableItems};
+      const linkedBlocks = [];
+      let canSplit = true;
+
+      for (const [index, item] of linkedTableItems.entries()) {
+        const itemMarkedSourceId = item.getAttribute(SOURCE_ID_ATTRIBUTE);
+        const itemIsExistingSource = Boolean(itemMarkedSourceId) &&
+          (typeof isActiveSource !== 'function' || isActiveSource(item));
+        const itemExistingSourceId = itemIsExistingSource ? itemMarkedSourceId : null;
+        const excludeExistingItem = () => {
+          if (itemIsExistingSource) onExcluded?.(item);
+        };
+        if (isHidden(item) && !itemIsExistingSource) {
+          canSplit = false;
+          break;
+        }
+
+        const itemText = normalizeSourceText(textFromNode(item, item));
+        if (itemText.length < 2 || !hasLettersOrNumbers(itemText) ||
+            !isTranslatableBlock(item, itemText, targetLanguage)) {
+          excludeExistingItem();
+          canSplit = false;
+          break;
+        }
+
+        const itemSourceHash = hashSourceText(itemText);
+        if (itemIsExistingSource && !item.getAttribute(SOURCE_HASH_ATTRIBUTE)) continue;
+        if (itemIsExistingSource && item.getAttribute(PRESENTATION_HASH_ATTRIBUTE) === itemSourceHash) continue;
+        if (itemIsExistingSource && item.getAttribute(SOURCE_HASH_ATTRIBUTE) === itemSourceHash) continue;
+        if (itemIsExistingSource) item.setAttribute(PENDING_SOURCE_HASH_ATTRIBUTE, itemSourceHash);
+
+        linkedBlocks.push({
+          element: item,
+          text: itemText,
+          sourceId: itemExistingSourceId || `source-${++sourceSequence}`,
+          sourceHash: itemSourceHash,
+          mixedContent: false,
+          tableLinked: {group: tableLinkedGroup, index}
+        });
+      }
+
+      if (canSplit) {
+        blocks.push(...linkedBlocks);
+        return;
+      }
     }
     const hasSegmentDescendant = Boolean(element.querySelector(SEGMENT_SELECTOR));
     if (!isExistingSource && hasSegmentDescendant && !hasNonSegmentBlockDescendant(element, candidateSet)) return;
