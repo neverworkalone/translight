@@ -30,6 +30,10 @@ const PRESENTATION_HASH_ATTRIBUTE = 'data-translight-presentation-hash';
 export const SEGMENT_ATTRIBUTE = 'data-translight-segment';
 export const SEGMENT_ID_ATTRIBUTE = 'data-translight-segment-id';
 export const SEGMENT_SELECTOR = `[${SEGMENT_ATTRIBUTE}="true"]`;
+export const PSNPROFILES_OVERVIEW_LABEL_SELECTOR = [
+  '.overview-info > .tag > .typo-bottom',
+  `.overview-info > ${SEGMENT_SELECTOR} > .tag > .typo-bottom`
+].join(',');
 const CANDIDATE_SELECTOR = `${BLOCK_SELECTOR},${SEGMENT_SELECTOR}`;
 const PHRASING_TAGS = new Set([
   'a', 'abbr', 'b', 'bdi', 'bdo', 'br', 'button', 'cite', 'code', 'data', 'del',
@@ -60,6 +64,20 @@ export function isExcluded(element) {
 export function isPsnProfilesPage(root) {
   return Boolean(root?.querySelector?.(PSNPROFILES_HEADER_NAV_SELECTOR) &&
     root.querySelector?.(PSNPROFILES_GUIDE_INFO_SELECTOR));
+}
+
+function isPsnProfilesOverviewContainer(element, isPsnProfilesDocument) {
+  if (!isElement(element) || !isPsnProfilesDocument) return false;
+
+  if (element.matches(PSNPROFILES_OVERVIEW_LABEL_SELECTOR)) return false;
+  if (element.matches('.overview-info')) {
+    return Boolean(element.querySelector(
+      ':scope > .tag > .typo-bottom, :scope > [data-translight-segment="true"] > .tag > .typo-bottom'
+    ));
+  }
+  return element.matches(SEGMENT_SELECTOR) &&
+    element.parentElement?.matches('.overview-info') &&
+    Boolean(element.querySelector(':scope > .tag > .typo-bottom'));
 }
 
 function isVisuallyHiddenStyle(style) {
@@ -703,10 +721,13 @@ function splitDirectTextIntoSegments(element, targetLanguage, {hasNestedBlocks =
   return wrappers;
 }
 
-function getCandidates(root) {
+function getCandidates(root, {isPsnProfilesDocument = isPsnProfilesPage(root.ownerDocument ?? root)} = {}) {
+  const candidateSelector = isPsnProfilesDocument
+    ? `${CANDIDATE_SELECTOR},${PSNPROFILES_OVERVIEW_LABEL_SELECTOR}`
+    : CANDIDATE_SELECTOR;
   const candidates = [];
-  if (isElement(root) && root.matches(CANDIDATE_SELECTOR)) candidates.push(root);
-  candidates.push(...root.querySelectorAll(CANDIDATE_SELECTOR));
+  if (isElement(root) && root.matches(candidateSelector)) candidates.push(root);
+  candidates.push(...root.querySelectorAll(candidateSelector));
   return candidates;
 }
 
@@ -740,7 +761,8 @@ export function collectTranslationBlocks(
 ) {
   if (!root || typeof root.querySelectorAll !== 'function') return [];
 
-  const candidates = getCandidates(root);
+  const isPsnProfilesDocument = isPsnProfilesPage(root.ownerDocument ?? root);
+  const candidates = getCandidates(root, {isPsnProfilesDocument});
   const candidateSet = new Set(candidates);
   const blocks = [];
   const previousVisibilityCache = activeVisibilityCache;
@@ -758,6 +780,15 @@ export function collectTranslationBlocks(
     };
     if (isHidden(element) && !isExistingSource) {
       onHidden?.(element);
+      return;
+    }
+
+    // The overview badges contain numeric values and labels as separate
+    // inline elements. Translating the container (or the segment wrapper
+    // created by generic line-break splitting) repeats all three numbers in
+    // one generated line. Collect only the labels below instead.
+    if (isPsnProfilesOverviewContainer(element, isPsnProfilesDocument)) {
+      excludeExisting();
       return;
     }
 

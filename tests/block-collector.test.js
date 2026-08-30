@@ -109,6 +109,44 @@ describe('collectTranslationBlocks', () => {
     ]);
   });
 
+  it.each([false, true])('collects PSNProfiles overview labels without bundling badge values (splitSegments=%s)', (splitSegments) => {
+    document.body.innerHTML = `
+      <div id="header"><div class="navigation"></div></div>
+      <div id="banner"><div class="guide-info"></div></div>
+      <div class="box light guide overview">
+        <div class="overview-info">
+          <span class="tag">
+            <span class="typo-top">3/10</span><br />
+            <span class="typo-bottom">Difficulty</span>
+          </span>
+          <span class="tag">
+            <span class="typo-top">1</span><br />
+            <span class="typo-bottom">Playthrough</span>
+          </span>
+          <span class="tag">
+            <span class="typo-top">20</span><br />
+            <span class="typo-bottom">Hours</span>
+          </span>
+        </div>
+      </div>
+    `;
+
+    const overview = document.querySelector('.overview-info');
+    const blocks = collectTranslationBlocks(document.body, {splitSegments});
+
+    expect(blocks.map((block) => block.text)).toEqual([
+      'Difficulty',
+      'Playthrough',
+      'Hours'
+    ]);
+    expect(blocks.map((block) => block.element)).toEqual([
+      overview.querySelector('.tag:nth-child(1) .typo-bottom'),
+      overview.querySelector('.tag:nth-child(2) .typo-bottom'),
+      overview.querySelector('.tag:nth-child(3) .typo-bottom')
+    ]);
+    expect(overview.querySelector('[data-translight-segment="true"]')).toBeNull();
+  });
+
   it('keeps linked table values translatable while excluding a real navigation container', () => {
     document.body.innerHTML = `
       <table class="trophy-overview">
