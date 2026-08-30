@@ -23,6 +23,7 @@
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.8",
+    "esbuild": "^0.28.2",
     "jsdom": "^25.0.1",
     "vite": "^8.2.2",
     "vitest": "^4.1.11",

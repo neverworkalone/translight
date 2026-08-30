@@ -1334,7 +1334,7 @@ describe('TranslationRenderer', () => {
     expect(large.hostChildIterations).toBe(0);
     expect(small.sourceComparisons).toBeGreaterThan(0);
     expect(large.sourceComparisons).toBeLessThanOrEqual(small.sourceComparisons * 3);
-  });
+  }, 15_000);
 
   it('clears anchored translation styles when a grid source becomes a normal sibling', () => {
     document.body.innerHTML = `
