@@ -2379,6 +2379,50 @@ describe('TranslationRenderer', () => {
     expect(document.body.innerHTML).toBe('<table><tbody><tr><td id="cell">Original cell</td></tr></tbody></table>');
   });
 
+  it('keeps mixed table-cell prose translations before a nested guide list', () => {
+    document.body.innerHTML = `
+      <table><tbody><tr>
+        <td id="cell">
+          For the hardest single-chapter trophy of the game, you must choose the best path to the end and do so impeccably.
+          This will likely not go on your first run, so just move on and retry it with chapter select later if so.
+          Here are the instructions for the perfect route: It is recommended that you pause the game every 2-4 actions so you can check your next move.
+          These instructions are for the hardest difficulty, but everything except the button prompts are the same on the lowest.
+          Thanks to <a href="#author">FrumpleOrz</a> for pointing out some flaws in the instructions (these have been corrected).
+          <ul>
+            <li>Go left. Tilt right. Go right. Go left. Tilt left. Tilt right.</li>
+            <li>Your car is fishtailing, you must continuously tilt the controller left to right.</li>
+          </ul>
+        </td>
+      </tr></tbody></table>
+    `;
+    const cell = document.querySelector('#cell');
+    const block = collectTranslationBlocks(document.body, {splitSegments: false}).find(({text}) =>
+      text.startsWith('For the hardest single-chapter trophy')
+    );
+    const renderer = new TranslationRenderer({
+      document,
+      sessionId: 'mixed-table-guide-session',
+      settings: {translationMode: TRANSLATION_MODES.ORIGINAL_TRANSLATION}
+    });
+
+    expect(block?.element).toBe(cell);
+    expect(block?.mixedContent).toBe(true);
+    renderer.insert({
+      ...block,
+      translatedText: '게임에서 가장 어려운 단일 챕터 트로피의 완벽한 경로를 선택하는 안내 문단입니다.'
+    });
+
+    const translation = cell.querySelector('translight-translation');
+    const list = cell.querySelector('ul');
+    expect(translation).not.toBeNull();
+    expect(translation?.nextElementSibling).toBe(list);
+    expect(list?.previousElementSibling).toBe(translation);
+
+    renderer.removeAll();
+    expect(document.body.textContent).toContain('For the hardest single-chapter trophy');
+    expect(document.querySelector('translight-translation')).toBeNull();
+  });
+
   it('renders each linked table value as a separate highlighted item', () => {
     document.body.innerHTML = `
       <table><tbody><tr>
