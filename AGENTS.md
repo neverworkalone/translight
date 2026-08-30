@@ -80,6 +80,15 @@ If a test itself is wrong, fix the test for a stated reason and re-confirm that 
   * translation stop/restart
 * When text length affects layout, use deterministic short and long translations for reproducible checks.
 
+### Browser Validation
+
+* For Translight development and regression testing, NEVER control or attach to the user's regular Google Chrome.
+* NEVER use browser automation, AppleScript, or an existing Chrome debugging session as a substitute for Chrome for Testing.
+* Always launch the repository-managed Chrome for Testing through the documented CFT runner.
+* Verify that the reported browser path is `Google Chrome for Testing.app` before accepting browser-test results.
+* If Chrome for Testing cannot be launched, report validation as blocked. Do not fall back to regular Google Chrome.
+* Use the user's regular Chrome only when the user explicitly requests it for the current task.
+
 ## 3. Performance and Test Safety
 
 * When adding or changing site-specific handling, DOM collection, insertion, recovery, layout synchronization, or observer paths, validate both functional and performance regressions in the same change.
