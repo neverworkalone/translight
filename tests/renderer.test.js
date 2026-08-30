@@ -381,6 +381,9 @@ describe('TranslationRenderer', () => {
     expect(renderer.records.get('fixed-title-source')?.placement).toBe('inside');
     expect(translation.style.getPropertyValue('margin')).toBe('0px');
     expect(window.getComputedStyle(translation).margin).toBe('0px');
+    const generatedText = translation.querySelector('[data-translight-text="true"]');
+    expect(generatedText.style.getPropertyValue('display')).toBe('inline-block');
+    expect(window.getComputedStyle(generatedText).display).toBe('inline-block');
   });
 
   it('does not copy host layout dimensions from generated segment wrappers', () => {

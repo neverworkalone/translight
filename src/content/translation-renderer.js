@@ -130,6 +130,17 @@ function isFixedHeightLayoutHeading(element) {
   return Number.isFinite(height) && height > 0;
 }
 
+function syncFixedHeightHeadingText(record) {
+  const {element, translation, placement} = record ?? {};
+  const text = translation?.querySelector?.(`[${TRANSLATION_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"]`);
+  if (!text?.style) return;
+  const isFixedHeightHeading = placement === 'inside' && isFixedHeightLayoutHeading(element);
+  // An inline span inherits the title h3's line box and paints a taller
+  // highlight than its own text. Keep the generated heading highlight tight
+  // without changing the normal inline behavior elsewhere.
+  setStyleValue(text.style, 'display', isFixedHeightHeading ? 'inline-block' : '');
+}
+
 function setStyleValue(style, property, value) {
   const currentValue = style?.getPropertyValue?.(property) || '';
   const currentPriority = style?.getPropertyPriority?.(property) || '';
@@ -250,6 +261,7 @@ function syncSourceLayout(record, {
   // Fixed-height layout headings need the same compact treatment: their host
   // title bar cannot absorb the generated block's default vertical margins.
   const isFixedHeightHeading = placement === 'inside' && isFixedHeightLayoutHeading(element);
+  syncFixedHeightHeadingText(record);
   setStyleValue(translation.style, 'margin', isGridOwnedLayout || isFixedHeightHeading ? '0' : '');
   if (placement?.kind === GRID_LAYOUT_ANCHORED_PLACEMENT) {
     const parent = syncGridLayoutReservation(record, {defer: deferGridReservation});
