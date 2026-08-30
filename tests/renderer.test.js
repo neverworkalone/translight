@@ -2263,6 +2263,35 @@ describe('TranslationRenderer', () => {
     expect(document.body.innerHTML).toBe('<table><tbody><tr><td id="cell">Original cell</td></tr></tbody></table>');
   });
 
+  it('adds spacing to translations for table cells with multiple linked values', () => {
+    document.body.innerHTML = `
+      <table><tbody><tr>
+        <td id="multi">
+          <nobr><a href="#fbi-investigator">FBI Investigator</a></nobr>
+          <nobr><a href="#nerd">Nerd</a></nobr>
+        </td>
+        <td id="single"><nobr><a href="#interactive-drama">Interactive Drama</a></nobr></td>
+      </tr></tbody></table>
+    `;
+    const renderer = new TranslationRenderer({document, sessionId: 'multi-link-spacing-session'});
+    const multiTranslation = renderer.insert({
+      element: document.querySelector('#multi'),
+      sourceId: 'multi-link-spacing-source',
+      translatedText: 'FBI 수사관 괴짜'
+    });
+    const singleTranslation = renderer.insert({
+      element: document.querySelector('#single'),
+      sourceId: 'single-link-spacing-source',
+      translatedText: '인터랙티브 드라마'
+    });
+
+    expect(multiTranslation.getAttribute('data-translight-multi-link')).toBe('true');
+    expect(singleTranslation.hasAttribute('data-translight-multi-link')).toBe(false);
+    expect(renderer.style.textContent).toContain('word-spacing: 0.35em !important');
+
+    renderer.removeAll();
+  });
+
   it('places direct-text paragraph translations at each paragraph boundary', () => {
     document.body.innerHTML = '<div id="guide">First paragraph.<br><br>Second paragraph.</div>';
     const guide = document.querySelector('#guide');

@@ -28,6 +28,7 @@ export const HIDDEN_PLACEMENT_ATTRIBUTE = 'data-translight-hidden-placement';
 export const REPLACED_ATTRIBUTE = 'data-translight-replaced';
 export const STYLED_REPLACEMENT_ATTRIBUTE = 'data-translight-styled-replacement';
 export const REPLACEMENT_TEXT_ATTRIBUTE = 'data-translight-replacement-text';
+export const MULTI_LINK_TABLE_ATTRIBUTE = 'data-translight-multi-link';
 
 const GENERATED_VALUE = 'true';
 const STYLE_ATTRIBUTE = 'data-translight-style';
@@ -40,6 +41,7 @@ const BLOCK_SELECTOR = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,figcaption,div,section
 const GENERATED_SELECTOR = 'translight-translation,[data-translight-generated="true"]';
 const LAYOUT_DISPLAYS = new Set(['flex', 'inline-flex', 'grid', 'inline-grid']);
 const TABLE_CELL_TAGS = new Set(['td', 'th']);
+const MULTI_LINK_TABLE_WORD_SPACING = '0.35em';
 const MAX_RECOVERY_ATTEMPTS = 1;
 const STABLE_LIST_SIBLING_PLACEMENT = 'stable-list-sibling';
 const GRID_LAYOUT_ANCHORED_PLACEMENT = 'grid-layout-anchored';
@@ -1507,7 +1509,9 @@ function styleText(sessionId, presentation) {
   const styleSelector = (style) =>
     `${styledSelector}[${STYLE_ATTRIBUTE}="${style}"], ${replacementTextSelector}[${STYLE_ATTRIBUTE}="${style}"]`;
   const tableCellSelector = `td > ${selector}, th > ${selector}`;
+  const multiLinkTableSelector = `td > ${styledSelector}[${MULTI_LINK_TABLE_ATTRIBUTE}="${GENERATED_VALUE}"], th > ${styledSelector}[${MULTI_LINK_TABLE_ATTRIBUTE}="${GENERATED_VALUE}"]`;
   const translationTextSelector = `${selector} > [${TRANSLATION_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"]`;
+  const multiLinkTableTextSelector = `${multiLinkTableSelector} > [${TRANSLATION_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"]`;
   const styledTranslationTextSelector = `${styledSelector} > [${TRANSLATION_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"]`;
   const textStyleSelector = (style) =>
     `${styledSelector}[${STYLE_ATTRIBUTE}="${style}"], ${replacementTextSelector}[${STYLE_ATTRIBUTE}="${style}"]`;
@@ -1640,6 +1644,10 @@ function styleText(sessionId, presentation) {
       width: 100% !important;
       max-width: 100% !important;
       margin: 0.25em 0 0 !important;
+    }
+
+    ${multiLinkTableTextSelector} {
+      word-spacing: ${MULTI_LINK_TABLE_WORD_SPACING} !important;
     }
 
     ${styleSelector(TRANSLATION_STYLES.LEFT_BORDER)} {
@@ -2216,9 +2224,30 @@ export class TranslationRenderer {
     restoreAttribute(element, HIDDEN_PLACEMENT_ATTRIBUTE, record.originalAttributes?.[HIDDEN_PLACEMENT_ATTRIBUTE]);
   }
 
+  syncMultiLinkTableAttribute(record) {
+    const {element, translation} = record ?? {};
+    if (!translation) return;
+    const tagName = element?.tagName?.toLowerCase();
+    if (!TABLE_CELL_TAGS.has(tagName)) {
+      translation.removeAttribute(MULTI_LINK_TABLE_ATTRIBUTE);
+      return;
+    }
+    let linkedValueCount = 0;
+    for (const link of element.querySelectorAll('a')) {
+      if (link.closest('td,th') !== element) continue;
+      linkedValueCount += 1;
+      if (linkedValueCount > 1) {
+        translation.setAttribute(MULTI_LINK_TABLE_ATTRIBUTE, GENERATED_VALUE);
+        return;
+      }
+    }
+    translation.removeAttribute(MULTI_LINK_TABLE_ATTRIBUTE);
+  }
+
   applyRecordPresentation(record) {
     const {element, translation} = record;
     if (!element || !translation) return;
+    this.syncMultiLinkTableAttribute(record);
     const mode = this.presentation.translationMode;
     this.reconcileGridLayoutPlacement(record);
     this.observeSourceLayout(record);
