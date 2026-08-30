@@ -17,6 +17,10 @@ const NAVIGATION_SELECTOR = [
   '[data-nav-moretrigger]',
   '.MainNavigation'
 ].join(',');
+const PSNPROFILES_SHELL_SELECTOR = '#header,#banner';
+const PSNPROFILES_HEADER_NAV_SELECTOR = '#header .navigation';
+const PSNPROFILES_GUIDE_INFO_SELECTOR = '#banner .guide-info';
+const PSNPROFILES_TOC_ITEM_SELECTOR = '.tableofcontents li';
 const LINK_RATIO_LIMIT = 0.65;
 const DOUBLE_LINE_BREAK_PATTERN = /\r?\n[ \t\f]*(?:\r?\n)+/;
 const SOURCE_ID_ATTRIBUTE = 'data-translight-source-id';
@@ -51,6 +55,11 @@ export function isExcluded(element) {
   if (element.matches(EXCLUDED_ANCESTOR_SELECTOR) || element.closest(EXCLUDED_ANCESTOR_SELECTOR)) return true;
   if (element.isContentEditable || element.closest('[contenteditable="true"],[contenteditable=""]')) return true;
   return false;
+}
+
+export function isPsnProfilesPage(root) {
+  return Boolean(root?.querySelector?.(PSNPROFILES_HEADER_NAV_SELECTOR) &&
+    root.querySelector?.(PSNPROFILES_GUIDE_INFO_SELECTOR));
 }
 
 function isVisuallyHiddenStyle(style) {
@@ -145,12 +154,34 @@ function hasLettersOrNumbers(text) {
   }
 }
 
-function isNavigationLike(element, text) {
+function isDirectContentLink(element, link) {
+  // A mixed guide container can contain link-heavy nested cards. Only count
+  // links in the same direct-content scope as the text being classified.
+  let current = link?.parentElement;
+  while (current && current !== element) {
+    if (current.matches?.(BLOCK_SELECTOR)) return false;
+    current = current.parentElement;
+  }
+  return current === element;
+}
+
+function isNavigationLike(element, text, {directContentOnly = false} = {}) {
   if (element.closest(NAVIGATION_SELECTOR)) return true;
+  const shell = element.closest(PSNPROFILES_SHELL_SELECTOR);
+  // PSNProfiles puts the guide title, statistics, and navigation in fixed
+  // shell regions. Adding block translations there expands a bottom-anchored
+  // banner and moves its title out of the viewport, so keep that chrome in
+  // its native layout while translating the guide body below it.
+  if (shell && isPsnProfilesPage(element.ownerDocument)) return true;
   // Figure captions commonly link to the referenced films, but the links are
   // part of the caption content rather than a navigation list.
   if (element.matches('figcaption')) return false;
-  const links = Array.from(element.querySelectorAll('a'));
+  // Table cells commonly contain linked data values (for example, multiple
+  // trophies in one row), so link density is not enough to classify them as
+  // navigation. The semantic/known navigation checks above still apply.
+  if (element.matches('td,th')) return false;
+  const links = Array.from(element.querySelectorAll('a'))
+    .filter((link) => !directContentOnly || isDirectContentLink(element, link));
   if (links.length < 2 || text.length === 0) return false;
   const linkText = links
     .map((link) => normalizeSourceText(textFromNode(link, link)))
@@ -164,6 +195,22 @@ function isBreak(node) {
 
 function isWhitespaceText(node) {
   return node?.nodeType === 3 && !(node.nodeValue ?? '').trim();
+}
+
+function getLinkedTableItems(element) {
+  if (!element.matches?.('td,th') || element.closest?.(NAVIGATION_SELECTOR)) return [];
+
+  const items = [];
+  for (const node of Array.from(element.childNodes ?? [])) {
+    if (isWhitespaceText(node) || isGenerated(node)) continue;
+    if (!isElement(node)) return [];
+
+    const links = node.matches('a') ? [node] :
+      node.matches('nobr') ? Array.from(node.querySelectorAll('a')) : [];
+    if (links.length !== 1 || links[0].closest('td,th') !== element) return [];
+    items.push(node);
+  }
+  return items.length > 1 ? items : [];
 }
 
 function isPhrasingContent(nodes) {
@@ -226,6 +273,13 @@ function createSegmentWrapper(element) {
   const wrapper = element.ownerDocument.createElement('span');
   wrapper.setAttribute(SEGMENT_ATTRIBUTE, 'true');
   wrapper.setAttribute(SEGMENT_ID_ATTRIBUTE, `source-${++sourceSequence}`);
+  // PSNProfiles uses spans for trophy icons and constrains every span inside
+  // its table of contents to a 14px absolute box. The generated source
+  // wrapper is only a segmentation boundary, so let the original link keep
+  // the list item's layout while retaining the wrapper for bookkeeping.
+  if (element.closest?.(PSNPROFILES_TOC_ITEM_SELECTOR)) {
+    wrapper.style.setProperty('display', 'contents', 'important');
+  }
   return wrapper;
 }
 
@@ -706,6 +760,59 @@ export function collectTranslationBlocks(
       onHidden?.(element);
       return;
     }
+
+    const linkedTableItems = getLinkedTableItems(element);
+    if (linkedTableItems.length > 1) {
+      // A table cell can contain several independent linked values. Keep the
+      // cell as the shared layout anchor, but translate each value separately
+      // so the renderer can preserve a visible gap between their highlights.
+      if (isExistingSource) excludeExisting();
+      const tableLinkedGroup = {cell: element, items: linkedTableItems};
+      const linkedBlocks = [];
+      let canSplit = true;
+
+      for (const [index, item] of linkedTableItems.entries()) {
+        const itemMarkedSourceId = item.getAttribute(SOURCE_ID_ATTRIBUTE);
+        const itemIsExistingSource = Boolean(itemMarkedSourceId) &&
+          (typeof isActiveSource !== 'function' || isActiveSource(item));
+        const itemExistingSourceId = itemIsExistingSource ? itemMarkedSourceId : null;
+        const excludeExistingItem = () => {
+          if (itemIsExistingSource) onExcluded?.(item);
+        };
+        if (isHidden(item) && !itemIsExistingSource) {
+          canSplit = false;
+          break;
+        }
+
+        const itemText = normalizeSourceText(textFromNode(item, item));
+        if (itemText.length < 2 || !hasLettersOrNumbers(itemText) ||
+            !isTranslatableBlock(item, itemText, targetLanguage)) {
+          excludeExistingItem();
+          canSplit = false;
+          break;
+        }
+
+        const itemSourceHash = hashSourceText(itemText);
+        if (itemIsExistingSource && !item.getAttribute(SOURCE_HASH_ATTRIBUTE)) continue;
+        if (itemIsExistingSource && item.getAttribute(PRESENTATION_HASH_ATTRIBUTE) === itemSourceHash) continue;
+        if (itemIsExistingSource && item.getAttribute(SOURCE_HASH_ATTRIBUTE) === itemSourceHash) continue;
+        if (itemIsExistingSource) item.setAttribute(PENDING_SOURCE_HASH_ATTRIBUTE, itemSourceHash);
+
+        linkedBlocks.push({
+          element: item,
+          text: itemText,
+          sourceId: itemExistingSourceId || `source-${++sourceSequence}`,
+          sourceHash: itemSourceHash,
+          mixedContent: false,
+          tableLinked: {group: tableLinkedGroup, index}
+        });
+      }
+
+      if (canSplit) {
+        blocks.push(...linkedBlocks);
+        return;
+      }
+    }
     const hasSegmentDescendant = Boolean(element.querySelector(SEGMENT_SELECTOR));
     if (!isExistingSource && hasSegmentDescendant && !hasNonSegmentBlockDescendant(element, candidateSet)) return;
     const hasNestedBlocks = hasBlockDescendant(element, candidateSet);
@@ -714,14 +821,15 @@ export function collectTranslationBlocks(
 
     const text = hasNestedBlocks ? directText : normalizeSourceText(textFromNode(element, element));
     const segmentationText = hasNestedBlocks ? directText : text;
-    if (allowSegmentation && segmentationText && !isNavigationLike(element, segmentationText)) {
+    const navigationOptions = hasNestedBlocks ? {directContentOnly: true} : undefined;
+    if (allowSegmentation && segmentationText && !isNavigationLike(element, segmentationText, navigationOptions)) {
       const segments = splitDirectTextIntoSegments(element, targetLanguage, {hasNestedBlocks});
       if (segments.length) {
         for (const segment of segments) processCandidate(segment, {allowSegmentation: false});
         return;
       }
     }
-    if (text.length < 2 || !hasLettersOrNumbers(text) || isNavigationLike(element, text)) {
+    if (text.length < 2 || !hasLettersOrNumbers(text) || isNavigationLike(element, text, navigationOptions)) {
       excludeExisting();
       return;
     }

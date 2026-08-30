@@ -66,6 +66,148 @@ describe('collectTranslationBlocks', () => {
     ]);
   });
 
+  it('keeps PSNProfiles shell chrome out of the translation blocks', () => {
+    document.body.innerHTML = `
+      <div id="header">
+        <div class="header">
+          <div class="navigation"><ul><li><a href="/guides">Guides</a></li></ul></div>
+        </div>
+      </div>
+      <div id="banner">
+        <div class="banner-overlay">
+          <div class="guide-info">
+            <h3>Beyond: Two Souls Trophy Guide</h3>
+            <div class="intro">A story-based guide introduction.</div>
+          </div>
+          <div class="stats">230 User Favourites</div>
+          <div class="title-bar">Guide details</div>
+        </div>
+      </div>
+      <main id="content" class="page"><p>Guide body remains translatable.</p></main>
+    `;
+
+    expect(collectTranslationBlocks(document.body).map((block) => block.text)).toEqual([
+      'Guide body remains translatable.'
+    ]);
+  });
+
+  it('keeps PSNProfiles shell chrome out while the guide body is still mounting', () => {
+    document.body.innerHTML = `
+      <div id="header">
+        <div class="navigation"><a href="/guides">Guides</a></div>
+      </div>
+      <div id="banner">
+        <div class="guide-info">
+          <h3>Beyond: Two Souls Trophy Guide</h3>
+        </div>
+      </div>
+      <p>Guide body remains translatable.</p>
+    `;
+
+    expect(collectTranslationBlocks(document.body).map((block) => block.text)).toEqual([
+      'Guide body remains translatable.'
+    ]);
+  });
+
+  it('keeps linked table values translatable while excluding a real navigation container', () => {
+    document.body.innerHTML = `
+      <table class="trophy-overview">
+        <tbody>
+          <tr><td><nobr><a href="#interactive-drama">Interactive Drama</a></nobr></td></tr>
+          <tr><th>
+            <nobr><a href="#fbi-investigator">FBI Investigator</a></nobr>
+            <nobr><a href="#nerd">Nerd</a></nobr>
+          </th></tr>
+        </tbody>
+      </table>
+      <nav aria-label="Guide navigation">
+        <div><a href="#overview">Overview</a><a href="#roadmap">Roadmap</a></div>
+      </nav>
+    `;
+
+    const blocks = collectTranslationBlocks(document.body);
+    expect(blocks.map((block) => block.text)).toEqual([
+      'Interactive Drama',
+      'FBI Investigator',
+      'Nerd'
+    ]);
+    expect(blocks.slice(1).every((block) => block.tableLinked?.group?.cell.matches('th'))).toBe(true);
+    expect(blocks.slice(1).map((block) => block.tableLinked.index)).toEqual([0, 1]);
+  });
+
+  it('keeps linked table collection within a linear query budget', () => {
+    const measure = (rowCount) => {
+      document.body.innerHTML = `
+        <table><tbody>
+          ${Array.from({length: rowCount}, (_, rowIndex) => `
+            <tr><td>
+              ${Array.from({length: 8}, (_, itemIndex) => `
+                <nobr><a href="#value-${rowIndex}-${itemIndex}">Table value ${rowIndex}-${itemIndex}</a></nobr>
+              `).join('')}
+            </td></tr>
+          `).join('')}
+        </tbody></table>
+      `;
+
+      const originalQuerySelectorAll = Element.prototype.querySelectorAll;
+      let queryCalls = 0;
+      let returnedNodes = 0;
+      Element.prototype.querySelectorAll = function (...args) {
+        queryCalls += 1;
+        const result = originalQuerySelectorAll.apply(this, args);
+        returnedNodes += result.length;
+        return result;
+      };
+
+      try {
+        const blocks = collectTranslationBlocks(document.body);
+        return {blocks, queryCalls, returnedNodes};
+      } finally {
+        Element.prototype.querySelectorAll = originalQuerySelectorAll;
+      }
+    };
+
+    const smaller = measure(10);
+    const larger = measure(20);
+
+    expect(smaller.blocks).toHaveLength(80);
+    expect(larger.blocks).toHaveLength(160);
+    expect(larger.queryCalls).toBeLessThanOrEqual(smaller.queryCalls * 2);
+    expect(larger.returnedNodes).toBeLessThanOrEqual(smaller.returnedNodes * 2);
+  });
+
+  it('does not let PSNProfiles TOC segmentation wrappers hide the source link', () => {
+    document.head.innerHTML = `
+      <style>
+        .tableofcontents li span {
+          position: absolute;
+          height: 12px;
+          width: 14px;
+          margin: 8px;
+          overflow: hidden;
+          white-space: nowrap;
+        }
+      </style>
+    `;
+    document.body.innerHTML = `
+      <ul class="nav tableofcontents zebra">
+        <li id="source" class="ellipsis">
+          <span class="icon-sprite bronze"></span>
+
+          <a href="#source">Somebody Else?</a>
+        </li>
+      </ul>
+    `;
+
+    const blocks = collectTranslationBlocks(document.body);
+    const source = blocks.find((block) => block.text === 'Somebody Else?')?.element;
+
+    expect(source?.matches('[data-translight-segment="true"]')).toBe(true);
+    expect(source?.style.getPropertyValue('display')).toBe('contents');
+    expect(source?.style.getPropertyPriority('display')).toBe('important');
+    expect(source?.querySelector('a')?.textContent).toBe('Somebody Else?');
+  });
+
   it.each(['has-navigation', 'layout-with-navigation', 'AppWithNavigation'])
     ('does not treat ordinary layout class %s as a navigation container', (className) => {
       document.body.innerHTML = `
@@ -242,6 +384,30 @@ describe('collectTranslationBlocks', () => {
       'Direct parent text.',
       'Nested block text.'
     ]);
+  });
+
+  it('keeps direct guide prose when nested blocks contain unrelated links', () => {
+    const unrelatedLinks = Array.from({length: 60}, (_, index) =>
+      `<a href="#trophy-${index}">Trophy Guide Link ${index}</a>`
+    ).join('');
+    document.body.innerHTML = `
+      <div class="step-original guide">
+        <h1>Stage 1: Playthrough</h1>
+        <table><tbody><tr><td><div>Overview</div></td></tr></tbody></table>
+        <div><br></div>
+        Your first playthrough will be focused on achieving all the endings required for
+        <img alt="Trophy"><a href="#perfect-crime">Perfect Crime</a>.
+        This trophy is highly missable, and it requires specific decisions from the beginning of the game.
+        <a href="#order"><strong>Playthrough Order / Miscellaneous Trophies</strong></a> section.<br>
+        <div class="roadmap-intended-trophies">${unrelatedLinks}</div>
+      </div>
+    `;
+
+    const blocks = collectTranslationBlocks(document.body);
+
+    expect(blocks.some(({text}) => text.startsWith(
+      'Your first playthrough will be focused on achieving all the endings required for'
+    ))).toBe(true);
   });
 
   it('collects direct text from semantic sections such as a Craigslist posting body', () => {

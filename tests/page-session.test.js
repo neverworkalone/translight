@@ -65,6 +65,47 @@ describe('PageSession', () => {
     session.stop();
   });
 
+  it('translates linked table values independently and separates their highlights', async () => {
+    document.title = '';
+    document.body.innerHTML = `
+      <table><tbody><tr><td id="linked-values">
+        <nobr><a href="#first">First value</a></nobr>
+        <nobr><a href="#second">Second value</a></nobr>
+      </td></tr></tbody></table>
+    `;
+    const calls = [];
+    const session = new PageSession({
+      generation: 141,
+      document,
+      settings: {translatePageTitle: false},
+      provider: makeProvider({
+        translate: async (text) => {
+          calls.push(text);
+          return `ko:${text}`;
+        }
+      })
+    });
+
+    try {
+      await session.start();
+
+      expect(calls).toEqual(['First value', 'Second value']);
+      const cell = document.querySelector('#linked-values');
+      const group = cell.querySelector('[data-translight-table-link-group="true"]');
+      expect([...group.children].map((item) => item.textContent)).toEqual([
+        'ko:First value',
+        'ko:Second value'
+      ]);
+      expect(group.children[0].nextElementSibling).toBe(group.children[1]);
+    } finally {
+      session.stop({notify: false});
+    }
+
+    expect(document.querySelector('[data-translight-table-link-group="true"]')).toBeNull();
+    expect(document.querySelector('#linked-values').textContent.replace(/[\t\r\n ]+/g, ' ').trim())
+      .toBe('First value Second value');
+  });
+
   it('does not pass a Hangul-mixed block to the translation provider', async () => {
     const mixedText = `${'a'.repeat(18)}가나`; // 2 Hangul / 20 letters.
     const englishText = 'This is a pure English block.';

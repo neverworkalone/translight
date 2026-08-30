@@ -5,6 +5,7 @@ import {
   GENERATED_ATTRIBUTE,
   HIDDEN_ATTRIBUTE,
   HIDDEN_PLACEMENT_ATTRIBUTE,
+  PSNPROFILES_OVERVIEW_ATTRIBUTE,
   PRESENTATION_HASH_ATTRIBUTE,
   REPLACED_ATTRIBUTE,
   REPLACEMENT_TEXT_ATTRIBUTE,
@@ -12,6 +13,7 @@ import {
   SOURCE_ATTRIBUTE,
   SOURCE_HASH_ATTRIBUTE,
   STYLED_REPLACEMENT_ATTRIBUTE,
+  TABLE_LINK_GROUP_ATTRIBUTE,
   TRANSLATED_ATTRIBUTE,
   TranslationRenderer
 } from '../src/content/translation-renderer.js';
@@ -355,6 +357,160 @@ describe('TranslationRenderer', () => {
     expect(computedStyle.height).toBe('auto');
     expect(computedStyle.margin).toBe('0px');
     expect(computedStyle.display).toBe('inline');
+  });
+
+  it('removes generated block spacing inside fixed-height flex titles', () => {
+    document.head.innerHTML = `
+      <style>
+        .title { display: flex; height: 40px; padding: 5px; }
+        .title h3 { display: block; font-size: 14px; line-height: 16px; }
+      </style>
+    `;
+    document.body.innerHTML = `
+      <div id="header"><div class="navigation"></div></div>
+      <div id="banner"><div class="guide-info"></div></div>
+      <div class="title flex v-align">
+        <h3 class="grow" id="source">Roadmap</h3>
+      </div>
+    `;
+    const source = document.querySelector('#source');
+    const renderer = new TranslationRenderer({document, sessionId: 'fixed-title-session'});
+
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'fixed-title-source',
+      translatedText: '로드맵'
+    });
+
+    expect(renderer.records.get('fixed-title-source')?.placement).toBe('inside');
+    expect(translation.style.getPropertyValue('margin')).toBe('0px');
+    expect(window.getComputedStyle(translation).margin).toBe('0px');
+    const generatedText = translation.querySelector('[data-translight-text="true"]');
+    expect(generatedText.style.getPropertyValue('display')).toBe('inline-block');
+    expect(window.getComputedStyle(generatedText).display).toBe('inline-block');
+  });
+
+  it('adds spacing between PSNProfiles overview items without matching generic overview blocks', () => {
+    document.body.innerHTML = `
+      <div id="header"><div class="navigation"></div></div>
+      <div id="banner"><div class="guide-info"></div></div>
+      <div class="overview-info">
+        <span class="tag">3/10<br>Difficulty</span>
+        <span class="tag">1<br>Playthrough</span>
+        <span class="tag">20<br>Hours</span>
+      </div>
+    `;
+    const renderer = new TranslationRenderer({document, sessionId: 'psnprofiles-overview-session'});
+    const [block] = collectTranslationBlocks(document.body);
+    const translation = renderer.insert({
+      ...block,
+      translatedText: '3/10 난이도 1 플레이 20시간'
+    });
+    const generatedText = translation.querySelector('[data-translight-text="true"]');
+
+    expect(translation.getAttribute(PSNPROFILES_OVERVIEW_ATTRIBUTE)).toBe('true');
+    expect(renderer.style.textContent).toContain('word-spacing: 0.35em !important');
+
+    renderer.removeAll();
+    document.body.innerHTML = `
+      <div class="overview-info">Generic overview text</div>
+    `;
+    const genericOverview = document.querySelector('.overview-info');
+    const genericRenderer = new TranslationRenderer({document, sessionId: 'generic-overview-session'});
+    const [genericBlock] = collectTranslationBlocks(document.body);
+    const genericTranslation = genericRenderer.insert({
+      ...genericBlock,
+      translatedText: '일반 개요 텍스트'
+    });
+
+    expect(generatedText.isConnected).toBe(false);
+    expect(genericTranslation.hasAttribute(PSNPROFILES_OVERVIEW_ATTRIBUTE)).toBe(false);
+    expect(genericTranslation.previousElementSibling).toBe(genericOverview);
+
+    genericRenderer.removeAll();
+  });
+
+  it.each(['flex', 'grid'])('does not treat resolved auto-height %s headings as fixed outside PSNProfiles', (display) => {
+    document.head.innerHTML = `
+      <style>
+        .title { display: ${display}; height: auto; }
+        .title h3 { display: block; font-size: 14px; line-height: 16px; }
+      </style>
+    `;
+    document.body.innerHTML = `
+      <div class="title" id="auto-title">
+        <h3 id="source">Auto-height heading</h3>
+      </div>
+    `;
+    const source = document.querySelector('#source');
+    const parent = document.querySelector('#auto-title');
+    const originalGetComputedStyle = window.getComputedStyle.bind(window);
+    const getComputedStyleSpy = vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => {
+      const style = originalGetComputedStyle(element);
+      if (element !== parent) return style;
+      return new Proxy(style, {
+        get(target, property, receiver) {
+          if (property === 'height') return '40px';
+          if (property === 'getPropertyValue') {
+            return (name) => name === 'height' ? '40px' : target.getPropertyValue(name);
+          }
+          return Reflect.get(target, property, receiver);
+        }
+      });
+    });
+    const renderer = new TranslationRenderer({document, sessionId: `auto-height-${display}-session`});
+
+    try {
+      const translation = renderer.insert({
+        element: source,
+        sourceId: `auto-height-${display}-source`,
+        translatedText: '자동 높이 제목'
+      });
+
+      expect(translation.style.getPropertyValue('margin')).toBe('');
+      const generatedText = translation.querySelector('[data-translight-text="true"]');
+      expect(generatedText.style.getPropertyValue('display')).toBe('');
+    } finally {
+      renderer.removeAll();
+      getComputedStyleSpy.mockRestore();
+    }
+  });
+
+  it('does not copy host layout dimensions from generated segment wrappers', () => {
+    document.head.innerHTML = `
+      <style>
+        .tableofcontents li span {
+          position: absolute;
+          height: 12px;
+          width: 14px;
+          margin: 8px;
+          overflow: hidden;
+          white-space: nowrap;
+        }
+      </style>
+    `;
+    document.body.innerHTML = `
+      <ul class="tableofcontents">
+        <li id="source-parent">
+          <span ${SEGMENT_ATTRIBUTE}="true" data-translight-segment-id="source-segment">
+            Roadmap
+          </span>
+        </li>
+      </ul>
+    `;
+    const source = document.querySelector(`[${SEGMENT_ATTRIBUTE}="true"]`);
+    const renderer = new TranslationRenderer({document, sessionId: 'segment-layout-session'});
+
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'source-segment',
+      translatedText: '로드맵'
+    });
+
+    expect(translation.style.width).toBe('');
+    expect(translation.style.marginLeft).toBe('');
+    expect(translation.style.marginRight).toBe('');
+    expect(window.getComputedStyle(translation).width).not.toBe('14px');
   });
 
   it('does not replace visually hidden accessibility text in a visible source block', () => {
@@ -2195,6 +2351,154 @@ describe('TranslationRenderer', () => {
 
     renderer.removeAll();
     expect(document.body.innerHTML).toBe('<table><tbody><tr><td id="cell">Original cell</td></tr></tbody></table>');
+  });
+
+  it('renders each linked table value as a separate highlighted item', () => {
+    document.body.innerHTML = `
+      <table><tbody><tr>
+        <td id="multi">
+          <nobr><a href="#fbi-investigator">FBI Investigator</a></nobr>
+          <nobr><a href="#nerd">Nerd</a></nobr>
+        </td>
+        <td id="single"><nobr><a href="#interactive-drama">Interactive Drama</a></nobr></td>
+      </tr></tbody></table>
+    `;
+    const renderer = new TranslationRenderer({document, sessionId: 'multi-link-spacing-session'});
+    const blocks = collectTranslationBlocks(document.body);
+    const translated = new Map([
+      ['FBI Investigator', 'FBI 수사관'],
+      ['Nerd', '괴짜'],
+      ['Interactive Drama', '인터랙티브 드라마']
+    ]);
+    for (const block of blocks) {
+      renderer.insert({...block, translatedText: translated.get(block.text)});
+    }
+
+    const multiCell = document.querySelector('#multi');
+    const group = multiCell.querySelector(`[${TABLE_LINK_GROUP_ATTRIBUTE}="true"]`);
+    const items = [...group.children];
+    expect(items).toHaveLength(2);
+    expect(items.map((item) => item.textContent)).toEqual(['FBI 수사관', '괴짜']);
+    expect(items[0].nextElementSibling).toBe(items[1]);
+    expect(items.every((item) => item.matches('translight-translation'))).toBe(true);
+    expect(multiCell.querySelectorAll(':scope > translight-translation')).toHaveLength(0);
+    expect(document.querySelector('#single')?.querySelector('translight-translation')?.textContent)
+      .toBe('인터랙티브 드라마');
+    expect(renderer.style.textContent).toContain('margin-left: 0.35em !important');
+
+    renderer.removeAll();
+    expect(document.querySelector(`[${TABLE_LINK_GROUP_ATTRIBUTE}]`)).toBeNull();
+  });
+
+  it('keeps linked table translations in source order when results arrive out of order', () => {
+    document.body.innerHTML = `
+      <table><tbody><tr><td id="multi-order">
+        <nobr><a href="#first">First value</a></nobr>
+        <nobr><a href="#second">Second value</a></nobr>
+        <nobr><a href="#third">Third value</a></nobr>
+      </td></tr></tbody></table>
+    `;
+    const renderer = new TranslationRenderer({document, sessionId: 'multi-link-order-session'});
+    const blocks = collectTranslationBlocks(document.body);
+    const byText = new Map(blocks.map((block) => [block.text, block]));
+
+    renderer.insert({...byText.get('Third value'), translatedText: '셋째'});
+    renderer.insert({...byText.get('First value'), translatedText: '첫째'});
+    renderer.insert({...byText.get('Second value'), translatedText: '둘째'});
+
+    const cell = document.querySelector('#multi-order');
+    const group = cell.querySelector(`[${TABLE_LINK_GROUP_ATTRIBUTE}="true"]`);
+    expect([...group.children].map((item) => item.textContent)).toEqual(['첫째', '둘째', '셋째']);
+
+    renderer.remove(byText.get('Second value').element);
+    expect([...group.children].map((item) => item.textContent)).toEqual(['첫째', '셋째']);
+    renderer.remove(byText.get('First value').element);
+    renderer.remove(byText.get('Third value').element);
+    expect(cell.querySelector(`[${TABLE_LINK_GROUP_ATTRIBUTE}="true"]`)).toBeNull();
+  });
+
+  it('keeps linked table placement writes linear as a cell grows', () => {
+    const measure = (itemCount, sessionId) => {
+      document.body.innerHTML = `
+        <table><tbody><tr><td id="multi-scale">
+          ${Array.from({length: itemCount}, (_, index) => `
+            <nobr><a href="#value-${index}">Table value ${index}</a></nobr>
+          `).join('')}
+        </td></tr></tbody></table>
+      `;
+      const renderer = new TranslationRenderer({document, sessionId});
+      const blocks = collectTranslationBlocks(document.body);
+      const nodePrototype = document.defaultView.Node.prototype;
+      const originalInsertBefore = nodePrototype.insertBefore;
+      let groupInsertions = 0;
+      nodePrototype.insertBefore = function(node, reference) {
+        if (this.getAttribute?.(TABLE_LINK_GROUP_ATTRIBUTE) === 'true') groupInsertions += 1;
+        return originalInsertBefore.call(this, node, reference);
+      };
+
+      try {
+        for (const block of [...blocks].reverse()) {
+          renderer.insert({...block, translatedText: `번역 ${block.text}`});
+        }
+        return {blocks, groupInsertions};
+      } finally {
+        nodePrototype.insertBefore = originalInsertBefore;
+        renderer.removeAll();
+      }
+    };
+
+    const smaller = measure(50, 'multi-link-scale-50');
+    const larger = measure(100, 'multi-link-scale-100');
+
+    expect(smaller.blocks).toHaveLength(50);
+    expect(larger.blocks).toHaveLength(100);
+    expect(smaller.groupInsertions).toBeLessThanOrEqual(51);
+    expect(larger.groupInsertions).toBeLessThanOrEqual(smaller.groupInsertions * 2);
+  });
+
+  it('restores linked table presentation when switching translation modes', () => {
+    document.body.innerHTML = `
+      <table><tbody><tr><td id="multi-modes">
+        <nobr><a href="#first">First value</a></nobr>
+        <nobr><a href="#second">Second value</a></nobr>
+      </td></tr></tbody></table>
+    `;
+    const renderer = new TranslationRenderer({
+      document,
+      sessionId: 'multi-link-modes-session',
+      settings: {translationMode: TRANSLATION_MODES.ORIGINAL_TRANSLATION}
+    });
+    const blocks = collectTranslationBlocks(document.body);
+    const translations = new Map([
+      ['First value', '첫째'],
+      ['Second value', '둘째']
+    ]);
+    for (const block of blocks) renderer.insert({...block, translatedText: translations.get(block.text)});
+
+    const cell = document.querySelector('#multi-modes');
+    const groupSelector = `[${TABLE_LINK_GROUP_ATTRIBUTE}="true"]`;
+    const sourceLinks = () => [...cell.querySelectorAll('a')].map((link) => link.textContent);
+    const groupTexts = () => [...cell.querySelector(groupSelector)?.children ?? []]
+      .map((item) => item.textContent);
+
+    expect(sourceLinks()).toEqual(['First value', 'Second value']);
+    expect(groupTexts()).toEqual(['첫째', '둘째']);
+
+    renderer.updatePresentation({translationMode: TRANSLATION_MODES.TRANSLATION_ONLY});
+    expect(sourceLinks()).toEqual(['첫째', '둘째']);
+    expect(cell.querySelector(groupSelector)).toBeNull();
+
+    renderer.updatePresentation({translationMode: TRANSLATION_MODES.ORIGINAL_TRANSLATION});
+    expect(sourceLinks()).toEqual(['First value', 'Second value']);
+    expect(groupTexts()).toEqual(['첫째', '둘째']);
+
+    renderer.updatePresentation({translationMode: TRANSLATION_MODES.TRANSLATION_ORIGINAL});
+    expect(sourceLinks()).toEqual(['첫째', '둘째']);
+    expect(groupTexts()).toEqual(['First value', 'Second value']);
+
+    renderer.removeAll();
+    expect(document.querySelector('#multi-modes')?.textContent.replace(/[\t\r\n ]+/g, ' ').trim())
+      .toBe('First value Second value');
   });
 
   it('places direct-text paragraph translations at each paragraph boundary', () => {
