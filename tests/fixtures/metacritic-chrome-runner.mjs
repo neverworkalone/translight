@@ -2388,6 +2388,7 @@ async function main() {
 export {
   ProcessSampler,
   createChromeLaunchSpec,
+  cleanupRunnerResources,
   evaluateCpuRecovery,
   evaluateResponsiveness,
   finalizeLayoutReport,

@@ -1,5 +1,8 @@
+import {existsSync} from 'node:fs';
+import {mkdir, rm} from 'node:fs/promises';
 import {describe, expect, it, vi} from 'vitest';
 import {
+  cleanupRunnerResources,
   ProcessSampler,
   createChromeLaunchSpec,
   evaluateCpuRecovery,
@@ -55,7 +58,7 @@ describe('Metacritic Chrome runner', () => {
     expect(parseArgs(['--foreground']).background).toBe(false);
   });
 
-  it('uses macOS open -g for an app-bundled browser while preserving browser arguments', () => {
+  it('uses macOS open -n -g for an app-bundled browser while preserving browser arguments', () => {
     const chromePath = '/tmp/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
     const browserArgs = ['--remote-debugging-port=1234', 'about:blank'];
 
@@ -166,6 +169,27 @@ describe('Metacritic Chrome runner', () => {
     expect(signalProcess).toHaveBeenCalledWith(202, 'SIGKILL');
     expect(signalProcess).not.toHaveBeenCalledWith(204, 'SIGKILL');
     expect(launcher.kill).toHaveBeenCalledWith('SIGKILL');
+  });
+
+  it('cleans outer resources when launch setup fails', async () => {
+    const profileDir = `/private/tmp/translight-cft-cleanup-test-${process.pid}-${Date.now()}`;
+    const localServer = {kill: vi.fn()};
+    await mkdir(profileDir, {recursive: true});
+    try {
+      await cleanupRunnerResources({
+        chrome: null,
+        localServer,
+        ownsProfile: true,
+        profileDir,
+        keepBrowser: false,
+        keepProfile: false
+      });
+
+      expect(localServer.kill).toHaveBeenCalledWith('SIGTERM');
+      expect(existsSync(profileDir)).toBe(false);
+    } finally {
+      await rm(profileDir, {recursive: true, force: true});
+    }
   });
 
   it('rejects invalid dummy provider settings', () => {
