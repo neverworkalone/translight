@@ -121,6 +121,15 @@ function getStyleValue(style, property) {
   return style?.getPropertyValue?.(property) || style?.[property] || '';
 }
 
+function isFixedHeightLayoutHeading(element) {
+  const tagName = element?.tagName?.toLowerCase();
+  if (!/^h[1-6]$/u.test(tagName ?? '')) return false;
+  const parent = element.parentElement;
+  if (!LAYOUT_DISPLAYS.has(getDisplay(parent))) return false;
+  const height = Number.parseFloat(getComputedStyleValue(parent, 'height'));
+  return Number.isFinite(height) && height > 0;
+}
+
 function setStyleValue(style, property, value) {
   const currentValue = style?.getPropertyValue?.(property) || '';
   const currentPriority = style?.getPropertyPriority?.(property) || '';
@@ -238,7 +247,10 @@ function syncSourceLayout(record, {
   // A layout control that owns a grid cell must not inherit paragraph
   // spacing from the generated-node stylesheet; that spacing would enlarge
   // the grid row even though the source control itself is unchanged.
-  setStyleValue(translation.style, 'margin', isGridOwnedLayout ? '0' : '');
+  // Fixed-height layout headings need the same compact treatment: their host
+  // title bar cannot absorb the generated block's default vertical margins.
+  const isFixedHeightHeading = placement === 'inside' && isFixedHeightLayoutHeading(element);
+  setStyleValue(translation.style, 'margin', isGridOwnedLayout || isFixedHeightHeading ? '0' : '');
   if (placement?.kind === GRID_LAYOUT_ANCHORED_PLACEMENT) {
     const parent = syncGridLayoutReservation(record, {defer: deferGridReservation});
     if (deferGridReservation && parent) reservationParents?.add(parent);

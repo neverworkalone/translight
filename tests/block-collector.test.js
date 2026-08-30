@@ -319,6 +319,30 @@ describe('collectTranslationBlocks', () => {
     ]);
   });
 
+  it('keeps direct guide prose when nested blocks contain unrelated links', () => {
+    const unrelatedLinks = Array.from({length: 60}, (_, index) =>
+      `<a href="#trophy-${index}">Trophy Guide Link ${index}</a>`
+    ).join('');
+    document.body.innerHTML = `
+      <div class="step-original guide">
+        <h1>Stage 1: Playthrough</h1>
+        <table><tbody><tr><td><div>Overview</div></td></tr></tbody></table>
+        <div><br></div>
+        Your first playthrough will be focused on achieving all the endings required for
+        <img alt="Trophy"><a href="#perfect-crime">Perfect Crime</a>.
+        This trophy is highly missable, and it requires specific decisions from the beginning of the game.
+        <a href="#order"><strong>Playthrough Order / Miscellaneous Trophies</strong></a> section.<br>
+        <div class="roadmap-intended-trophies">${unrelatedLinks}</div>
+      </div>
+    `;
+
+    const blocks = collectTranslationBlocks(document.body);
+
+    expect(blocks.some(({text}) => text.startsWith(
+      'Your first playthrough will be focused on achieving all the endings required for'
+    ))).toBe(true);
+  });
+
   it('collects direct text from semantic sections such as a Craigslist posting body', () => {
     document.body.innerHTML = `
       <section id="postingbody">

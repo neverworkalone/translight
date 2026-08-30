@@ -357,6 +357,32 @@ describe('TranslationRenderer', () => {
     expect(computedStyle.display).toBe('inline');
   });
 
+  it('removes generated block spacing inside fixed-height flex titles', () => {
+    document.head.innerHTML = `
+      <style>
+        .title { display: flex; height: 40px; padding: 5px; }
+        .title h3 { display: block; font-size: 14px; line-height: 16px; }
+      </style>
+    `;
+    document.body.innerHTML = `
+      <div class="title flex v-align">
+        <h3 class="grow" id="source">Roadmap</h3>
+      </div>
+    `;
+    const source = document.querySelector('#source');
+    const renderer = new TranslationRenderer({document, sessionId: 'fixed-title-session'});
+
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'fixed-title-source',
+      translatedText: '로드맵'
+    });
+
+    expect(renderer.records.get('fixed-title-source')?.placement).toBe('inside');
+    expect(translation.style.getPropertyValue('margin')).toBe('0px');
+    expect(window.getComputedStyle(translation).margin).toBe('0px');
+  });
+
   it('does not copy host layout dimensions from generated segment wrappers', () => {
     document.head.innerHTML = `
       <style>

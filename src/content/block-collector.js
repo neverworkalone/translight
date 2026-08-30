@@ -147,7 +147,18 @@ function hasLettersOrNumbers(text) {
   }
 }
 
-function isNavigationLike(element, text) {
+function isDirectContentLink(element, link) {
+  // A mixed guide container can contain link-heavy nested cards. Only count
+  // links in the same direct-content scope as the text being classified.
+  let current = link?.parentElement;
+  while (current && current !== element) {
+    if (current.matches?.(BLOCK_SELECTOR)) return false;
+    current = current.parentElement;
+  }
+  return current === element;
+}
+
+function isNavigationLike(element, text, {directContentOnly = false} = {}) {
   if (element.closest(NAVIGATION_SELECTOR)) return true;
   const shell = element.closest(PSNPROFILES_SHELL_SELECTOR);
   if (shell) {
@@ -162,7 +173,8 @@ function isNavigationLike(element, text) {
   // Figure captions commonly link to the referenced films, but the links are
   // part of the caption content rather than a navigation list.
   if (element.matches('figcaption')) return false;
-  const links = Array.from(element.querySelectorAll('a'));
+  const links = Array.from(element.querySelectorAll('a'))
+    .filter((link) => !directContentOnly || isDirectContentLink(element, link));
   if (links.length < 2 || text.length === 0) return false;
   const linkText = links
     .map((link) => normalizeSourceText(textFromNode(link, link)))
@@ -733,14 +745,15 @@ export function collectTranslationBlocks(
 
     const text = hasNestedBlocks ? directText : normalizeSourceText(textFromNode(element, element));
     const segmentationText = hasNestedBlocks ? directText : text;
-    if (allowSegmentation && segmentationText && !isNavigationLike(element, segmentationText)) {
+    const navigationOptions = hasNestedBlocks ? {directContentOnly: true} : undefined;
+    if (allowSegmentation && segmentationText && !isNavigationLike(element, segmentationText, navigationOptions)) {
       const segments = splitDirectTextIntoSegments(element, targetLanguage, {hasNestedBlocks});
       if (segments.length) {
         for (const segment of segments) processCandidate(segment, {allowSegmentation: false});
         return;
       }
     }
-    if (text.length < 2 || !hasLettersOrNumbers(text) || isNavigationLike(element, text)) {
+    if (text.length < 2 || !hasLettersOrNumbers(text) || isNavigationLike(element, text, navigationOptions)) {
       excludeExisting();
       return;
     }
