@@ -1,4 +1,6 @@
 # Translight · 빛번역
+[![CI](https://github.com/neverworkalone/translight/actions/workflows/ci.yml/badge.svg)](https://github.com/neverworkalone/translight/actions/workflows/ci.yml)
+[![pages-build-deployment](https://github.com/neverworkalone/translight/actions/workflows/pages/pages-build-deployment/badge.svg?branch=master)](https://github.com/neverworkalone/translight/actions/workflows/pages/pages-build-deployment)
 
 A Chrome extension for translating English webpages into Korean with Chrome's built-in Translator API while preserving the original text.
 
