@@ -390,6 +390,41 @@ describe('TranslationRenderer', () => {
     expect(window.getComputedStyle(generatedText).display).toBe('inline-block');
   });
 
+  it('expands Steam guide table-of-contents rows around sibling translations', () => {
+    document.body.innerHTML = `
+      <div id="GuideTableOfContents">
+        <div class="rightbox_list_option" style="height: 37px">
+          <div class="guideSubSectionSelectionLink ellipsis" id="source">
+            <a href="#introduction">Introduction</a>
+          </div>
+        </div>
+        <div class="rightbox_list_option" style="height: 37px">
+          <div class="guideSubSectionSelectionLink ellipsis">Chapter: The Experiment</div>
+        </div>
+      </div>
+    `;
+    const source = document.querySelector('#source');
+    const option = source.parentElement;
+    const renderer = new TranslationRenderer({document, sessionId: 'steam-toc-session'});
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'steam-toc-source',
+      translatedText: '소개'
+    });
+
+    expect(translation.parentElement).toBe(option);
+    expect(renderer.records.get('steam-toc-source')?.placement).toBe('sibling');
+    expect(renderer.style.textContent).toContain(
+      '#GuideTableOfContents > .rightbox_list_option:has(> translight-translation[data-translight-session-id="steam-toc-session"])'
+    );
+    expect(renderer.style.textContent).toContain('height: auto !important');
+
+    renderer.removeAll();
+    expect(document.querySelectorAll('translight-translation')).toHaveLength(0);
+    expect(document.querySelector('#GuideTableOfContents')?.children).toHaveLength(2);
+    expect(option.getAttribute('style')).toBe('height: 37px');
+  });
+
   it('translates PSNProfiles overview labels inside their badges without repeating values', () => {
     document.body.innerHTML = `
       <div id="header"><div class="navigation"></div></div>
