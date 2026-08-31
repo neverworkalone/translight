@@ -57,6 +57,7 @@ const COLLAPSED_REVIEW_TRANSLATION_AFTER_CARD = 'after-card';
 const COLLAPSED_REVIEW_TRANSLATION_BEFORE_CARD = 'before-card';
 const AMAZON_REVIEW_CONTENT_SELECTOR = '[data-hook="reviewRichContentContainer"]';
 const AMAZON_REVIEW_CARD_SELECTOR = '[data-a-card-type="basic"]';
+const STEAM_GUIDE_TOC_OPTION_SELECTOR = '#GuideTableOfContents > .rightbox_list_option';
 const DOCUMENT_POSITION_PRECEDING = 2;
 const DOCUMENT_POSITION_FOLLOWING = 4;
 const gridLayoutReservations = new WeakMap();
@@ -1615,6 +1616,7 @@ function styleText(sessionId, presentation) {
   const translationTextSelector = `${selector} > [${TRANSLATION_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"]`;
   const styledTranslationTextSelector = `${styledSelector} > [${TRANSLATION_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"]`;
   const psnProfilesOverviewTranslationSelector = `${styledSelector}[${PSNPROFILES_OVERVIEW_ATTRIBUTE}="${GENERATED_VALUE}"]`;
+  const steamGuideTocOptionSelector = `${STEAM_GUIDE_TOC_OPTION_SELECTOR}:has(> ${selector})`;
   const textStyleSelector = (style) =>
     `${styledSelector}[${STYLE_ATTRIBUTE}="${style}"], ${replacementTextSelector}[${STYLE_ATTRIBUTE}="${style}"]`;
   const hiddenSelector = `[${HIDDEN_ATTRIBUTE}="true"][${SESSION_ATTRIBUTE}="${escapeAttribute(sessionId)}"]`;
@@ -1784,6 +1786,10 @@ function styleText(sessionId, presentation) {
       margin: 0.2em 0 0 !important;
       font-size: inherit !important;
       white-space: normal !important;
+    }
+
+    ${steamGuideTocOptionSelector} {
+      height: auto !important;
     }
 
     ${styleSelector(TRANSLATION_STYLES.LEFT_BORDER)} {
