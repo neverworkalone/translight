@@ -3,6 +3,33 @@ const HANGUL_CHARACTER = /[\uac00-\ud7af\u3130-\u318f]/u;
 const LETTER_CHARACTER = /^\p{L}$/u;
 const LATIN_CHARACTER = /^\p{Script=Latin}$/u;
 const STANDALONE_HANDLE_PATTERN = /^@[\p{L}\p{N}._-]+$/u;
+const WORD_PATTERN = /[\p{L}]+(?:['’][\p{L}]+)?/gu;
+// Undeclared Latin text is eligible only when it contains a small, stable
+// set of common English signals. This is deliberately conservative: it keeps
+// the en-to-ko product from guessing that Spanish, French, or German is
+// English without adding an external language detector.
+const ENGLISH_SIGNAL_WORDS = new Set([
+  'a', 'about', 'after', 'all', 'also', 'an', 'and', 'are', 'as', 'at', 'be',
+  'been', 'before', 'between', 'both', 'but', 'by', 'can', 'could', 'did',
+  'do', 'does', 'each', 'for', 'from', 'go', 'had', 'has', 'have', 'hello',
+  'her', 'here', 'him', 'his', 'how', 'i', 'if', 'in', 'into', 'is', 'it',
+  'its', 'just', 'more', 'most', 'my', 'new', 'no', 'not', 'now', 'of', 'on',
+  'one', 'only', 'or', 'other', 'our', 'out', 'over', 'own', 'same', 'see',
+  'she', 'should', 'so', 'some', 'somebody', 'such', 'than', 'that', 'the',
+  'their', 'them', 'then', 'there', 'these', 'they', 'this', 'those', 'through',
+  'to', 'too', 'under', 'up', 'use', 'used', 'very', 'was', 'we', 'were', 'what',
+  'when', 'where', 'which', 'who', 'will', 'with', 'words', 'would', 'yes',
+  'you', 'your',
+  'accommodations', 'article', 'body', 'cell', 'column', 'comfortable',
+  'content', 'deeply', 'difficulty', 'dining', 'drama', 'english', 'else',
+  'example', 'facilities', 'first', 'fresh', 'guide', 'heading', 'hours',
+  'headline', 'interactive', 'investigator', 'item', 'language', 'list',
+  'location', 'nested', 'nerd', 'paragraph', 'playthrough',
+  'post', 'prime', 'remains', 'review', 'rooms', 'second', 'sentence', 'table',
+  'team', 'text', 'third', 'title', 'translatable', 'translation', 'translated',
+  'trophy', 'value', 'visit', 'visible', 'world', 'written', 'docs'
+]);
+const MIN_ENGLISH_SIGNAL_WORDS = 2;
 
 export const LANGUAGE_MIN_LETTERS = 3;
 export const LANGUAGE_MIN_LATIN_LETTERS = 2;
@@ -36,6 +63,16 @@ function hasDetectableText(stats) {
     (stats.latinCount > 0 || stats.hangulCount > 0);
 }
 
+function hasEnglishSignal(value) {
+  const words = String(value ?? '').toLowerCase().match(WORD_PATTERN) ?? [];
+  const signalCount = words.reduce(
+    (count, word) => count + (ENGLISH_SIGNAL_WORDS.has(word) ? 1 : 0),
+    0
+  );
+  return signalCount >= MIN_ENGLISH_SIGNAL_WORDS ||
+    (words.length <= 3 && signalCount > 0);
+}
+
 function hasHangulSkipRatio(stats) {
   return stats.hangulCount >= LANGUAGE_MIN_HANGUL_LETTERS &&
     stats.hangulCount / Math.max(stats.letterCount, 1) >= HANGUL_SKIP_RATIO;
@@ -44,13 +81,16 @@ function hasHangulSkipRatio(stats) {
 /**
  * Classify only the languages that the built-in en-to-ko provider can act on.
  * A blank result means the text is too short, contains no useful letters, or
- * is not confidently English/Korean from its character composition.
+ * is not confidently English/Korean from its character composition. For
+ * undeclared Latin text, character composition alone is not enough: a small
+ * English lexical signal is required to avoid sending other Latin languages
+ * to the provider's en source-language model.
  */
 export function classifyTextLanguage(value) {
   const stats = analyzeText(value);
   if (!hasDetectableText(stats)) return '';
   if (hasHangulSkipRatio(stats)) return 'ko';
-  if (stats.latinCount >= LANGUAGE_MIN_LATIN_LETTERS) return 'en';
+  if (stats.latinCount >= LANGUAGE_MIN_LATIN_LETTERS && hasEnglishSignal(value)) return 'en';
   return '';
 }
 
@@ -92,8 +132,9 @@ export function nearestContentLanguage(element) {
 /**
  * Decide whether a collected content block should be sent to the provider.
  * Content-based Korean protection takes precedence over a local English
- * declaration; the heuristic intentionally recognizes English only for the
- * current en-to-ko product scope.
+ * declaration. An explicit English declaration is sufficient; otherwise the
+ * conservative English signal must also be present before en-to-ko translation
+ * is allowed.
  */
 export function isTranslatableBlock(element, text, targetLanguage = 'ko') {
   const target = normalizeLanguageCode(targetLanguage);
@@ -109,7 +150,8 @@ export function isTranslatableBlock(element, text, targetLanguage = 'ko') {
   if (declared) return false;
 
   return target === 'ko' &&
-    stats.latinCount >= LANGUAGE_MIN_LATIN_LETTERS;
+    stats.latinCount >= LANGUAGE_MIN_LATIN_LETTERS &&
+    hasEnglishSignal(text);
 }
 
 export function isTranslatableText(text, targetLanguage = 'ko') {

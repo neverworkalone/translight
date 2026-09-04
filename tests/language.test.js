@@ -14,9 +14,14 @@ import {
   normalizeLanguageCode
 } from '../src/content/language.js';
 
-const BELOW_HANGUL_SKIP_RATIO = `${'a'.repeat(19)}가나`; // 2 Hangul / 21 letters.
-const AT_HANGUL_SKIP_RATIO = `${'a'.repeat(18)}가나`; // 2 Hangul / 20 letters.
-const SINGLE_HANGUL_AT_RATIO = `${'a'.repeat(9)}가`; // 1 Hangul / 10 letters.
+const BELOW_HANGUL_SKIP_RATIO = `${'a'.repeat(13)} is this 가나`; // 2 Hangul / 21 letters.
+const AT_HANGUL_SKIP_RATIO = `${'a'.repeat(12)} is this 가나`; // 2 Hangul / 20 letters.
+const SINGLE_HANGUL_AT_RATIO = 'go now 가'; // One Hangul character never reaches the skip rule.
+const UNDECLARED_LATIN_EXAMPLES = [
+  'Hola mundo, esta página está en español.',
+  'Bonjour tout le monde, cette page est française.',
+  'Dies ist ein deutscher Beispielsatz.'
+];
 
 describe('content language detection', () => {
   it('normalizes regional language tags', () => {
@@ -33,12 +38,19 @@ describe('content language detection', () => {
     document.documentElement.removeAttribute('lang');
   });
 
-  it('classifies Korean and English text using character composition', () => {
+  it('classifies Korean and English text with a conservative English signal', () => {
     expect(classifyTextLanguage('한국어로 작성된 문장입니다.')).toBe('ko');
     expect(classifyTextLanguage('This page is written in English.')).toBe('en');
     expect(classifyTextLanguage('123 !? 🐈')).toBe('');
     expect(HANGUL_SKIP_RATIO).toBe(0.1);
     expect(LANGUAGE_MIN_LETTERS).toBe(3);
+  });
+
+  it('does not guess undeclared non-English Latin text as English', () => {
+    for (const text of UNDECLARED_LATIN_EXAMPLES) {
+      expect(classifyTextLanguage(text)).toBe('');
+      expect(isTranslatableText(text, 'ko')).toBe(false);
+    }
   });
 
   it('prefers an English local declaration for otherwise eligible text', () => {
