@@ -1219,7 +1219,10 @@ describe('TranslationRenderer', () => {
     expect(sourceComparisons).toBe(0);
   });
 
-  it('keeps incremental external grid insertion within the order-index budget', {timeout: 15_000}, () => {
+  // This exercises 750 real DOM insertions. Keep the operation-count budget
+  // below as the regression guard, while allowing slower shared CI runners
+  // enough wall-clock time to complete the same workload.
+  it('keeps incremental external grid insertion within the order-index budget', {timeout: 30_000}, () => {
     const measureIncrementalOrderWork = (sourceCount, sessionId) => {
       document.body.innerHTML = '';
       const host = document.createElement('div');
