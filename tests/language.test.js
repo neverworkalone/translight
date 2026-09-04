@@ -23,6 +23,8 @@ const UNDECLARED_LATIN_EXAMPLES = [
   'Dies ist ein deutscher Beispielsatz.',
   'No es posible acceder a esta página.',
   'Das ist ein Text in deutscher Sprache.',
+  'Cet article est important.',
+  'Usted puede pintar la pared.',
   'text text text text'
 ];
 const UNDECLARED_ENGLISH_SHORT_LABELS = [
@@ -34,6 +36,7 @@ const UNDECLARED_ENGLISH_PROSE = [
   'The community published a deeply researched article about access.',
   'This page is written in English and should be translated.'
 ];
+const UNDECLARED_MIXED_LANGUAGE_TEXT = 'This English article is useful, pero la página está en español.';
 const UNDECLARED_AMBIGUOUS_SHORT_LABELS = ['Go', 'Text', 'Page'];
 
 describe('content language detection', () => {
@@ -90,6 +93,16 @@ describe('content language detection', () => {
   it('does not count repeated shared words as English evidence', () => {
     expect(classifyTextLanguage('the the the the')).toBe('');
     expect(classifyTextLanguage('in in in in')).toBe('');
+  });
+
+  it('does not treat morphology or shared vocabulary as English evidence', () => {
+    expect(classifyTextLanguage('Usted puede pintar la pared.')).toBe('');
+    expect(classifyTextLanguage('Cet article est important.')).toBe('');
+  });
+
+  it('rejects mixed text when competing-language evidence is present', () => {
+    expect(classifyTextLanguage(UNDECLARED_MIXED_LANGUAGE_TEXT)).toBe('');
+    expect(isTranslatableText(UNDECLARED_MIXED_LANGUAGE_TEXT, 'ko')).toBe(false);
   });
 
   it('prefers an English local declaration for otherwise eligible text', () => {

@@ -5,40 +5,40 @@ const LATIN_CHARACTER = /^\p{Script=Latin}$/u;
 const STANDALONE_HANDLE_PATTERN = /^@[\p{L}\p{N}._-]+$/u;
 const WORD_PATTERN = /[\p{L}]+(?:['’][\p{L}]+)?/gu;
 // These words are intentionally narrower than general English stopwords. They
-// are useful lexical evidence because they are less likely to be shared
-// verbatim by Spanish, French, or German. A word from this set is not enough
-// for a long sentence on its own; repeated/common words must not manufacture
-// confidence.
+// are high-confidence English lexical anchors because they are less likely to
+// be shared verbatim by Spanish, French, or German. A word from this set is
+// not enough for a long sentence on its own; repeated/common words must not
+// manufacture confidence.
 const ENGLISH_DISCRIMINATIVE_WORDS = new Set([
-  'access', 'active', 'accommodations', 'added', 'article', 'arrived', 'around', 'away',
-  'background', 'base', 'block', 'body', 'breaking', 'cached', 'carefully', 'cell',
+  'access', 'active', 'accommodations', 'added', 'arrived', 'around', 'away',
+  'background', 'block', 'body', 'breaking', 'cached', 'carefully', 'cell',
   'change', 'changed', 'changes', 'checks', 'chrome', 'close', 'column', 'community',
   'contains', 'content', 'current', 'deeply', 'denied', 'difficulty', 'dining',
   'direct', 'docs', 'drama', 'else', 'enough', 'english', 'example', 'explains',
-  'facilities', 'favorite', 'favourites', 'final', 'first', 'fresh', 'growing', 'guide',
-  'generic', 'guests', 'heading', 'headline', 'hello', 'home', 'hours', 'important', 'independent',
-  'initial', 'interactive', 'introduction', 'investigator', 'item', 'jump', 'keeps',
+  'facilities', 'favorite', 'favourites', 'first', 'fresh', 'growing',
+  'generic', 'guests', 'heading', 'headline', 'hello', 'home', 'hours', 'independent',
+  'initial', 'interactive', 'investigator', 'item', 'jump', 'keeps',
   'language', 'late', 'latest', 'lawsuit', 'leaf', 'list', 'long', 'meaningful', 'nested',
-  'nerd', 'news', 'new', 'next', 'nominations', 'note', 'number', 'old', 'open', 'opening', 'overview',
+  'nerd', 'news', 'new', 'next', 'nominations', 'number', 'old', 'open', 'opening', 'overview',
   'paragraph', 'parent', 'phone', 'playthrough', 'post', 'preview', 'prime', 'provider',
   'pure', 'quoted', 'queue', 'read', 'remarkable', 'remains', 'rendered', 'results',
-  'review', 'rooms', 'search', 'second', 'sentence', 'settles', 'sharing', 'short', 'spa',
-  'stable', 'story', 'technical', 'team', 'teen', 'thanks', 'third', 'title', 'touch',
+  'review', 'rooms', 'search', 'second', 'sentence', 'settles', 'sharing', 'short',
+  'stable', 'story', 'technical', 'teen', 'thanks', 'third', 'title', 'touch',
   'translatable',
-  'translated', 'translation', 'trophy', 'untitled', 'user', 'value', 'visible',
-  'visit', 'why', 'win', 'words', 'world', 'written', 'yes'
+  'translated', 'trophy', 'untitled', 'user', 'value',
+  'visible', 'visit', 'why', 'win', 'words', 'world', 'written', 'yes'
 ]);
 
 // A single short label can be valid evidence when it is itself distinctive,
 // but ambiguous labels such as "go", "text", or "page" remain undecided.
 const ENGLISH_SHORT_LABEL_WORDS = new Set([
   'access', 'active', 'block', 'body', 'breaking', 'cached', 'cell', 'close',
-  'added', 'base', 'denied', 'difficulty', 'direct', 'docs', 'else', 'english', 'facilities', 'first',
+  'added', 'denied', 'difficulty', 'direct', 'docs', 'drama', 'else', 'english', 'facilities', 'first',
   'generic', 'guests', 'hello', 'heading', 'headline', 'home', 'hours', 'initial', 'investigator', 'item',
   'language', 'latest', 'list', 'news', 'nerd', 'new', 'nominations', 'old', 'open', 'paragraph',
   'phone', 'playthrough', 'preview', 'pure', 'read', 'results', 'search', 'second',
-  'short', 'spa', 'stable', 'technical', 'thanks', 'third', 'title', 'user', 'value',
-  'untitled', 'visible', 'why', 'win', 'world', 'yes'
+  'short', 'stable', 'technical', 'thanks', 'third', 'title', 'user', 'value',
+  'untitled', 'visible', 'visit', 'why', 'win', 'world', 'yes'
 ]);
 
 // Function words are supporting evidence only. They are deliberately not
@@ -61,6 +61,22 @@ const ENGLISH_MORPHOLOGY_PATTERNS = [
   /(?:ing|ings)$/u,
   /(?:ed|edly)$/u,
   /(?:ly|ness|ship|ward|wise)$/u
+];
+
+// A positive English anchor is still ambiguous when a sentence also contains
+// several markers of another common Latin-script language. These are generic
+// function-word markers, not sentence blacklists; two distinct markers are
+// required so an isolated name or borrowed word does not veto English.
+const COMPETING_LANGUAGE_MARKERS = [
+  {
+    words: new Set(['al', 'el', 'es', 'esta', 'está', 'hola', 'la', 'las', 'los', 'para', 'pero'])
+  },
+  {
+    words: new Set(['avec', 'bonjour', 'cet', 'cette', 'dans', 'des', 'est', 'la', 'le', 'les', 'pour', 'sont', 'une'])
+  },
+  {
+    words: new Set(['das', 'der', 'die', 'dies', 'ein', 'eine', 'für', 'ist', 'nicht', 'und'])
+  }
 ];
 
 export const LANGUAGE_MIN_LETTERS = 3;
@@ -95,6 +111,13 @@ function hasDetectableText(stats) {
     (stats.latinCount > 0 || stats.hangulCount > 0);
 }
 
+function hasCompetingLanguageSignal(uniqueWords) {
+  return COMPETING_LANGUAGE_MARKERS.some(({words}) => {
+    const matches = new Set([...uniqueWords].filter((word) => words.has(word)));
+    return matches.size >= 2;
+  });
+}
+
 function hasEnglishSignal(value) {
   const words = String(value ?? '').toLowerCase().match(WORD_PATTERN) ?? [];
   const uniqueWords = new Set(words);
@@ -106,25 +129,31 @@ function hasEnglishSignal(value) {
       word.length >= 5 && ENGLISH_MORPHOLOGY_PATTERNS.some((pattern) => pattern.test(word))
     )
   );
-  const evidenceWords = new Set([...discriminativeWords, ...morphologyWords]);
-  if (evidenceWords.size === 0) return false;
-
-  // Short labels do not have enough context for a confidence score. Accept
-  // only a known high-confidence label or two separate pieces of evidence.
-  if (words.length <= 3) {
-    return [...discriminativeWords].some((word) => ENGLISH_SHORT_LABEL_WORDS.has(word)) ||
-      evidenceWords.size >= 2;
-  }
-
-  // Longer text needs either two distinct lexical/morphological clues or one
-  // clue supported by multiple English function words. Function words alone,
-  // including repeated occurrences of one word, never qualify.
-  if (evidenceWords.size >= 2) return true;
-
   const functionWords = new Set(
     [...uniqueWords].filter((word) => ENGLISH_FUNCTION_WORDS.has(word))
   );
-  return evidenceWords.size === 1 && functionWords.size >= 2;
+  if (hasCompetingLanguageSignal(uniqueWords)) return false;
+
+  // Morphology is never sufficient on its own. It can be useful for English
+  // prose when paired with multiple function words, even if the prose has no
+  // high-confidence content word in this deliberately small vocabulary.
+  if (discriminativeWords.size === 0) {
+    return morphologyWords.size >= 1 && functionWords.size >= 2;
+  }
+
+  // Short labels do not have enough context for a confidence score. Accept
+  // only a known high-confidence label or two separate lexical anchors.
+  if (words.length <= 3) {
+    return [...discriminativeWords].some((word) => ENGLISH_SHORT_LABEL_WORDS.has(word)) ||
+      discriminativeWords.size >= 2;
+  }
+
+  // Longer text needs either two distinct lexical anchors or one anchor with
+  // independent supporting context. Morphology and function words can support
+  // an English anchor, but neither can establish English by itself.
+  if (discriminativeWords.size >= 2) return true;
+
+  return morphologyWords.size >= 1 || functionWords.size >= 2;
 }
 
 function hasHangulSkipRatio(stats) {
@@ -138,7 +167,10 @@ function hasHangulSkipRatio(stats) {
  * is not confidently English/Korean from its character composition. For
  * undeclared Latin text, character composition alone is not enough: a small
  * English lexical signal is required to avoid sending other Latin languages
- * to the provider's en source-language model.
+ * to the provider's en source-language model. A high-confidence English
+ * lexical anchor is normally required; the only fallback is morphology paired
+ * with multiple English function words. Competing-language evidence keeps the
+ * text unknown in either case.
  */
 export function classifyTextLanguage(value) {
   const stats = analyzeText(value);
