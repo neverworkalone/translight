@@ -20,14 +20,15 @@ const ENGLISH_SIGNAL_WORDS = new Set([
   'to', 'too', 'under', 'up', 'use', 'used', 'very', 'was', 'we', 'were', 'what',
   'when', 'where', 'which', 'who', 'will', 'with', 'words', 'would', 'yes',
   'you', 'your',
-  'accommodations', 'article', 'body', 'cell', 'column', 'comfortable',
-  'content', 'deeply', 'difficulty', 'dining', 'drama', 'english', 'else',
-  'example', 'facilities', 'first', 'fresh', 'guide', 'heading', 'hours',
-  'headline', 'interactive', 'investigator', 'item', 'language', 'list',
-  'location', 'nested', 'nerd', 'paragraph', 'playthrough',
-  'post', 'prime', 'remains', 'review', 'rooms', 'second', 'sentence', 'table',
-  'team', 'text', 'third', 'title', 'translatable', 'translation', 'translated',
-  'trophy', 'value', 'visit', 'visible', 'world', 'written', 'docs'
+  'accommodations', 'article', 'body', 'block', 'cached', 'cell', 'close', 'column', 'comfortable',
+  'community', 'content', 'deeply', 'difficulty', 'dining', 'docs', 'drama',
+  'english', 'else', 'example', 'facilities', 'first', 'fresh', 'growing',
+  'guide', 'heading', 'headline', 'hours', 'interactive', 'investigator',
+  'item', 'keeps', 'language', 'list', 'location', 'nested', 'nerd', 'old', 'page',
+  'paragraph', 'playthrough', 'post', 'prime', 'provider', 'remains', 'review',
+  'rooms', 'route', 'second', 'sentence', 'table', 'team', 'text', 'third', 'title',
+  'total', 'translatable', 'translation', 'translated', 'trophy', 'untitled', 'value',
+  'visit', 'visible', 'why', 'win', 'world', 'written'
 ]);
 const MIN_ENGLISH_SIGNAL_WORDS = 2;
 
