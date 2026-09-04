@@ -381,6 +381,51 @@ describe('collectTranslationBlocks', () => {
     expect(visited).toBe(1);
   });
 
+  it('keeps deeply nested candidate descendant checks within a linear query budget', () => {
+    const candidateSelector = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,figcaption,div,section,td,th,[data-translight-segment="true"]';
+    const measure = (depth) => {
+      document.body.innerHTML = '<div id="deep-root"></div>';
+      let current = document.querySelector('#deep-root');
+      for (let index = 0; index < depth; index += 1) {
+        const next = document.createElement('div');
+        current.appendChild(next);
+        current = next;
+      }
+      const leaf = document.createElement('p');
+      leaf.textContent = 'Deeply nested English content remains translatable.';
+      current.appendChild(leaf);
+
+      const originalQuerySelectorAll = Element.prototype.querySelectorAll;
+      let candidateQueryCalls = 0;
+      let candidateReturnedNodes = 0;
+      Element.prototype.querySelectorAll = function (...args) {
+        const result = originalQuerySelectorAll.apply(this, args);
+        if (args[0] === candidateSelector) {
+          candidateQueryCalls += 1;
+          candidateReturnedNodes += result.length;
+        }
+        return result;
+      };
+
+      try {
+        const blocks = collectTranslationBlocks(document.body);
+        return {blocks, candidateQueryCalls, candidateReturnedNodes};
+      } finally {
+        Element.prototype.querySelectorAll = originalQuerySelectorAll;
+      }
+    };
+
+    const smaller = measure(100);
+    const larger = measure(200);
+
+    expect(smaller.blocks.map((block) => block.text)).toEqual([
+      'Deeply nested English content remains translatable.'
+    ]);
+    expect(larger.blocks.map((block) => block.text)).toEqual(smaller.blocks.map((block) => block.text));
+    expect(larger.candidateQueryCalls).toBeLessThanOrEqual(smaller.candidateQueryCalls * 2);
+    expect(larger.candidateReturnedNodes).toBeLessThanOrEqual(smaller.candidateReturnedNodes * 2);
+  });
+
   it('does not check visibility for excluded segment descendants', () => {
     const root = document.createElement('div');
     root.innerHTML = Array.from({length: 100}, (_, index) =>

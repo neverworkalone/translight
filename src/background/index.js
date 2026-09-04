@@ -58,6 +58,10 @@ const ERROR_MESSAGE_KEYS = Object.freeze({
 let tabStates = {};
 let generationSequence = Date.now();
 const tabOperationChains = new Map();
+// Keep a tombstone for every tab id so work that started for a previous tab
+// cannot write state after Chrome reuses the id for a new tab.
+const tabLifecycleEpochs = new Map();
+const activeTabOperationEpochs = new Map();
 let testProviderConfig = null;
 // Full document URLs are only needed to identify a late loading event. Keep
 // them out of persisted tab state because URLs may contain private paths or
@@ -155,6 +159,24 @@ function getState(tabId) {
   return tabStates[String(tabId)] ?? createTabState();
 }
 
+function getTabLifecycleEpoch(tabId) {
+  const key = String(tabId);
+  if (!tabLifecycleEpochs.has(key)) tabLifecycleEpochs.set(key, 0);
+  return tabLifecycleEpochs.get(key);
+}
+
+function isCurrentTabLifecycle(tabId, epoch) {
+  return getTabLifecycleEpoch(tabId) === epoch;
+}
+
+function assertCurrentTabOperation(tabId) {
+  const operationEpoch = activeTabOperationEpochs.get(String(tabId));
+  if (operationEpoch == null || isCurrentTabLifecycle(tabId, operationEpoch)) return;
+  const error = new Error('The tab was closed before its operation completed.');
+  error.code = 'TAB_CLOSED';
+  throw error;
+}
+
 function rememberDocumentUrl(tabId, url) {
   const documentUrl = documentUrlForUrl(url);
   if (documentUrl) documentUrls.set(String(tabId), documentUrl);
@@ -185,9 +207,20 @@ function isLatestContentRoute(tabId, message) {
 
 function enqueueTabOperation(tabId, operation) {
   const key = String(tabId);
+  const lifecycleEpoch = getTabLifecycleEpoch(tabId);
   const previous = tabOperationChains.get(key) ?? Promise.resolve();
-  const current = previous.catch(() => {}).then(operation).catch((error) => {
-    console.error('Translight tab operation failed.', error);
+  const current = previous.catch(() => {}).then(async () => {
+    if (!isCurrentTabLifecycle(tabId, lifecycleEpoch)) return;
+    activeTabOperationEpochs.set(key, lifecycleEpoch);
+    try {
+      return await operation();
+    } finally {
+      if (activeTabOperationEpochs.get(key) === lifecycleEpoch) {
+        activeTabOperationEpochs.delete(key);
+      }
+    }
+  }).catch((error) => {
+    if (error?.code !== 'TAB_CLOSED') console.error('Translight tab operation failed.', error);
   });
   tabOperationChains.set(key, current);
   void current.then(() => {
@@ -237,10 +270,13 @@ async function refreshAction(tabId, state) {
 }
 
 async function setState(tabId, patch) {
+  assertCurrentTabOperation(tabId);
   tabStates = updateTabState(tabStates, tabId, patch);
   await persist();
-  await refreshAction(tabId, tabStates[String(tabId)]);
-  return tabStates[String(tabId)];
+  assertCurrentTabOperation(tabId);
+  const state = tabStates[String(tabId)];
+  await refreshAction(tabId, state);
+  return state;
 }
 
 async function sendContentMessage(tabId, message, {allowInjection = false} = {}) {
@@ -429,6 +465,7 @@ async function handleContentReady(message, sender) {
   await ready;
   const tabId = sender?.tab?.id;
   if (typeof tabId !== 'number' || !message.documentToken) return;
+  assertCurrentTabOperation(tabId);
 
   const url = message.url || sender?.tab?.url || '';
   const initialState = getState(tabId);
@@ -438,6 +475,7 @@ async function handleContentReady(message, sender) {
     return;
   }
   const settings = await loadSettings();
+  assertCurrentTabOperation(tabId);
   let state = getState(tabId);
   const currentHost = hostnameForUrl(url);
   const documentUrl = documentUrlForUrl(url);
@@ -563,8 +601,10 @@ async function handleContentRulesChanged(message, sender) {
   const tabId = sender?.tab?.id;
   const url = typeof message.url === 'string' ? message.url : '';
   if (typeof tabId !== 'number' || !url) return;
+  assertCurrentTabOperation(tabId);
 
   const settings = await loadSettings();
+  assertCurrentTabOperation(tabId);
   let state = getState(tabId);
   if (state.autoTranslateSuppressed &&
       state.documentToken &&
@@ -603,6 +643,7 @@ async function handleContentNavigation(message, sender) {
   await ready;
   const tabId = sender?.tab?.id;
   if (typeof tabId !== 'number' || !message.documentToken || !message.url) return;
+  assertCurrentTabOperation(tabId);
 
   let state = getState(tabId);
   if (state.documentToken && state.documentToken !== message.documentToken) return;
@@ -619,6 +660,7 @@ async function handleContentNavigation(message, sender) {
   rememberDocumentUrl(tabId, message.url);
 
   const settings = await loadSettings();
+  assertCurrentTabOperation(tabId);
   const navigation = classifyNavigation({
     state,
     url: message.url,
@@ -654,6 +696,7 @@ async function handleContentNavigation(message, sender) {
 
 async function handleTabUpdated(tabId, changeInfo) {
   await ready;
+  assertCurrentTabOperation(tabId);
   let state = getState(tabId);
   const initialGeneration = state.generation;
   const initialDocumentToken = state.documentToken;
@@ -677,6 +720,7 @@ async function handleTabUpdated(tabId, changeInfo) {
   }
   if (!url) return;
   const settings = await loadSettings();
+  assertCurrentTabOperation(tabId);
   const latestState = getState(tabId);
   if (!isNavigationStateCurrent(
     {generation: initialGeneration, documentToken: initialDocumentToken},
@@ -815,9 +859,10 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
+  const key = String(tabId);
+  tabLifecycleEpochs.set(key, getTabLifecycleEpoch(tabId) + 1);
   tabStates = removeTabState(tabStates, tabId);
-  tabOperationChains.delete(String(tabId));
-  documentUrls.delete(String(tabId));
-  latestContentRoutes.delete(String(tabId));
+  documentUrls.delete(key);
+  latestContentRoutes.delete(key);
   void persist();
 });

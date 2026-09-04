@@ -35,6 +35,8 @@ export const PSNPROFILES_OVERVIEW_LABEL_SELECTOR = [
   `.overview-info > ${SEGMENT_SELECTOR} > .tag > .typo-bottom`
 ].join(',');
 const CANDIDATE_SELECTOR = `${BLOCK_SELECTOR},${SEGMENT_SELECTOR}`;
+const ANY_DESCENDANT_PREDICATE = () => true;
+const NON_SEGMENT_DESCENDANT_PREDICATE = (descendant) => !descendant.matches(SEGMENT_SELECTOR);
 const PHRASING_TAGS = new Set([
   'a', 'abbr', 'b', 'bdi', 'bdo', 'br', 'button', 'cite', 'code', 'data', 'del',
   'dfn', 'em', 'i', 'img', 'input', 'ins', 'kbd', 'label', 'mark', 'meter',
@@ -731,7 +733,88 @@ function getCandidates(root, {isPsnProfilesDocument = isPsnProfilesPage(root.own
   return candidates;
 }
 
-export function hasVisibleBlockDescendant(element, candidateSet, predicate = () => true) {
+function createCandidateDescendantIndex(root, candidates) {
+  const candidateSet = new Set(candidates);
+  const index = new WeakMap();
+  const candidateStack = [];
+  const traversalStack = [{
+    node: root,
+    nextChild: root.firstElementChild,
+    candidate: null,
+    entered: false
+  }];
+
+  while (traversalStack.length) {
+    const frame = traversalStack[traversalStack.length - 1];
+    if (!frame.entered) {
+      frame.entered = true;
+      if (isElement(frame.node) && candidateSet.has(frame.node)) {
+        frame.candidate = {
+          element: frame.node,
+          hasVisibleBlockDescendant: false,
+          hasVisibleNonSegmentBlockDescendant: false,
+          hasSegmentDescendant: false
+        };
+        candidateStack.push(frame.candidate);
+      }
+    }
+
+    if (frame.nextChild) {
+      const child = frame.nextChild;
+      frame.nextChild = child.nextElementSibling;
+      traversalStack.push({
+        node: child,
+        nextChild: child.firstElementChild,
+        candidate: null,
+        entered: false
+      });
+      continue;
+    }
+
+    if (frame.candidate) {
+      const candidate = frame.candidate;
+      const isSegment = candidate.element.matches(SEGMENT_SELECTOR);
+      index.set(candidate.element, {
+        hasVisibleBlockDescendant: candidate.hasVisibleBlockDescendant,
+        hasVisibleNonSegmentBlockDescendant: candidate.hasVisibleNonSegmentBlockDescendant,
+        hasSegmentDescendant: candidate.hasSegmentDescendant
+      });
+      candidateStack.pop();
+
+      const parent = candidateStack[candidateStack.length - 1];
+      if (parent) {
+        if (!isHidden(candidate.element)) {
+          parent.hasVisibleBlockDescendant = true;
+          if (!isSegment) parent.hasVisibleNonSegmentBlockDescendant = true;
+        }
+        parent.hasVisibleBlockDescendant ||= candidate.hasVisibleBlockDescendant;
+        parent.hasVisibleNonSegmentBlockDescendant ||= candidate.hasVisibleNonSegmentBlockDescendant;
+        parent.hasSegmentDescendant ||= isSegment || candidate.hasSegmentDescendant;
+      }
+    }
+
+    traversalStack.pop();
+  }
+
+  return index;
+}
+
+export function hasVisibleBlockDescendant(
+  element,
+  candidateSet,
+  predicate = ANY_DESCENDANT_PREDICATE,
+  descendantIndex
+) {
+  const indexedDescendants = descendantIndex?.get?.(element);
+  if (indexedDescendants) {
+    if (predicate === ANY_DESCENDANT_PREDICATE) {
+      return indexedDescendants.hasVisibleBlockDescendant;
+    }
+    if (predicate === NON_SEGMENT_DESCENDANT_PREDICATE) {
+      return indexedDescendants.hasVisibleNonSegmentBlockDescendant;
+    }
+  }
+
   const descendants = element?.querySelectorAll?.(CANDIDATE_SELECTOR);
   if (!descendants) return false;
   for (const descendant of descendants) {
@@ -743,15 +826,16 @@ export function hasVisibleBlockDescendant(element, candidateSet, predicate = () 
   return false;
 }
 
-function hasBlockDescendant(element, candidateSet) {
-  return hasVisibleBlockDescendant(element, candidateSet);
+function hasBlockDescendant(element, candidateSet, descendantIndex) {
+  return hasVisibleBlockDescendant(element, candidateSet, ANY_DESCENDANT_PREDICATE, descendantIndex);
 }
 
-function hasNonSegmentBlockDescendant(element, candidateSet) {
+function hasNonSegmentBlockDescendant(element, candidateSet, descendantIndex) {
   return hasVisibleBlockDescendant(
     element,
     candidateSet,
-    (descendant) => !descendant.matches(SEGMENT_SELECTOR)
+    NON_SEGMENT_DESCENDANT_PREDICATE,
+    descendantIndex
   );
 }
 
@@ -767,6 +851,13 @@ export function collectTranslationBlocks(
   const blocks = [];
   const previousVisibilityCache = activeVisibilityCache;
   activeVisibilityCache = new WeakMap();
+  let candidateDescendantIndex;
+  try {
+    candidateDescendantIndex = createCandidateDescendantIndex(root, candidates);
+  } catch (error) {
+    activeVisibilityCache = previousVisibilityCache;
+    throw error;
+  }
 
   const processCandidate = (element, {allowSegmentation = splitSegments} = {}) => {
     if (!isElement(element)) return;
@@ -844,9 +935,12 @@ export function collectTranslationBlocks(
         return;
       }
     }
-    const hasSegmentDescendant = Boolean(element.querySelector(SEGMENT_SELECTOR));
-    if (!isExistingSource && hasSegmentDescendant && !hasNonSegmentBlockDescendant(element, candidateSet)) return;
-    const hasNestedBlocks = hasBlockDescendant(element, candidateSet);
+    const indexedDescendants = candidateDescendantIndex.get(element);
+    const hasSegmentDescendant = indexedDescendants?.hasSegmentDescendant ??
+      Boolean(element.querySelector(SEGMENT_SELECTOR));
+    if (!isExistingSource && hasSegmentDescendant &&
+        !hasNonSegmentBlockDescendant(element, candidateSet, candidateDescendantIndex)) return;
+    const hasNestedBlocks = hasBlockDescendant(element, candidateSet, candidateDescendantIndex);
     const directText = hasNestedBlocks ? normalizeSourceText(directTextFromNode(element, element)) : '';
     if (hasNestedBlocks && !directText) return;
 

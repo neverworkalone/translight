@@ -14,9 +14,30 @@ import {
   normalizeLanguageCode
 } from '../src/content/language.js';
 
-const BELOW_HANGUL_SKIP_RATIO = `${'a'.repeat(19)}가나`; // 2 Hangul / 21 letters.
-const AT_HANGUL_SKIP_RATIO = `${'a'.repeat(18)}가나`; // 2 Hangul / 20 letters.
-const SINGLE_HANGUL_AT_RATIO = `${'a'.repeat(9)}가`; // 1 Hangul / 10 letters.
+const BELOW_HANGUL_SKIP_RATIO = `${'a'.repeat(3)} written carefully 가나`; // 2 Hangul / 21 letters.
+const AT_HANGUL_SKIP_RATIO = `${'a'.repeat(2)} written carefully 가나`; // 2 Hangul / 20 letters.
+const SINGLE_HANGUL_AT_RATIO = 'open access 가'; // One Hangul character never reaches the skip rule.
+const UNDECLARED_LATIN_EXAMPLES = [
+  'Hola mundo, esta página está en español.',
+  'Bonjour tout le monde, cette page est française.',
+  'Dies ist ein deutscher Beispielsatz.',
+  'No es posible acceder a esta página.',
+  'Das ist ein Text in deutscher Sprache.',
+  'Cet article est important.',
+  'Usted puede pintar la pared.',
+  'text text text text'
+];
+const UNDECLARED_ENGLISH_SHORT_LABELS = [
+  'Breaking news',
+  'Access denied',
+  'Search results'
+];
+const UNDECLARED_ENGLISH_PROSE = [
+  'The community published a deeply researched article about access.',
+  'This page is written in English and should be translated.'
+];
+const UNDECLARED_MIXED_LANGUAGE_TEXT = 'This English article is useful, pero la página está en español.';
+const UNDECLARED_AMBIGUOUS_SHORT_LABELS = ['Go', 'Text', 'Page'];
 
 describe('content language detection', () => {
   it('normalizes regional language tags', () => {
@@ -33,7 +54,7 @@ describe('content language detection', () => {
     document.documentElement.removeAttribute('lang');
   });
 
-  it('classifies Korean and English text using character composition', () => {
+  it('classifies Korean and English text with independent English evidence', () => {
     expect(classifyTextLanguage('한국어로 작성된 문장입니다.')).toBe('ko');
     expect(classifyTextLanguage('This page is written in English.')).toBe('en');
     expect(classifyTextLanguage('123 !? 🐈')).toBe('');
@@ -41,10 +62,60 @@ describe('content language detection', () => {
     expect(LANGUAGE_MIN_LETTERS).toBe(3);
   });
 
+  it('does not guess undeclared non-English Latin text as English', () => {
+    for (const text of UNDECLARED_LATIN_EXAMPLES) {
+      expect(classifyTextLanguage(text)).toBe('');
+      expect(isTranslatableText(text, 'ko')).toBe(false);
+    }
+  });
+
+  it('keeps short English labels with distinctive evidence eligible', () => {
+    for (const text of UNDECLARED_ENGLISH_SHORT_LABELS) {
+      expect(classifyTextLanguage(text)).toBe('en');
+      expect(isTranslatableText(text, 'ko')).toBe(true);
+    }
+  });
+
+  it('keeps representative undeclared English prose eligible', () => {
+    for (const text of UNDECLARED_ENGLISH_PROSE) {
+      expect(classifyTextLanguage(text)).toBe('en');
+      expect(isTranslatableText(text, 'ko')).toBe(true);
+    }
+  });
+
+  it('leaves ambiguous undeclared short labels unchanged', () => {
+    for (const text of UNDECLARED_AMBIGUOUS_SHORT_LABELS) {
+      expect(classifyTextLanguage(text)).toBe('');
+      expect(isTranslatableText(text, 'ko')).toBe(false);
+    }
+  });
+
+  it('does not count repeated shared words as English evidence', () => {
+    expect(classifyTextLanguage('the the the the')).toBe('');
+    expect(classifyTextLanguage('in in in in')).toBe('');
+  });
+
+  it('does not treat morphology or shared vocabulary as English evidence', () => {
+    expect(classifyTextLanguage('Usted puede pintar la pared.')).toBe('');
+    expect(classifyTextLanguage('Cet article est important.')).toBe('');
+  });
+
+  it('rejects mixed text when competing-language evidence is present', () => {
+    expect(classifyTextLanguage(UNDECLARED_MIXED_LANGUAGE_TEXT)).toBe('');
+    expect(isTranslatableText(UNDECLARED_MIXED_LANGUAGE_TEXT, 'ko')).toBe(false);
+  });
+
   it('prefers an English local declaration for otherwise eligible text', () => {
     document.body.innerHTML = '<section lang="en-US"><p>This content is marked English.</p></section>';
     const block = document.querySelector('p');
     expect(nearestContentLanguage(block)).toBe('en');
+    expect(isTranslatableBlock(block, block.textContent, 'ko')).toBe(true);
+  });
+
+  it('honors an explicit English declaration without lexical evidence', () => {
+    document.body.innerHTML = '<section lang="en-US"><p>Text</p></section>';
+    const block = document.querySelector('p');
+    expect(classifyTextLanguage(block.textContent)).toBe('');
     expect(isTranslatableBlock(block, block.textContent, 'ko')).toBe(true);
   });
 
