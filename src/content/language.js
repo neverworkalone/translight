@@ -4,33 +4,64 @@ const LETTER_CHARACTER = /^\p{L}$/u;
 const LATIN_CHARACTER = /^\p{Script=Latin}$/u;
 const STANDALONE_HANDLE_PATTERN = /^@[\p{L}\p{N}._-]+$/u;
 const WORD_PATTERN = /[\p{L}]+(?:['’][\p{L}]+)?/gu;
-// Undeclared Latin text is eligible only when it contains a small, stable
-// set of common English signals. This is deliberately conservative: it keeps
-// the en-to-ko product from guessing that Spanish, French, or German is
-// English without adding an external language detector.
-const ENGLISH_SIGNAL_WORDS = new Set([
+// These words are intentionally narrower than general English stopwords. They
+// are useful lexical evidence because they are less likely to be shared
+// verbatim by Spanish, French, or German. A word from this set is not enough
+// for a long sentence on its own; repeated/common words must not manufacture
+// confidence.
+const ENGLISH_DISCRIMINATIVE_WORDS = new Set([
+  'access', 'active', 'accommodations', 'added', 'article', 'arrived', 'around', 'away',
+  'background', 'base', 'block', 'body', 'breaking', 'cached', 'carefully', 'cell',
+  'change', 'changed', 'changes', 'checks', 'chrome', 'close', 'column', 'community',
+  'contains', 'content', 'current', 'deeply', 'denied', 'difficulty', 'dining',
+  'direct', 'docs', 'drama', 'else', 'enough', 'english', 'example', 'explains',
+  'facilities', 'favorite', 'favourites', 'final', 'first', 'fresh', 'growing', 'guide',
+  'generic', 'guests', 'heading', 'headline', 'hello', 'home', 'hours', 'important', 'independent',
+  'initial', 'interactive', 'introduction', 'investigator', 'item', 'jump', 'keeps',
+  'language', 'late', 'latest', 'lawsuit', 'leaf', 'list', 'long', 'meaningful', 'nested',
+  'nerd', 'news', 'new', 'next', 'nominations', 'note', 'number', 'old', 'open', 'opening', 'overview',
+  'paragraph', 'parent', 'phone', 'playthrough', 'post', 'preview', 'prime', 'provider',
+  'pure', 'quoted', 'queue', 'read', 'remarkable', 'remains', 'rendered', 'results',
+  'review', 'rooms', 'search', 'second', 'sentence', 'settles', 'sharing', 'short', 'spa',
+  'stable', 'story', 'technical', 'team', 'teen', 'thanks', 'third', 'title', 'touch',
+  'translatable',
+  'translated', 'translation', 'trophy', 'untitled', 'user', 'value', 'visible',
+  'visit', 'why', 'win', 'words', 'world', 'written', 'yes'
+]);
+
+// A single short label can be valid evidence when it is itself distinctive,
+// but ambiguous labels such as "go", "text", or "page" remain undecided.
+const ENGLISH_SHORT_LABEL_WORDS = new Set([
+  'access', 'active', 'block', 'body', 'breaking', 'cached', 'cell', 'close',
+  'added', 'base', 'denied', 'difficulty', 'direct', 'docs', 'else', 'english', 'facilities', 'first',
+  'generic', 'guests', 'hello', 'heading', 'headline', 'home', 'hours', 'initial', 'investigator', 'item',
+  'language', 'latest', 'list', 'news', 'nerd', 'new', 'nominations', 'old', 'open', 'paragraph',
+  'phone', 'playthrough', 'preview', 'pure', 'read', 'results', 'search', 'second',
+  'short', 'spa', 'stable', 'technical', 'thanks', 'third', 'title', 'user', 'value',
+  'untitled', 'visible', 'why', 'win', 'world', 'yes'
+]);
+
+// Function words are supporting evidence only. They are deliberately not
+// counted as English signals by themselves because words such as "no", "a",
+// "in", and "text" also occur in other Latin-script languages.
+const ENGLISH_FUNCTION_WORDS = new Set([
   'a', 'about', 'after', 'all', 'also', 'an', 'and', 'are', 'as', 'at', 'be',
   'been', 'before', 'between', 'both', 'but', 'by', 'can', 'could', 'did',
-  'do', 'does', 'each', 'for', 'from', 'go', 'had', 'has', 'have', 'hello',
-  'her', 'here', 'him', 'his', 'how', 'i', 'if', 'in', 'into', 'is', 'it',
-  'its', 'just', 'more', 'most', 'my', 'new', 'no', 'not', 'now', 'of', 'on',
-  'one', 'only', 'or', 'other', 'our', 'out', 'over', 'own', 'same', 'see',
-  'she', 'should', 'so', 'some', 'somebody', 'such', 'than', 'that', 'the',
-  'their', 'them', 'then', 'there', 'these', 'they', 'this', 'those', 'through',
-  'to', 'too', 'under', 'up', 'use', 'used', 'very', 'was', 'we', 'were', 'what',
-  'when', 'where', 'which', 'who', 'will', 'with', 'words', 'would', 'yes',
-  'you', 'your',
-  'accommodations', 'article', 'body', 'block', 'cached', 'cell', 'close', 'column', 'comfortable',
-  'community', 'content', 'deeply', 'difficulty', 'dining', 'docs', 'drama',
-  'english', 'else', 'example', 'facilities', 'first', 'fresh', 'growing',
-  'guide', 'heading', 'headline', 'hours', 'interactive', 'investigator',
-  'item', 'keeps', 'language', 'list', 'location', 'nested', 'nerd', 'old', 'page',
-  'paragraph', 'playthrough', 'post', 'prime', 'provider', 'remains', 'review',
-  'rooms', 'route', 'second', 'sentence', 'table', 'team', 'text', 'third', 'title',
-  'total', 'translatable', 'translation', 'translated', 'trophy', 'untitled', 'value',
-  'visit', 'visible', 'why', 'win', 'world', 'written'
+  'do', 'does', 'each', 'for', 'from', 'had', 'has', 'have', 'her', 'here',
+  'him', 'his', 'how', 'i', 'if', 'in', 'into', 'is', 'it', 'its', 'just',
+  'more', 'most', 'my', 'new', 'no', 'not', 'now', 'of', 'on', 'one', 'only',
+  'or', 'other', 'our', 'out', 'over', 'own', 'same', 'see', 'she', 'should',
+  'so', 'some', 'somebody', 'such', 'than', 'that', 'the', 'their', 'them',
+  'then', 'there', 'these', 'they', 'this', 'those', 'through', 'to', 'too',
+  'under', 'up', 'use', 'used', 'very', 'was', 'we', 'were', 'what', 'when',
+  'where', 'which', 'who', 'will', 'with', 'would', 'you', 'your'
 ]);
-const MIN_ENGLISH_SIGNAL_WORDS = 2;
+
+const ENGLISH_MORPHOLOGY_PATTERNS = [
+  /(?:ing|ings)$/u,
+  /(?:ed|edly)$/u,
+  /(?:ly|ness|ship|ward|wise)$/u
+];
 
 export const LANGUAGE_MIN_LETTERS = 3;
 export const LANGUAGE_MIN_LATIN_LETTERS = 2;
@@ -66,12 +97,34 @@ function hasDetectableText(stats) {
 
 function hasEnglishSignal(value) {
   const words = String(value ?? '').toLowerCase().match(WORD_PATTERN) ?? [];
-  const signalCount = words.reduce(
-    (count, word) => count + (ENGLISH_SIGNAL_WORDS.has(word) ? 1 : 0),
-    0
+  const uniqueWords = new Set(words);
+  const discriminativeWords = new Set(
+    [...uniqueWords].filter((word) => ENGLISH_DISCRIMINATIVE_WORDS.has(word))
   );
-  return signalCount >= MIN_ENGLISH_SIGNAL_WORDS ||
-    (words.length <= 3 && signalCount > 0);
+  const morphologyWords = new Set(
+    [...uniqueWords].filter((word) =>
+      word.length >= 5 && ENGLISH_MORPHOLOGY_PATTERNS.some((pattern) => pattern.test(word))
+    )
+  );
+  const evidenceWords = new Set([...discriminativeWords, ...morphologyWords]);
+  if (evidenceWords.size === 0) return false;
+
+  // Short labels do not have enough context for a confidence score. Accept
+  // only a known high-confidence label or two separate pieces of evidence.
+  if (words.length <= 3) {
+    return [...discriminativeWords].some((word) => ENGLISH_SHORT_LABEL_WORDS.has(word)) ||
+      evidenceWords.size >= 2;
+  }
+
+  // Longer text needs either two distinct lexical/morphological clues or one
+  // clue supported by multiple English function words. Function words alone,
+  // including repeated occurrences of one word, never qualify.
+  if (evidenceWords.size >= 2) return true;
+
+  const functionWords = new Set(
+    [...uniqueWords].filter((word) => ENGLISH_FUNCTION_WORDS.has(word))
+  );
+  return evidenceWords.size === 1 && functionWords.size >= 2;
 }
 
 function hasHangulSkipRatio(stats) {

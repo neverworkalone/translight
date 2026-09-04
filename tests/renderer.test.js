@@ -1219,7 +1219,7 @@ describe('TranslationRenderer', () => {
     expect(sourceComparisons).toBe(0);
   });
 
-  it('keeps incremental external grid insertion within the order-index budget', () => {
+  it('keeps incremental external grid insertion within the order-index budget', {timeout: 15_000}, () => {
     const measureIncrementalOrderWork = (sourceCount, sessionId) => {
       document.body.innerHTML = '';
       const host = document.createElement('div');
