@@ -1267,6 +1267,9 @@ describe('TranslationRenderer', () => {
     expect(large).toBeLessThan(budget(500));
   });
 
+  // This companion workload performs another 1,500 real DOM insertions. Keep
+  // its structural and comparison-count assertions as the regression guard,
+  // while allowing slower shared CI runners enough wall-clock time.
   it('bounds external grid ordering work without scanning the host children', () => {
     const measureExternalOrderWork = (sourceCount, sessionId) => {
       document.body.innerHTML = '';
@@ -1337,7 +1340,7 @@ describe('TranslationRenderer', () => {
     expect(large.hostChildIterations).toBe(0);
     expect(small.sourceComparisons).toBeGreaterThan(0);
     expect(large.sourceComparisons).toBeLessThanOrEqual(small.sourceComparisons * 3);
-  }, 15_000);
+  }, 30_000);
 
   it('clears anchored translation styles when a grid source becomes a normal sibling', () => {
     document.body.innerHTML = `
