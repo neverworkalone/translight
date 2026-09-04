@@ -9,6 +9,7 @@ const iconCalls = [];
 const badgeCalls = [];
 const titleCalls = [];
 const contentMessages = [];
+const sessionWrites = [];
 let settings;
 let runtimeMessage;
 
@@ -35,7 +36,10 @@ function installChrome({
   };
   globalThis.chrome = {
     storage: {
-      session: {get: async () => ({})},
+      session: {
+        get: async () => ({}),
+        set: async (value) => sessionWrites.push(value)
+      },
       local: makeArea({[SETTINGS_KEY]: settings}),
       onChanged: {addListener: vi.fn()}
     },
@@ -85,6 +89,7 @@ afterEach(() => {
   badgeCalls.length = 0;
   titleCalls.length = 0;
   contentMessages.length = 0;
+  sessionWrites.length = 0;
   runtimeMessage = null;
 });
 
@@ -98,6 +103,75 @@ describe('background automatic translation status', () => {
     await expect(harness.configureProvider({provider: 'dummy'}))
       .rejects.toMatchObject({code: 'TEST_BUILD_REQUIRED'});
     expect(contentMessages).toHaveLength(0);
+  });
+
+  it('does not recreate a closed tab state after an in-flight content-ready operation finishes', async () => {
+    installChrome();
+    await import('../src/background/index.js?background-removed-tab-race');
+
+    let releaseSettings;
+    globalThis.chrome.storage.local.get = (_key, callback) => {
+      releaseSettings = () => callback({[SETTINGS_KEY]: settings});
+    };
+
+    runtimeMessage({
+      type: 'CONTENT_READY',
+      documentToken: 'document-1',
+      url: 'https://example.com/page'
+    }, {tab: {id: 7, url: 'https://example.com/page'}});
+    await settle();
+    expect(releaseSettings).toBeTypeOf('function');
+
+    removedListeners[0](7);
+    releaseSettings();
+    await settle();
+    await settle();
+
+    expect(sessionWrites.some((write) => Object.hasOwn(write["translight.tabStates"], '7')))
+      .toBe(false);
+  });
+
+  it('isolates a reused tab id from an operation belonging to the closed tab', async () => {
+    installChrome();
+    await import('../src/background/index.js?background-removed-tab-id-reuse');
+
+    const pendingSettings = [];
+    globalThis.chrome.storage.local.get = (_key, callback) => {
+      pendingSettings.push(() => callback({[SETTINGS_KEY]: settings}));
+    };
+
+    runtimeMessage({
+      type: 'CONTENT_READY',
+      documentToken: 'old-document',
+      url: 'https://example.com/old'
+    }, {tab: {id: 7, url: 'https://example.com/old'}});
+    await settle();
+    expect(pendingSettings).toHaveLength(1);
+
+    removedListeners[0](7);
+    runtimeMessage({
+      type: 'CONTENT_READY',
+      documentToken: 'new-document',
+      url: 'https://example.com/new'
+    }, {tab: {id: 7, url: 'https://example.com/new'}});
+    await settle();
+    expect(pendingSettings).toHaveLength(1);
+
+    pendingSettings.shift()();
+    await settle();
+    expect(pendingSettings).toHaveLength(1);
+
+    pendingSettings.shift()();
+    await settle();
+    await settle();
+
+    expect(globalThis.__translight_test_harness__.getState(7)).toMatchObject({
+      documentToken: 'new-document',
+      status: 'ACTIVE'
+    });
+    expect(sessionWrites.some((write) =>
+      write["translight.tabStates"]?.['7']?.documentToken === 'old-document'
+    )).toBe(false);
   });
 
   it('exposes a test-only toggle that follows the action handler state path', async () => {
