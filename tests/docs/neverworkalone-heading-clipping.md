@@ -16,11 +16,17 @@ npm run test:metacritic:chrome -- \
   --skip-translation \
   --scenario=navigation \
   --url=http://127.0.0.1:5173/tests/fixtures/neverworkalone-heading-clipping-repro.html \
+  --window-size=925,676 \
   --output-dir=/private/tmp/translight-issue59-before
 ```
+
+The 925×676 window gives the CFT page a 925×533 viewport, matching the issue
+screenshot. `--window-size` applies to launched browsers; attach mode keeps the
+attached browser's existing size.
 
 The runner's navigation checks expect the Metacritic fixture and therefore
 exit when this local page has no `Star Wars Zero Company` link. Its CFT
 `failure.png` is still a browser rendering capture of the fixture. The issue
-reproduction itself is visible in the page's report panel and in
-`window.__neverworkaloneIssue59Report`.
+reproduction is visible in the page, with geometry recorded in
+`window.__neverworkaloneIssue59Report`. The report panel is hidden at the
+issue's viewport width so it does not cover the text being checked.

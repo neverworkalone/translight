@@ -76,6 +76,7 @@ Options:
   --dummy-profile=normal|expanded  Dummy output profile (default: normal)
   --dummy-delay-ms=<number>        Dummy provider delay (default: ${DEFAULT_DUMMY_DELAY_MS})
   --url=<url>                     Start URL (defaults to the selected scenario)
+  --window-size=<width>,<height>  Launched browser window size (default: 1440,1000)
   --cycles=<number>               Scroll/back cycles (default: ${DEFAULT_CYCLES})
   --settle-ms=<number>            Delay after each scroll (default: ${DEFAULT_SETTLE_MS})
   --translation-wait-ms=<number>  Wait for the first translation (default: ${DEFAULT_TRANSLATION_WAIT_MS})
@@ -115,6 +116,17 @@ function parsePort(value, name) {
   return port;
 }
 
+function parseWindowSize(value) {
+  const dimensions = String(value).split(',');
+  if (dimensions.length !== 2) {
+    throw new Error('--window-size must be WIDTH,HEIGHT.');
+  }
+  return {
+    width: parseNumber(dimensions[0], '--window-size width', {minimum: 1}),
+    height: parseNumber(dimensions[1], '--window-size height', {minimum: 1})
+  };
+}
+
 function parseArgs(argv) {
   const options = {
     scenario: 'gallery',
@@ -122,6 +134,7 @@ function parseArgs(argv) {
     dummyProfile: 'normal',
     dummyDelayMs: DEFAULT_DUMMY_DELAY_MS,
     url: null,
+    windowSize: {width: 1440, height: 1000},
     cycles: DEFAULT_CYCLES,
     settleMs: DEFAULT_SETTLE_MS,
     translationWaitMs: DEFAULT_TRANSLATION_WAIT_MS,
@@ -197,6 +210,9 @@ function parseArgs(argv) {
       case '--url':
         options.url = value;
         options.urlProvided = true;
+        break;
+      case '--window-size':
+        options.windowSize = parseWindowSize(value);
         break;
       case '--cycles':
         options.cycles = parseNumber(value, '--cycles', {minimum: 1});
@@ -2019,6 +2035,7 @@ async function launchChrome(options, port, profileDir, {
   signalProcess = (pid, signal) => process.kill(pid, signal),
   platform = process.platform
 } = {}) {
+  const windowSize = options.windowSize ?? {width: 1440, height: 1000};
   const args = [
     `--remote-debugging-port=${port}`,
     '--remote-debugging-address=127.0.0.1',
@@ -2028,7 +2045,7 @@ async function launchChrome(options, port, profileDir, {
     '--enable-automation',
     '--no-first-run',
     '--no-default-browser-check',
-    '--window-size=1440,1000',
+    `--window-size=${windowSize.width},${windowSize.height}`,
     options.url
   ];
   const launchSpec = createChromeLaunchSpec({
@@ -2200,7 +2217,12 @@ async function main() {
       profile: options.provider === 'dummy' ? options.dummyProfile : null,
       delayMs: options.provider === 'dummy' ? options.dummyDelayMs : null
     },
-    scenario: {name: options.scenario, url: options.url, cycles: options.cycles},
+    scenario: {
+      name: options.scenario,
+      url: options.url,
+      cycles: options.cycles,
+      windowSize: options.windowSize
+    },
     chrome: {
       path: options.chromePath,
       pid: chrome?.pid ?? options.browserPid ?? null,
