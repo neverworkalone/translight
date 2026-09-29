@@ -99,6 +99,15 @@ function isGridLayoutPlacement(placement) {
     placement?.kind === GRID_LAYOUT_EXTERNAL_PLACEMENT;
 }
 
+function isSiblingPlacement(placement) {
+  return placement === 'sibling' || placement === 'sibling-before';
+}
+
+function hasColumnReverseFlexParent(element) {
+  if (!['flex', 'inline-flex'].includes(getDisplay(element))) return false;
+  return getComputedStyleValue(element, 'flex-direction') === 'column-reverse';
+}
+
 function escapeAttribute(value) {
   return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
@@ -109,6 +118,7 @@ function getDisplay(element) {
 }
 
 const SOURCE_TYPOGRAPHY_PROPERTIES = ['font-size', 'line-height'];
+const HOST_TRANSFORM_PROPERTIES = ['transform', 'rotate', 'scale', 'translate'];
 const SOURCE_LAYOUT_PROPERTIES = [
   'width',
   'margin-left',
@@ -155,7 +165,7 @@ function syncPsnProfilesOverview(record) {
   const overview = element?.closest?.('.overview-info');
   const isOverviewLabel = element?.matches?.(PSNPROFILES_OVERVIEW_LABEL_SELECTOR);
   const isOverview = Boolean(overview &&
-    (placement === 'inside' || placement === 'sibling') &&
+    (placement === 'inside' || isSiblingPlacement(placement)) &&
     (element === overview || element.matches?.(SEGMENT_SELECTOR) ||
       element.parentElement === overview || isOverviewLabel) &&
     isPsnProfilesPage(element.ownerDocument));
@@ -240,6 +250,17 @@ function clearSourceLayout(translation) {
   }
 }
 
+function neutralizeHostTransforms(translation) {
+  if (!translation?.style) return;
+  const generatedText = translation.querySelector?.(`[${TRANSLATION_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"]`);
+  for (const element of [translation, generatedText]) {
+    if (!element?.style) continue;
+    for (const property of HOST_TRANSFORM_PROPERTIES) {
+      setStyleValue(element.style, property, 'none');
+    }
+  }
+}
+
 function getSourceLayoutWidth(element, computedStyle) {
   const offsetWidth = Number(element.offsetWidth);
   if (Number.isFinite(offsetWidth) && offsetWidth > 0) return `${offsetWidth}px`;
@@ -273,7 +294,7 @@ function syncSourceLayout(record, {
     if (['grid', 'inline-grid'].includes(parentDisplay)) {
       isGridOwnedLayout = LAYOUT_DISPLAYS.has(getDisplay(element));
     }
-  } else if (!isGridOwnedLayout && placement === 'sibling') {
+  } else if (!isGridOwnedLayout && isSiblingPlacement(placement)) {
     sourceIsLayout = LAYOUT_DISPLAYS.has(getDisplay(element));
     if (sourceIsLayout) isGridOwnedLayout = LAYOUT_DISPLAYS.has(getDisplay(element.parentElement));
   }
@@ -301,7 +322,7 @@ function syncSourceLayout(record, {
   // The other placements already share the source's containing block, so
   // copying a pixel width there would make nested/grid/table layouts less
   // flexible.
-  if (placement !== 'sibling') {
+  if (!isSiblingPlacement(placement)) {
     clearSourceLayout(translation);
     return;
   }
@@ -1167,6 +1188,10 @@ function insertAtSafeLocation(element, translation, mixedContent = false, source
   }
 
   if (!shouldInsertInside(element)) {
+    if (hasColumnReverseFlexParent(element.parentElement)) {
+      insertBeforeIfNeeded(element.parentNode, translation, element);
+      return 'sibling-before';
+    }
     insertBeforeIfNeeded(element.parentNode, translation, element.nextSibling);
     return 'sibling';
   }
@@ -1297,8 +1322,12 @@ function restorePlacement(record) {
     return;
   }
   if (!element?.parentNode) return;
-  if (placement === 'sibling') {
-    insertBeforeIfNeeded(element.parentNode, translation, element.nextSibling);
+  if (isSiblingPlacement(placement)) {
+    insertBeforeIfNeeded(
+      element.parentNode,
+      translation,
+      placement === 'sibling-before' ? element : element.nextSibling
+    );
     return;
   }
   if (placement === 'inside-before-nested-list') {
@@ -2052,7 +2081,7 @@ export class TranslationRenderer {
     const nextTargets = isGridLayoutPlacement(record.placement)
       ? [...new Set([record.element, record.placement.reservationParent,
         record.placement.gridParent, record.placement.anchor].filter(Boolean))]
-      : record.placement === 'sibling' && !LAYOUT_DISPLAYS.has(getDisplay(record.element))
+      : isSiblingPlacement(record.placement) && !LAYOUT_DISPLAYS.has(getDisplay(record.element))
         ? [record.element, record.element.parentElement].filter(Boolean)
         : [];
     const previousTargets = record.layoutTargets ?? [];
@@ -2278,8 +2307,12 @@ export class TranslationRenderer {
       if (inserted) bindGridExternalRecord(record, this);
       return;
     }
-    if (record.placement === 'sibling') {
-      insertBeforeIfNeeded(element.parentNode, translation, element);
+    if (isSiblingPlacement(record.placement)) {
+      insertBeforeIfNeeded(
+        element.parentNode,
+        translation,
+        record.placement === 'sibling-before' ? element.nextSibling : element
+      );
       return;
     }
     if (record.placement === MIXED_CONTENT_AFTER_DIRECT_TEXT_PLACEMENT) {
@@ -2309,7 +2342,7 @@ export class TranslationRenderer {
         preserveGridLayoutFallbackDisplay(record);
       }
       element.setAttribute(HIDDEN_ATTRIBUTE, GENERATED_VALUE);
-      const hasExternalPlacement = record.placement === 'sibling' ||
+      const hasExternalPlacement = isSiblingPlacement(record.placement) ||
         record.placement?.kind === COLLAPSED_REVIEW_CARD_PLACEMENT ||
         isGridLayoutPlacement(record.placement);
       if (!hasExternalPlacement) {
@@ -2409,6 +2442,7 @@ export class TranslationRenderer {
     const {element, translation} = record;
     if (!element || !translation) return;
     const mode = this.presentation.translationMode;
+    neutralizeHostTransforms(translation);
     this.reconcileGridLayoutPlacement(record);
     this.observeSourceLayout(record);
     syncSourceLayout(record);

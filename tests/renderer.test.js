@@ -1803,6 +1803,51 @@ describe('TranslationRenderer', () => {
     renderer.removeAll();
   });
 
+  it('keeps search-result translations upright and below their source in reverse-column layout', () => {
+    document.head.innerHTML = `
+      <style>
+        #google-results .result a {
+          display: flex;
+          flex-direction: column-reverse;
+        }
+        #google-results .result h3 {
+          display: flex;
+        }
+        #google-results .result a > translight-translation,
+        #google-results .result a > translight-translation > span {
+          transform: rotate(180deg) !important;
+        }
+      </style>
+    `;
+    document.body.innerHTML = `
+      <div id="google-results">
+        <div class="result">
+          <a href="https://example.test/">
+            <h3 id="source">Never Work Alone: Because life and work are team sports.</h3>
+          </a>
+        </div>
+      </div>
+    `;
+    const source = document.querySelector('#source');
+    const renderer = new TranslationRenderer({document, sessionId: 'google-result-transform-session'});
+
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'google-result-transform-source',
+      translatedText: 'Never Work Alone: 삶과 일이 팀 스포츠이기 때문입니다.'
+    });
+    const translationText = translation.querySelector('[data-translight-text="true"]');
+    const record = renderer.getRecordForElement(source);
+
+    expect(window.getComputedStyle(translation).transform).toBe('none');
+    expect(window.getComputedStyle(translationText).transform).toBe('none');
+    expect(window.getComputedStyle(source.parentElement).flexDirection).toBe('column-reverse');
+    expect(record.placement).toBe('sibling-before');
+    expect(translation.nextElementSibling).toBe(source);
+
+    renderer.removeAll();
+  });
+
   it('syncs only records affected by a horizontal resize and ignores height-only changes', () => {
     const previousResizeObserver = window.ResizeObserver;
     const observers = [];
