@@ -1848,6 +1848,41 @@ describe('TranslationRenderer', () => {
     renderer.removeAll();
   });
 
+  it('keeps reverse-column result insertion style reads linear as cards grow', () => {
+    const styleReadsFor = (count) => {
+      document.body.innerHTML = `
+        <div id="google-results">
+          ${Array.from({length: count}, (_, index) => `
+            <div class="result">
+              <a style="display:flex;flex-direction:column-reverse">
+                <h3 id="source-${index}" style="display:flex">Result title ${index}</h3>
+              </a>
+            </div>
+          `).join('')}
+        </div>
+      `;
+      const sourceElements = Array.from(document.querySelectorAll('#google-results h3'));
+      const renderer = new TranslationRenderer({document, sessionId: `google-results-${count}`});
+      const getComputedStyle = vi.spyOn(window, 'getComputedStyle');
+
+      sourceElements.forEach((element, index) => renderer.insert({
+        element,
+        sourceId: `google-result-${count}-${index}`,
+        translatedText: `결과 제목 ${index}`
+      }));
+      const reads = getComputedStyle.mock.calls.length;
+      getComputedStyle.mockRestore();
+      renderer.removeAll();
+      return reads;
+    };
+
+    const readsForForty = styleReadsFor(40);
+    const readsForEighty = styleReadsFor(80);
+
+    expect(readsForForty).toBeGreaterThan(0);
+    expect(readsForEighty).toBeLessThanOrEqual(readsForForty * 2.25 + 8);
+  });
+
   it('syncs only records affected by a horizontal resize and ignores height-only changes', () => {
     const previousResizeObserver = window.ResizeObserver;
     const observers = [];
