@@ -41,3 +41,8 @@ On the latest CFT run, the About heading translated into two visible lines with
 no clipping ancestor or overlapping peer. The hero heading remained untranslated
 in the saved page, so its clipping could not be assessed and `testPassed` is
 false. This run did not reproduce the reported clipping or overlap.
+
+In the screenshot's Korean page state, the two text-range rectangles intersect
+by 26.8px, but the high-resolution CFT rendering shows the glyphs on separate
+lines. The measured range rectangles extend beyond the painted glyphs, so their
+intersection is diagnostic geometry rather than visible text overlap.
