@@ -77,11 +77,15 @@ function measureTarget(element, session) {
   const range = document.createRange();
   range.selectNodeContents(text);
   const textRects = Array.from(range.getClientRects());
+  const visible = textRects.some(({left, right, top, bottom}) =>
+    right > 0 && left < innerWidth && bottom > 0 && top < innerHeight
+  );
   return {
     translated: true,
     source: normalizedText(record.originalText),
     translation: normalizedText(text.textContent),
     placement: record.placement,
+    visible,
     translationRect: {x: rect.x, y: rect.y, width: rect.width, height: rect.height},
     textLineRects: textRects.map(({x, y, width, height}) => ({x, y, width, height})),
     clippingAncestors: clippingAncestors(text),
@@ -109,7 +113,8 @@ async function run() {
 
   await session.start();
   await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-  window.scrollTo(0, Math.max(0, document.documentElement.scrollHeight - innerHeight));
+  const maxScrollY = Math.max(0, document.documentElement.scrollHeight - innerHeight);
+  window.scrollTo({top: maxScrollY, behavior: 'instant'});
   await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   const targetResults = targets.map((element) => measureTarget(element, session));
   const translatedTargets = targetResults.filter(({translated}) => translated !== false);
@@ -121,6 +126,7 @@ async function run() {
   const result = {
     fixture: 'neverworkalone-heading-clipping-repro',
     viewport: {width: innerWidth, height: innerHeight},
+    pageScroll: {scrollY, maxScrollY, scrollHeight: document.documentElement.scrollHeight},
     language: document.documentElement.lang,
     targets: targetResults,
     allTargetsTranslated: translatedTargets.length === targetResults.length,
@@ -129,7 +135,8 @@ async function run() {
     overlappingTargets: overlappingTargets.map(({source}) => source),
     clippingReproduced: clippedTargets.length > 0,
     overlapReproduced: overlappingTargets.length > 0,
-    testPassed: translatedTargets.length > 0 && clippedTargets.length === 0 && overlappingTargets.length === 0
+    testPassed: translatedTargets.length > 0 && translatedTargets.every(({visible}) => visible) &&
+      clippedTargets.length === 0 && overlappingTargets.length === 0
   };
   window.__neverworkaloneIssue59Report = result;
   reportElement.textContent = JSON.stringify(result, null, 2);

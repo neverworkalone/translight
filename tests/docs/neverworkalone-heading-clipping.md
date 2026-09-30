@@ -6,8 +6,9 @@ switcher. The saved extensionless Google Fonts stylesheet is served as
 `fonts.css` so Vite provides its CSS MIME type. The other page changes add a
 hidden report element and load a fixture module that selects Korean, starts
 production `PageSession` with the screenshot's Korean translation, scrolls to
-the bottom of the page, and records text geometry, clipping ancestors, and
-overlap with nearby content for the two reported headings.
+the bottom of the page instantly despite the saved site's smooth-scroll rule,
+and records viewport visibility, text geometry, clipping ancestors, and overlap
+with nearby content for the two reported headings.
 
 Run the saved page through the repository-managed Chrome for Testing runner:
 
