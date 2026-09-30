@@ -1,7 +1,7 @@
 import {PageSession} from '../../../src/content/page-session.js';
 
 const reportElement = document.querySelector('#report');
-const targets = [
+const headingTargets = [
   document.querySelector('#hero-title'),
   document.querySelector('#about-title')
 ];
@@ -69,6 +69,23 @@ function overlappingPeers(element, translation) {
   });
 }
 
+function lineRangeIntersections(textRects) {
+  return textRects.flatMap((first, firstIndex) =>
+    textRects.slice(firstIndex + 1).flatMap((second, offset) => {
+      const left = Math.max(first.left, second.left);
+      const right = Math.min(first.right, second.right);
+      const top = Math.max(first.top, second.top);
+      const bottom = Math.min(first.bottom, second.bottom);
+      if (left >= right || top >= bottom) return [];
+      return [{
+        firstLine: firstIndex + 1,
+        secondLine: firstIndex + offset + 2,
+        intersection: {x: left, y: top, width: right - left, height: bottom - top}
+      }];
+    })
+  );
+}
+
 function measureTarget(element, session) {
   const record = session.renderer.getRecordForElement(element);
   const text = record?.translation?.querySelector('[data-translight-text="true"]');
@@ -88,14 +105,17 @@ function measureTarget(element, session) {
     visible,
     translationRect: {x: rect.x, y: rect.y, width: rect.width, height: rect.height},
     textLineRects: textRects.map(({x, y, width, height}) => ({x, y, width, height})),
+    lineRangeIntersections: lineRangeIntersections(textRects),
     clippingAncestors: clippingAncestors(text),
     overlappingPeers: overlappingPeers(element, record.translation)
   };
 }
 
 async function run() {
-  // Reproduce issue #59: switch the saved homepage to English before translation.
-  document.querySelector('[data-language-choice="en"]').click();
+  const testLanguage = new URLSearchParams(location.search).get('language') === 'ko' ? 'ko' : 'en';
+  const targets = testLanguage === 'ko' ? [headingTargets[1]] : headingTargets;
+  // English is the issue #59 path; ?language=ko matches the supplied screenshot.
+  document.querySelector('[data-language-choice="' + testLanguage + '"]').click();
   await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
   const session = new PageSession({
@@ -125,6 +145,7 @@ async function run() {
   const untranslatedTargets = targetResults.filter(({translated}) => translated === false);
   const result = {
     fixture: 'neverworkalone-heading-clipping-repro',
+    testCase: testLanguage === 'ko' ? 'screenshot-korean-state' : 'issue-59-english-state',
     viewport: {width: innerWidth, height: innerHeight},
     pageScroll: {scrollY, maxScrollY, scrollHeight: document.documentElement.scrollHeight},
     language: document.documentElement.lang,

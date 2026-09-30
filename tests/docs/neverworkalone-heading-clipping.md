@@ -8,7 +8,9 @@ hidden report element and load a fixture module that selects English as in
 issue #59, starts production `PageSession` with deterministic Korean outputs,
 scrolls to the bottom of the page instantly despite the saved site's smooth
 scroll rule, and records whether both reported headings were translated,
-visible, clipped, or overlapped nearby content.
+visible, clipped, or overlapped nearby content. Add `?language=ko` to the fixture
+URL to reproduce the Korean page state in the supplied screenshot; this case
+measures the About heading.
 
 Run the saved page through the repository-managed Chrome for Testing runner:
 
@@ -31,6 +33,9 @@ CFT runner verifies that the fixture publishes a JSON report with a boolean
 no clipping or overlap. The fixture also reports each overlap and
 `untranslatedTargets`; a missing translation cannot establish that the reported
 clipping or overlap is fixed.
+It also reports intersections between the browser's text-range line rectangles
+separately from intersections with other page elements, so line geometry can be
+compared with the actual CFT rendering.
 
 On the latest CFT run, the About heading translated into two visible lines with
 no clipping ancestor or overlapping peer. The hero heading remained untranslated
