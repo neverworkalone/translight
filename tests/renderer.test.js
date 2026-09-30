@@ -2160,7 +2160,7 @@ describe('TranslationRenderer', () => {
     expect(document.body.innerHTML).toBe('<p id="source">Original text</p>');
   });
 
-  it('keeps highlight backgrounds at text height with half-size mini highlight padding', () => {
+  it('spaces wrapped highlight lines and keeps mini highlight padding half-sized', () => {
     const source = document.querySelector('#source');
     const renderer = new TranslationRenderer({document, sessionId: 'highlight-session'});
     renderer.insert({element: source, sourceId: 'highlight-source', translatedText: 'Highlighted text'});
@@ -2169,7 +2169,7 @@ describe('TranslationRenderer', () => {
     expect(document.querySelector('[data-translight-text="true"]')).not.toBeNull();
     expect(renderer.style.textContent).toContain('padding: 0 0.12em !important');
     expect(renderer.style.textContent).toContain('box-decoration-break: clone !important');
-    expect(renderer.style.textContent).toContain('line-height: 1 !important');
+    expect(renderer.style.textContent).toContain('line-height: 1.5 !important');
 
     renderer.updatePresentation({displayStyle: TRANSLATION_STYLES.MINI_HIGHLIGHT});
     expect(renderer.style.textContent).toContain('padding: 0 0.06em !important');

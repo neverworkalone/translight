@@ -1887,7 +1887,7 @@ function styleText(sessionId, presentation) {
     ${replacementMiniHighlightSelector} {
       -webkit-box-decoration-break: clone !important;
       box-decoration-break: clone !important;
-      line-height: 1 !important;
+      line-height: 1.5 !important;
     }
     ${highlightTextSelector},
     ${replacementHighlightSelector} {
