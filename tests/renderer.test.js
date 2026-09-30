@@ -1803,6 +1803,105 @@ describe('TranslationRenderer', () => {
     renderer.removeAll();
   });
 
+  it('cancels Google search result vertical flips and places translations below their source', () => {
+    document.head.innerHTML = `
+      <style>
+        .b8lM7 {
+          display: flex;
+          flex-direction: column-reverse;
+        }
+        .V9tjod,
+        .V9tjod .LC20lb,
+        .V9tjod .ESMNde {
+          text-wrap: wrap;
+          transform: scaleY(-1);
+        }
+        .V9tjod .LC20lb {
+          margin: 3px 0 0;
+        }
+      </style>
+    `;
+    document.body.innerHTML = `
+      <div id="google-results">
+        <div class="MjjYud">
+          <div class="A6K0A">
+            <div class="wHYlTd Ww4FFb tF2Cxc asEBEc">
+              <div class="N54PNb BToiNc">
+                <div class="kb0PBd A9Y9g">
+                  <div class="yuRUbf">
+                    <div class="b8lM7">
+                      <span class="V9tjod">
+                        <a class="zReHs" href="https://neverworkalone.net/">
+                          <h3 class="LC20lb MBeuO DKV0Md" id="source">
+                            Never Work Alone: Because life and work are team sports.
+                          </h3>
+                          <div class="notranslate ESMNde HGLrXd ojE3Fb">neverworkalone.net</div>
+                        </a>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    const source = document.querySelector('#source');
+    const renderer = new TranslationRenderer({document, sessionId: 'google-result-transform-session'});
+
+    const translation = renderer.insert({
+      element: source,
+      sourceId: 'google-result-transform-source',
+      translatedText: 'Never Work Alone: 삶과 일이 팀 스포츠이기 때문입니다.'
+    });
+    const translationText = translation.querySelector('[data-translight-text="true"]');
+    const record = renderer.getRecordForElement(source);
+
+    expect(window.getComputedStyle(translation).transform).toBe('scaleY(-1)');
+    expect(window.getComputedStyle(translationText).transform).toBe('none');
+    expect(window.getComputedStyle(source.closest('.b8lM7')).flexDirection).toBe('column-reverse');
+    expect(record.placement).toBe('sibling-before');
+    expect(translation.nextElementSibling).toBe(source);
+
+    renderer.removeAll();
+  });
+
+  it('keeps reverse-column result insertion style reads linear as cards grow', () => {
+    const styleReadsFor = (count) => {
+      document.body.innerHTML = `
+        <div id="google-results">
+          ${Array.from({length: count}, (_, index) => `
+            <div class="result">
+              <a style="display:flex;flex-direction:column-reverse">
+                <h3 id="source-${index}" style="display:flex">Result title ${index}</h3>
+              </a>
+            </div>
+          `).join('')}
+        </div>
+      `;
+      const sourceElements = Array.from(document.querySelectorAll('#google-results h3'));
+      const renderer = new TranslationRenderer({document, sessionId: `google-results-${count}`});
+      const getComputedStyle = vi.spyOn(window, 'getComputedStyle');
+
+      sourceElements.forEach((element, index) => renderer.insert({
+        element,
+        sourceId: `google-result-${count}-${index}`,
+        translatedText: `결과 제목 ${index}`
+      }));
+      const reads = getComputedStyle.mock.calls.length;
+      getComputedStyle.mockRestore();
+      renderer.removeAll();
+      return reads;
+    };
+
+    const readsForForty = styleReadsFor(40);
+    const readsForEighty = styleReadsFor(80);
+
+    expect(readsForForty).toBeGreaterThan(0);
+    expect(readsForEighty).toBeLessThanOrEqual(readsForForty * 2.25 + 8);
+  });
+
   it('syncs only records affected by a horizontal resize and ignores height-only changes', () => {
     const previousResizeObserver = window.ResizeObserver;
     const observers = [];
