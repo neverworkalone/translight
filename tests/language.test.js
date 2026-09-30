@@ -7,6 +7,7 @@ import {
   classifyTextLanguage,
   isDocumentInLanguage,
   isStandaloneHandle,
+  isStandaloneUrl,
   isTranslatableBlock,
   isTranslatableText,
   isTranslatableTitle,
@@ -202,6 +203,42 @@ describe('content language detection', () => {
     expect(isStandaloneHandle('Thanks @dreyaleigh for sharing this.')).toBe(false);
     expect(isTranslatableText('@dreyaleigh', 'ko')).toBe(false);
     expect(isTranslatableText('Thanks @dreyaleigh for sharing this.', 'ko')).toBe(true);
+  });
+
+  it('skips standalone domains and URLs without skipping prose that contains a URL', () => {
+    const standaloneUrls = [
+      'neverworkalone.com',
+      'Neverworkalone.com',
+      'everworkalone.com',
+      'https://www.neverworkalone.com',
+      'https://www.neverworkalone.com/path?q=search#result',
+      'www.neverworkalone.com.'
+    ];
+    for (const text of standaloneUrls) {
+      expect(isStandaloneUrl(text)).toBe(true);
+      expect(isTranslatableText(text, 'ko')).toBe(false);
+    }
+
+    const prose = 'This page is written in English and should be translated: https://www.neverworkalone.com';
+    expect(isStandaloneUrl(prose)).toBe(false);
+    expect(isTranslatableText(prose, 'ko')).toBe(true);
+  });
+
+  it('keeps standalone URLs excluded even inside an explicitly English result', () => {
+    document.body.innerHTML = `
+      <section lang="en">
+        <h3 id="domain">neverworkalone.com</h3>
+        <div id="url">https://www.neverworkalone.com</div>
+        <p id="prose">This result explains why the community works together.</p>
+      </section>
+    `;
+    const domain = document.querySelector('#domain');
+    const url = document.querySelector('#url');
+    const prose = document.querySelector('#prose');
+
+    expect(isTranslatableBlock(domain, domain.textContent, 'ko')).toBe(false);
+    expect(isTranslatableBlock(url, url.textContent, 'ko')).toBe(false);
+    expect(isTranslatableBlock(prose, prose.textContent, 'ko')).toBe(true);
   });
 
   it('rejects symbols and short text at the language boundary', () => {
