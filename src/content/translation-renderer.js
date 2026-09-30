@@ -134,6 +134,25 @@ function getComputedStyleValue(element, property) {
   return computedStyle.getPropertyValue?.(property) || computedStyle[property] || '';
 }
 
+function isVerticalReflectionTransform(value) {
+  const normalized = String(value ?? '').replace(/\s/gu, '').toLowerCase();
+  if (normalized === 'scaley(-1)') return true;
+  const matrix = normalized.match(/^matrix\(([^)]+)\)$/u);
+  if (!matrix) return false;
+  const [a, b, c, d, e, f] = matrix[1].split(',').map(Number);
+  return Math.abs(a - 1) < 0.001 && Math.abs(b) < 0.001 &&
+    Math.abs(c) < 0.001 && Math.abs(d + 1) < 0.001 &&
+    Math.abs(e) < 0.001 && Math.abs(f) < 0.001;
+}
+
+function hasCounteractingGoogleResultFlip(element) {
+  if (!element?.matches?.('.LC20lb')) return false;
+  const resultWrapper = element.closest?.('.V9tjod');
+  return Boolean(resultWrapper &&
+    isVerticalReflectionTransform(getComputedStyleValue(element, 'transform')) &&
+    isVerticalReflectionTransform(getComputedStyleValue(resultWrapper, 'transform')));
+}
+
 function getStyleValue(style, property) {
   return style?.getPropertyValue?.(property) || style?.[property] || '';
 }
@@ -250,7 +269,7 @@ function clearSourceLayout(translation) {
   }
 }
 
-function neutralizeHostTransforms(translation) {
+function neutralizeHostTransforms(translation, source) {
   if (!translation?.style) return;
   const generatedText = translation.querySelector?.(`[${TRANSLATION_TEXT_ATTRIBUTE}="${GENERATED_VALUE}"]`);
   for (const element of [translation, generatedText]) {
@@ -258,6 +277,12 @@ function neutralizeHostTransforms(translation) {
     for (const property of HOST_TRANSFORM_PROPERTIES) {
       setStyleValue(element.style, property, 'none');
     }
+  }
+  if (hasCounteractingGoogleResultFlip(source)) {
+    // Google flips this result wrapper and its title in opposite layers. Match
+    // the source title's local reflection so the translation cancels the
+    // wrapper reflection and stays upright.
+    setStyleValue(translation.style, 'transform', 'scaleY(-1)');
   }
 }
 
@@ -1185,6 +1210,11 @@ function insertAtSafeLocation(element, translation, mixedContent = false, source
       return placeGridLayoutTranslation(element, translation);
     }
     return placeGridLayoutExternalTranslation(element, translation);
+  }
+
+  if (hasCounteractingGoogleResultFlip(element)) {
+    insertBeforeIfNeeded(element.parentNode, translation, element);
+    return 'sibling-before';
   }
 
   if (!shouldInsertInside(element)) {
@@ -2442,7 +2472,7 @@ export class TranslationRenderer {
     const {element, translation} = record;
     if (!element || !translation) return;
     const mode = this.presentation.translationMode;
-    neutralizeHostTransforms(translation);
+    neutralizeHostTransforms(translation, element);
     this.reconcileGridLayoutPlacement(record);
     this.observeSourceLayout(record);
     syncSourceLayout(record);

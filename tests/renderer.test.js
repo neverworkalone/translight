@@ -1803,28 +1803,47 @@ describe('TranslationRenderer', () => {
     renderer.removeAll();
   });
 
-  it('keeps search-result translations upright and below their source in reverse-column layout', () => {
+  it('cancels Google search result vertical flips and places translations below their source', () => {
     document.head.innerHTML = `
       <style>
-        #google-results .result a {
+        .b8lM7 {
           display: flex;
           flex-direction: column-reverse;
         }
-        #google-results .result h3 {
-          display: flex;
+        .V9tjod,
+        .V9tjod .LC20lb,
+        .V9tjod .ESMNde {
+          text-wrap: wrap;
+          transform: scaleY(-1);
         }
-        #google-results .result a > translight-translation,
-        #google-results .result a > translight-translation > span {
-          transform: rotate(180deg) !important;
+        .V9tjod .LC20lb {
+          margin: 3px 0 0;
         }
       </style>
     `;
     document.body.innerHTML = `
       <div id="google-results">
-        <div class="result">
-          <a href="https://example.test/">
-            <h3 id="source">Never Work Alone: Because life and work are team sports.</h3>
-          </a>
+        <div class="MjjYud">
+          <div class="A6K0A">
+            <div class="wHYlTd Ww4FFb tF2Cxc asEBEc">
+              <div class="N54PNb BToiNc">
+                <div class="kb0PBd A9Y9g">
+                  <div class="yuRUbf">
+                    <div class="b8lM7">
+                      <span class="V9tjod">
+                        <a class="zReHs" href="https://neverworkalone.net/">
+                          <h3 class="LC20lb MBeuO DKV0Md" id="source">
+                            Never Work Alone: Because life and work are team sports.
+                          </h3>
+                          <div class="notranslate ESMNde HGLrXd ojE3Fb">neverworkalone.net</div>
+                        </a>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     `;
@@ -1839,9 +1858,9 @@ describe('TranslationRenderer', () => {
     const translationText = translation.querySelector('[data-translight-text="true"]');
     const record = renderer.getRecordForElement(source);
 
-    expect(window.getComputedStyle(translation).transform).toBe('none');
+    expect(window.getComputedStyle(translation).transform).toBe('scaleY(-1)');
     expect(window.getComputedStyle(translationText).transform).toBe('none');
-    expect(window.getComputedStyle(source.parentElement).flexDirection).toBe('column-reverse');
+    expect(window.getComputedStyle(source.closest('.b8lM7')).flexDirection).toBe('column-reverse');
     expect(record.placement).toBe('sibling-before');
     expect(translation.nextElementSibling).toBe(source);
 

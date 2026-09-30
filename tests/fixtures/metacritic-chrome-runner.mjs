@@ -70,7 +70,8 @@ function usage() {
   npm run test:metacritic:chrome -- [options]
 
 Options:
-  --scenario=gallery|navigation   Reproduce the article gallery or homepage flow
+  --scenario=gallery|navigation|fixture
+                                   Reproduce gallery, navigation, or a page-reported browser fixture
   --provider=real|dummy            Translation provider (default: real)
   --dummy-profile=normal|expanded  Dummy output profile (default: normal)
   --dummy-delay-ms=<number>        Dummy provider delay (default: ${DEFAULT_DUMMY_DELAY_MS})
@@ -173,8 +174,8 @@ function parseArgs(argv) {
     const value = argument.slice(separator + 1);
     switch (name) {
       case '--scenario':
-        if (!['gallery', 'navigation'].includes(value)) {
-          throw new Error('--scenario must be gallery or navigation.');
+        if (!['gallery', 'navigation', 'fixture'].includes(value)) {
+          throw new Error('--scenario must be gallery, navigation, or fixture.');
         }
         options.scenario = value;
         break;
@@ -226,6 +227,9 @@ function parseArgs(argv) {
     }
   }
 
+  if (options.scenario === 'fixture' && !options.url) {
+    throw new Error('--scenario=fixture requires --url=<fixture URL>.');
+  }
   options.url ??= options.scenario === 'gallery' ? DEFAULT_ARTICLE_URL : DEFAULT_HOMEPAGE_URL;
   return options;
 }
@@ -2085,11 +2089,36 @@ async function cleanupRunnerResources({
   }
 }
 
+async function runFixtureScenario({page, result}) {
+  const deadline = Date.now() + 15_000;
+  let report = null;
+  while (Date.now() < deadline) {
+    report = await evaluate(page, `(() => {
+      const element = document.querySelector('#report');
+      if (!element) return null;
+      try { return JSON.parse(element.textContent); }
+      catch { return null; }
+    })()`, 'fixture report').catch(() => null);
+    if (report && typeof report === 'object' && typeof report.testPassed === 'boolean') break;
+    await wait(50);
+  }
+  if (!report || typeof report !== 'object' || typeof report.testPassed !== 'boolean') {
+    throw new Error('The fixture did not publish a JSON test report in #report.');
+  }
+  result.fixtureReport = report;
+  result.scenarioPassed = report.testPassed === true;
+  result.scenario.completed = true;
+  if (!result.scenarioPassed) {
+    throw new Error(`The browser fixture reported testPassed=${report.testPassed}.`);
+  }
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const startedAt = new Date().toISOString();
   const attachMode = options.debuggingPort != null;
-  const performanceValidationRequested = !(attachMode && options.browserPid == null);
+  const performanceValidationRequested = options.scenario !== 'fixture' &&
+    !(attachMode && options.browserPid == null);
   if (attachMode) {
     if (!options.profileDir) {
       throw new ValidationBlockedError(
@@ -2139,7 +2168,7 @@ async function main() {
     });
     throw error;
   }
-  const processSampler = chrome?.pid || options.browserPid
+  const processSampler = options.scenario !== 'fixture' && (chrome?.pid || options.browserPid)
     ? new ProcessSampler(chrome?.pid ?? options.browserPid)
     : null;
   let page;
@@ -2241,18 +2270,20 @@ async function main() {
       options.url = attachedUrl || await evaluate(page, 'location.href');
       result.scenario.url = options.url;
     }
-    result.pageControlIsolation = await probePageControlIsolation(page);
-    result.pageControlIsolationPass = result.pageControlIsolation.harnessVisible === false &&
-      result.pageControlIsolation.extensionRuntimeVisible === false &&
-      result.pageControlIsolation.translationCountBeforeAction === 0;
-    const layoutBaseline = await readLayoutSnapshot(page);
-    result.layout = {
-      supported: layoutBaseline.length > 0 && layoutBaseline.every(({x, width}) =>
-        Number.isFinite(x) && Number.isFinite(width)),
-      tolerancePx: LAYOUT_TOLERANCE_PX,
-      baseline: layoutBaseline,
-      snapshots: []
-    };
+    if (options.scenario !== 'fixture') {
+      result.pageControlIsolation = await probePageControlIsolation(page);
+      result.pageControlIsolationPass = result.pageControlIsolation.harnessVisible === false &&
+        result.pageControlIsolation.extensionRuntimeVisible === false &&
+        result.pageControlIsolation.translationCountBeforeAction === 0;
+      const layoutBaseline = await readLayoutSnapshot(page);
+      result.layout = {
+        supported: layoutBaseline.length > 0 && layoutBaseline.every(({x, width}) =>
+          Number.isFinite(x) && Number.isFinite(width)),
+        tolerancePx: LAYOUT_TOLERANCE_PX,
+        baseline: layoutBaseline,
+        snapshots: []
+      };
+    }
     if (!options.skipTranslation && options.scenario === 'navigation') {
       settingsSnapshot = await enableSameSiteContinuation(worker);
       result.sameSiteContinuationTemporarilyEnabled = true;
@@ -2298,7 +2329,9 @@ async function main() {
         processResult = await processSampler.stop();
       }
       : null;
-    if (options.scenario === 'gallery') {
+    if (options.scenario === 'fixture') {
+      await runFixtureScenario({page, result});
+    } else if (options.scenario === 'gallery') {
       await runGalleryScenario({page, worker, options, result, tabId, captureCpuRecovery});
     } else {
       await runNavigationScenario({page, worker, options, result, tabId, captureCpuRecovery});
@@ -2377,7 +2410,7 @@ async function main() {
       result.performance.responsivenessPass === true &&
       result.performance.cpuRecoveryPass;
     result.smokePassed = !performanceValidationRequested && result.scenarioPassed === true &&
-      result.performance.responsivenessPass === true;
+      (options.scenario === 'fixture' || result.performance.responsivenessPass === true);
     await writeFile(resolve(options.outputDir, 'result.json'), `${JSON.stringify(result, null, 2)}\n`);
   }
 

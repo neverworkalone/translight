@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Google result translation placement reproduction</title>
+    <title>Google search result vertical-flip reproduction</title>
     <style>
       html, body { min-height: 100%; }
       body {
@@ -19,44 +19,66 @@
         z-index: 10;
         top: 12px;
         right: 12px;
-        width: 380px;
+        width: 500px;
         padding: 12px;
         box-sizing: border-box;
         background: #111827;
         color: white;
-        font: 12px/1.4 ui-monospace, monospace;
+        font: 11px/1.35 ui-monospace, monospace;
         white-space: pre-wrap;
       }
       #google-results { width: min(760px, 100%); margin: 80px auto; }
-      .result { padding: 24px; background: white; }
-      .result-link {
+      .MjjYud { padding: 24px; background: white; }
+      .b8lM7 {
         display: flex;
         flex-direction: column-reverse;
-        color: inherit;
-        text-decoration: none;
       }
-      .result-title {
-        display: flex;
-        margin: 0;
+      .V9tjod,
+      .V9tjod .LC20lb,
+      .V9tjod .ESMNde {
+        text-wrap: wrap;
+        transform: scaleY(-1);
+      }
+      .V9tjod .LC20lb {
+        margin: 3px 0 0;
+      }
+      .LC20lb {
+        display: inline-block;
+        margin-bottom: 3px;
         color: #1a0dab;
-        font-size: 28px;
+        font-size: 22px;
         font-weight: 400;
-        line-height: 1.25;
+        line-height: 28px;
       }
-      #google-results .result-link > translight-translation,
-      #google-results .result-link > translight-translation > span {
-        transform: rotate(180deg) !important;
-      }
+      .zReHs { color: inherit; text-decoration: none; }
+      .ESMNde { color: #5f6368; font-size: 14px; }
     </style>
   </head>
   <body>
     <pre id="report">starting…</pre>
     <main id="google-results">
-      <article class="result">
-        <a class="result-link" href="https://neverworkalone.net/">
-          <h3 class="result-title" id="source">Never Work Alone: Because life and work are team sports.</h3>
-        </a>
-      </article>
+      <div class="MjjYud">
+        <div class="A6K0A">
+          <div class="wHYlTd Ww4FFb tF2Cxc asEBEc">
+            <div class="N54PNb BToiNc">
+              <div class="kb0PBd A9Y9g">
+                <div class="yuRUbf">
+                  <div class="b8lM7">
+                    <span class="V9tjod">
+                      <a class="zReHs" href="https://neverworkalone.net/">
+                        <h3 class="LC20lb MBeuO DKV0Md" id="source">
+                          Never Work Alone: Because life and work are team sports.
+                        </h3>
+                        <div class="notranslate ESMNde HGLrXd ojE3Fb">neverworkalone.net</div>
+                      </a>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </main>
     <script type="module" src="/tests/fixtures/google-result-transform-repro.js"></script>
   </body>

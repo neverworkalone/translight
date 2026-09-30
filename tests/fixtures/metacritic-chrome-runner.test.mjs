@@ -54,6 +54,18 @@ describe('Metacritic Chrome runner', () => {
     });
   });
 
+  it('requires an explicit URL for a page-reported browser fixture', () => {
+    expect(parseArgs([
+      '--scenario=fixture',
+      '--url=http://127.0.0.1:5173/tests/fixtures/example.html'
+    ])).toMatchObject({
+      scenario: 'fixture',
+      url: 'http://127.0.0.1:5173/tests/fixtures/example.html',
+      urlProvided: true
+    });
+    expect(() => parseArgs(['--scenario=fixture'])).toThrow(/requires --url/u);
+  });
+
   it('defaults to background browser launch on macOS and supports explicit overrides', () => {
     expect(parseArgs([]).background).toBe(process.platform === 'darwin');
     expect(parseArgs(['--background']).background).toBe(true);
