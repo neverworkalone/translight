@@ -115,8 +115,15 @@ function measureTarget(element, session) {
     visible,
     translationRect: {x: rect.x, y: rect.y, width: rect.width, height: rect.height},
     textLineRects: textRects.map(({x, y, width, height}) => ({x, y, width, height})),
-    highlightFragmentRects: Array.from(text.getClientRects(), ({x, y, width, height}) => ({x, y, width, height})),
-    textStyle: {fontSize: textStyle.fontSize, lineHeight: textStyle.lineHeight, backgroundColor: textStyle.backgroundColor},
+    highlightFragmentRects: Array.from(
+      text.getClientRects(),
+      ({x, y, width, height}) => ({x, y, width, height})
+    ),
+    textStyle: {
+      fontSize: textStyle.fontSize,
+      lineHeight: textStyle.lineHeight,
+      backgroundColor: textStyle.backgroundColor
+    },
     highlightFragmentIntersections: highlightFragmentIntersections(Array.from(text.getClientRects())),
     lineRangeIntersections: lineRangeIntersections(textRects),
     clippingAncestors: clippingAncestors(text),
@@ -146,9 +153,15 @@ async function run() {
 
   await session.start();
   await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-  const maxScrollY = Math.max(0, document.documentElement.scrollHeight - innerHeight);
-  window.scrollTo({top: maxScrollY, behavior: 'instant'});
-  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  let maxScrollY = 0;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    maxScrollY = Math.max(0, document.documentElement.scrollHeight - innerHeight);
+    window.scrollTo({top: maxScrollY, behavior: 'instant'});
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    maxScrollY = Math.max(0, document.documentElement.scrollHeight - innerHeight);
+    if (Math.abs(scrollY - maxScrollY) <= 1) break;
+  }
+  const atBottom = Math.abs(scrollY - maxScrollY) <= 1;
   const targetResults = targets.map((element) => measureTarget(element, session));
   const translatedTargets = targetResults.filter(({translated}) => translated !== false);
   const clippedTargets = targetResults.filter((result) =>
@@ -162,19 +175,21 @@ async function run() {
     fixture: 'neverworkalone-heading-clipping-repro',
     testCase: testLanguage === 'ko' ? 'screenshot-korean-state' : 'issue-59-english-state',
     viewport: {width: innerWidth, height: innerHeight},
-    pageScroll: {scrollY, maxScrollY, scrollHeight: document.documentElement.scrollHeight},
+    pageScroll: {scrollY, maxScrollY, atBottom, scrollHeight: document.documentElement.scrollHeight},
     language: document.documentElement.lang,
     targets: targetResults,
     allTargetsTranslated: translatedTargets.length === targetResults.length,
     untranslatedTargets: untranslatedTargets.map(({source}) => source),
     clippedTargets: clippedTargets.map(({source}) => source),
     overlappingTargets: overlappingTargets.map(({source}) => source),
-    highlightOverlapReproduced: targetResults.some(({highlightFragmentIntersections: intersections}) => intersections?.length > 0),
+    highlightOverlapReproduced: targetResults.some(
+      ({highlightFragmentIntersections: intersections}) => intersections?.length > 0
+    ),
     clippingReproduced: clippedTargets.length > 0,
     overlapReproduced: overlappingTargets.length > 0,
     testPassed: translatedTargets.length === targets.length &&
       translatedTargets.every(({visible}) => visible) &&
-      clippedTargets.length === 0 && overlappingTargets.length === 0
+      clippedTargets.length === 0 && overlappingTargets.length === 0 && atBottom
   };
   window.__neverworkaloneIssue59Report = result;
   reportElement.textContent = JSON.stringify(result, null, 2);
