@@ -103,7 +103,7 @@ async function run() {
     translationRect.left < urlRect.right && translationRect.right > urlRect.left &&
     translationRect.top < urlRect.bottom && translationRect.bottom > urlRect.top);
   const result = {
-    fixture: 'google-result-transform-repro',
+    fixture: expectsUrlProtection ? 'google-url-translation-repro' : 'google-result-transform-repro',
     translationSources,
     translationInputs,
     urlText: url.textContent,
