@@ -4,11 +4,11 @@
 `neverworkalone.zip`. It keeps the page's HTML, CSS, assets, and language
 switcher. The saved extensionless Google Fonts stylesheet is served as
 `fonts.css` so Vite provides its CSS MIME type. The other page changes add a
-hidden report element and load a fixture module that selects Korean, starts
-production `PageSession` with the screenshot's Korean translation, scrolls to
-the bottom of the page instantly despite the saved site's smooth-scroll rule,
-and records viewport visibility, text geometry, clipping ancestors, and overlap
-with nearby content for the two reported headings.
+hidden report element and load a fixture module that selects English as in
+issue #59, starts production `PageSession` with deterministic Korean outputs,
+scrolls to the bottom of the page instantly despite the saved site's smooth
+scroll rule, and records whether both reported headings were translated,
+visible, clipped, or overlapped nearby content.
 
 Run the saved page through the repository-managed Chrome for Testing runner:
 
@@ -27,11 +27,7 @@ supplied screenshot's page scale. The fixture report is written to `result.json`
 and the browser page also exposes `window.__neverworkaloneIssue59Report`. The
 CFT runner verifies that the fixture publishes a JSON report with a boolean
 `testPassed` value.
-`testPassed` means at least one targeted translation rendered and none of the
-rendered target translations were clipped or overlapped a peer. The fixture
-also reports each overlap and `untranslatedTargets`; a missing translation
-cannot establish a clipping or overlap result.
-
-With the supplied screenshot's Korean translation, the About heading translated
-without clipping or overlap. The hero heading remained untranslated in the
-saved page, so that heading's clipping could not be measured.
+`testPassed` requires both targeted headings to be translated and visible, with
+no clipping or overlap. The fixture also reports each overlap and
+`untranslatedTargets`; a missing translation cannot establish that the reported
+clipping or overlap is fixed.

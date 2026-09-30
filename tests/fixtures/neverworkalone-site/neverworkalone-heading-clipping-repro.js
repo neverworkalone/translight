@@ -94,8 +94,8 @@ function measureTarget(element, session) {
 }
 
 async function run() {
-  // Match the supplied screenshot: Korean site copy with the English phrase translated.
-  document.querySelector('[data-language-choice="ko"]').click();
+  // Reproduce issue #59: switch the saved homepage to English before translation.
+  document.querySelector('[data-language-choice="en"]').click();
   await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
   const session = new PageSession({
@@ -135,7 +135,8 @@ async function run() {
     overlappingTargets: overlappingTargets.map(({source}) => source),
     clippingReproduced: clippedTargets.length > 0,
     overlapReproduced: overlappingTargets.length > 0,
-    testPassed: translatedTargets.length > 0 && translatedTargets.every(({visible}) => visible) &&
+    testPassed: translatedTargets.length === targets.length &&
+      translatedTargets.every(({visible}) => visible) &&
       clippedTargets.length === 0 && overlappingTargets.length === 0
   };
   window.__neverworkaloneIssue59Report = result;
