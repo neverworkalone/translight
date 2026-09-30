@@ -15,7 +15,7 @@ function translate(text) {
   if (source.startsWith("You'll never work alone") || source.startsWith("You'll neverwork alone")) {
     return '당신은 결코 혼자 일하지 않을 것입니다';
   }
-  if (source === 'Never Work Alone') return '절대 혼자 일하지 마세요';
+  if (source === 'Never Work Alone') return '절대 혼자 일하지 마십시오';
   return `번역: ${source}`;
 }
 
@@ -45,6 +45,30 @@ function clippingAncestors(text) {
   return clips;
 }
 
+function overlappingPeers(element, translation) {
+  const section = element.closest('section');
+  const translationRect = translation.getBoundingClientRect();
+  const candidates = [
+    ...Array.from(section?.querySelectorAll('h1, h2, p, a, button') ?? []),
+    document.querySelector('.site-footer')
+  ].filter((candidate) => candidate && candidate !== element && candidate !== translation &&
+    !element.contains(candidate) && !candidate.contains(element));
+
+  return candidates.flatMap((candidate) => {
+    const rect = candidate.getBoundingClientRect();
+    const left = Math.max(translationRect.left, rect.left);
+    const right = Math.min(translationRect.right, rect.right);
+    const top = Math.max(translationRect.top, rect.top);
+    const bottom = Math.min(translationRect.bottom, rect.bottom);
+    if (left >= right || top >= bottom) return [];
+    return [{
+      selector: candidate.id ? `#${candidate.id}` : candidate.className || candidate.tagName.toLowerCase(),
+      text: normalizedText(candidate.textContent),
+      intersection: {x: left, y: top, width: right - left, height: bottom - top}
+    }];
+  });
+}
+
 function measureTarget(element, session) {
   const record = session.renderer.getRecordForElement(element);
   const text = record?.translation?.querySelector('[data-translight-text="true"]');
@@ -60,13 +84,14 @@ function measureTarget(element, session) {
     placement: record.placement,
     translationRect: {x: rect.x, y: rect.y, width: rect.width, height: rect.height},
     textLineRects: textRects.map(({x, y, width, height}) => ({x, y, width, height})),
-    clippingAncestors: clippingAncestors(text)
+    clippingAncestors: clippingAncestors(text),
+    overlappingPeers: overlappingPeers(element, record.translation)
   };
 }
 
 async function run() {
-  // Use the saved site's own language control before starting the production path.
-  document.querySelector('[data-language-choice="en"]').click();
+  // Match the supplied screenshot: Korean site copy with the English phrase translated.
+  document.querySelector('[data-language-choice="ko"]').click();
   await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
   const session = new PageSession({
@@ -84,11 +109,14 @@ async function run() {
 
   await session.start();
   await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  window.scrollTo(0, Math.max(0, document.documentElement.scrollHeight - innerHeight));
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   const targetResults = targets.map((element) => measureTarget(element, session));
   const translatedTargets = targetResults.filter(({translated}) => translated !== false);
   const clippedTargets = targetResults.filter((result) =>
     result.clippingAncestors?.some(({clipped}) => clipped)
   );
+  const overlappingTargets = targetResults.filter((result) => result.overlappingPeers?.length > 0);
   const untranslatedTargets = targetResults.filter(({translated}) => translated === false);
   const result = {
     fixture: 'neverworkalone-heading-clipping-repro',
@@ -98,8 +126,10 @@ async function run() {
     allTargetsTranslated: translatedTargets.length === targetResults.length,
     untranslatedTargets: untranslatedTargets.map(({source}) => source),
     clippedTargets: clippedTargets.map(({source}) => source),
+    overlappingTargets: overlappingTargets.map(({source}) => source),
     clippingReproduced: clippedTargets.length > 0,
-    testPassed: translatedTargets.length > 0 && clippedTargets.length === 0
+    overlapReproduced: overlappingTargets.length > 0,
+    testPassed: translatedTargets.length > 0 && clippedTargets.length === 0 && overlappingTargets.length === 0
   };
   window.__neverworkaloneIssue59Report = result;
   reportElement.textContent = JSON.stringify(result, null, 2);

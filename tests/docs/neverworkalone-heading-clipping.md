@@ -4,9 +4,10 @@
 `neverworkalone.zip`. It keeps the page's HTML, CSS, assets, and language
 switcher. The saved extensionless Google Fonts stylesheet is served as
 `fonts.css` so Vite provides its CSS MIME type. The other page changes add a
-hidden report element and load a fixture module that clicks the real English
-button, starts production `PageSession` with deterministic Korean translations,
-and records text geometry and clipping ancestors for the two reported headings.
+hidden report element and load a fixture module that selects Korean, starts
+production `PageSession` with the screenshot's Korean translation, scrolls to
+the bottom of the page, and records text geometry, clipping ancestors, and
+overlap with nearby content for the two reported headings.
 
 Run the saved page through the repository-managed Chrome for Testing runner:
 
@@ -25,5 +26,6 @@ screenshot. The fixture report is written to `result.json` and the browser page
 also exposes `window.__neverworkaloneIssue59Report`. The CFT runner verifies
 that the fixture publishes a JSON report with a boolean `testPassed` value.
 `testPassed` means at least one targeted translation rendered and none of the
-rendered target translations were clipped. `untranslatedTargets` is recorded
-separately because a missing translation cannot establish a clipping result.
+rendered target translations were clipped or overlapped a peer. The fixture
+also reports each overlap and `untranslatedTargets`; a missing translation
+cannot establish a clipping or overlap result.
