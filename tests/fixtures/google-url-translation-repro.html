@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Google result URL translation reproduction</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { min-height: 100%; }
+      body {
+        margin: 0;
+        padding: 32px;
+        background: #fff;
+        color: #202124;
+        font: 14px/1.5 Arial, sans-serif;
+      }
+      #google-results { width: min(600px, 100%); margin: 72px auto; }
+      .MjjYud { padding: 16px 8px; }
+      .LC20lb {
+        display: inline-block;
+        margin: 3px 0;
+        color: #202124;
+        font-size: 14px;
+        font-weight: 400;
+        line-height: 21px;
+      }
+      .zReHs { color: inherit; text-decoration: none; }
+      .ESMNde { color: #5f6368; font-size: 13px; }
+      #report { position: fixed; left: -10000px; }
+    </style>
+  </head>
+  <body data-fixture="url-translation">
+    <pre id="report">starting…</pre>
+    <main id="google-results">
+      <div class="MjjYud">
+        <div class="A6K0A">
+          <div class="wHYlTd Ww4FFb tF2Cxc asEBEc">
+            <div class="N54PNb BToiNc">
+              <div class="kb0PBd A9Y9g">
+                <div class="yuRUbf">
+                  <div class="b8lM7">
+                    <span class="V9tjod" lang="en">
+                      <a class="zReHs" href="https://www.neverworkalone.com">
+                        <h3 class="LC20lb MBeuO DKV0Md" id="source">neverworkalone.com</h3>
+                        <div class="notranslate ESMNde HGLrXd ojE3Fb">https://www.neverworkalone.com</div>
+                      </a>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+    <script type="module" src="/tests/fixtures/google-result-transform-repro.js"></script>
+  </body>
+</html>

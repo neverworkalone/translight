@@ -37,6 +37,24 @@ describe('collectTranslationBlocks', () => {
     expect(new Set(blocks.map((block) => block.sourceId)).size).toBe(3);
   });
 
+  it('preserves Google URL identifiers and honors explicit no-translate markers', () => {
+    document.body.innerHTML = `
+      <section lang="en">
+        <p>This English paragraph explains the community result.</p>
+        <h3>neverworkalone.com</h3>
+        <p class="notranslate">Never Work Alone</p>
+        <div class="ESMNde notranslate">https://www.neverworkalone.com</div>
+        <p translate="No">This explicitly excluded English label stays unchanged.</p>
+        <p>This English paragraph contains <span class="notranslate">Never Work Alone</span> and remains translatable.</p>
+      </section>
+    `;
+
+    expect(collectTranslationBlocks(document.body).map(({text}) => text)).toEqual([
+      'This English paragraph explains the community result.',
+      'This English paragraph contains and remains translatable.'
+    ]);
+  });
+
   it('preserves a br as word spacing when collecting an English heading under a Korean root', () => {
     document.documentElement.lang = 'ko';
     document.body.innerHTML = '<h1 id="hero-title">You\'ll never<br>work alone</h1>';

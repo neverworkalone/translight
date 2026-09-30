@@ -3,6 +3,8 @@ const HANGUL_CHARACTER = /[\uac00-\ud7af\u3130-\u318f]/u;
 const LETTER_CHARACTER = /^\p{L}$/u;
 const LATIN_CHARACTER = /^\p{Script=Latin}$/u;
 const STANDALONE_HANDLE_PATTERN = /^@[\p{L}\p{N}._-]+$/u;
+const STANDALONE_URL_PATTERN = /^(?:https?:\/\/)?(?:www\.)?[\p{L}\p{N}](?:[\p{L}\p{N}-]{0,61}[\p{L}\p{N}])?(?:\.[\p{L}\p{N}](?:[\p{L}\p{N}-]{0,61}[\p{L}\p{N}])?)+(?::\d{1,5})?(?:[/?#][^\s]*)?$/iu;
+const TRAILING_URL_PUNCTUATION = /[.,;!?]+$/u;
 const WORD_PATTERN = /[\p{L}]+(?:['’][\p{L}]+)?/gu;
 // These words are intentionally narrower than general English stopwords. They
 // are high-confidence English lexical anchors because they are less likely to
@@ -194,6 +196,16 @@ export function isStandaloneHandle(value) {
 }
 
 /**
+ * URLs and bare domain names are identifiers, not translatable prose. Match
+ * only a block that consists entirely of a URL so a URL inside a sentence
+ * does not suppress translation of its surrounding content.
+ */
+export function isStandaloneUrl(value) {
+  const candidate = String(value ?? '').trim().replace(TRAILING_URL_PUNCTUATION, '');
+  return STANDALONE_URL_PATTERN.test(candidate);
+}
+
+/**
  * Return the nearest language declaration that applies to a content element.
  * html and body are intentionally skipped because localized sites commonly
  * use those elements for UI language rather than the language of each post.
@@ -224,7 +236,7 @@ export function nearestContentLanguage(element) {
  */
 export function isTranslatableBlock(element, text, targetLanguage = 'ko') {
   const target = normalizeLanguageCode(targetLanguage);
-  if (isStandaloneHandle(text)) return false;
+  if (isStandaloneHandle(text) || isStandaloneUrl(text)) return false;
   const stats = analyzeText(text);
   if (!target || !hasDetectableText(stats)) return false;
 
