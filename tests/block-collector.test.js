@@ -37,6 +37,17 @@ describe('collectTranslationBlocks', () => {
     expect(new Set(blocks.map((block) => block.sourceId)).size).toBe(3);
   });
 
+  it('preserves a br as word spacing when collecting an English heading under a Korean root', () => {
+    document.documentElement.lang = 'ko';
+    document.body.innerHTML = '<h1 id="hero-title">You\'ll never<br>work alone</h1>';
+
+    const blocks = collectTranslationBlocks(document.body);
+
+    expect(blocks.map(({text}) => text)).toEqual(["You'll never work alone"]);
+    expect(blocks[0].element).toBe(document.querySelector('#hero-title'));
+    document.documentElement.removeAttribute('lang');
+  });
+
   it('ignores custom navigation items while keeping nearby article text', () => {
     document.body.innerHTML = `
       <bsp-nav class="MainNavigation">

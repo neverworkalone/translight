@@ -1546,12 +1546,18 @@ function normalizeSourceText(value) {
     .trim();
 }
 
-function collectSourceTextNodes(element, mixedContent = false, {includeReplacementText = false} = {}) {
+function collectSourceText(
+  element,
+  mixedContent = false,
+  {includeReplacementText = false, includeText = true} = {}
+) {
   const nodes = [];
+  const textParts = [];
   const visit = (parent) => {
     for (const child of parent.childNodes ?? []) {
       if (child.nodeType === 3) {
         nodes.push(child);
+        if (includeText) textParts.push(child.nodeValue ?? '');
         continue;
       }
       if (child.nodeType !== 1) continue;
@@ -1565,15 +1571,19 @@ function collectSourceTextNodes(element, mixedContent = false, {includeReplaceme
       }
       if (child.matches(SEGMENT_SELECTOR)) continue;
       if (mixedContent && child.matches(BLOCK_SELECTOR)) continue;
+      if (child.tagName.toLowerCase() === 'br') {
+        if (includeText) textParts.push(' ');
+        continue;
+      }
       visit(child);
     }
   };
   visit(element);
-  return nodes;
+  return {nodes, text: includeText ? textParts.join('') : ''};
 }
 
-function sourceTextFromNodes(nodes) {
-  return Array.from(nodes ?? [], (node) => node.nodeValue ?? '').join('');
+function collectSourceTextNodes(element, mixedContent = false, options = {}) {
+  return collectSourceText(element, mixedContent, {...options, includeText: false}).nodes;
 }
 
 function setSourceTextNodes(nodes, values) {
@@ -2207,8 +2217,8 @@ export class TranslationRenderer {
   isSourceHashCurrent({element, sourceHash, mixedContent = false} = {}) {
     if (!element?.isConnected) return false;
     if (!sourceHash) return true;
-    const nodes = collectSourceTextNodes(element, Boolean(mixedContent));
-    const sourceText = normalizeSourceText(sourceTextFromNodes(nodes));
+    const {text} = collectSourceText(element, Boolean(mixedContent));
+    const sourceText = normalizeSourceText(text);
     return hashSourceText(sourceText) === sourceHash;
   }
 
@@ -2271,7 +2281,8 @@ export class TranslationRenderer {
     setSourceTextNodes(nodes, restoredValues);
     record.sourceTextNodes = nodes;
     record.originalTextNodeValues = snapshotTextNodes(nodes);
-    record.originalText = normalizeSourceText(sourceTextFromNodes(nodes));
+    const {text} = collectSourceText(record.element, record.mixedContent);
+    record.originalText = normalizeSourceText(text);
     record.replaced = false;
     record.presentedText = null;
     record.presentedTextNodeValues = null;
@@ -2425,8 +2436,7 @@ export class TranslationRenderer {
     const wasReplaced = record.replaced;
     if (wasReplaced) this.restoreSourceText(record);
 
-    const nodes = this.currentSourceTextNodes(record);
-    const currentText = sourceTextFromNodes(nodes);
+    const {nodes, text: currentText} = collectSourceText(record.element, record.mixedContent);
     record.sourceTextNodes = nodes;
     record.originalTextNodeValues = snapshotTextNodes(nodes);
     record.originalText = normalizeSourceText(wasReplaced ? currentText : (sourceText ?? currentText));
@@ -2603,8 +2613,11 @@ export class TranslationRenderer {
     }
     if (isExcluded(record.element) || isHidden(record.element)) return 'invalid';
 
-    const sourceTextNodes = collectSourceTextNodes(record.element, record.mixedContent);
-    const sourceText = normalizeSourceText(sourceTextFromNodes(sourceTextNodes));
+    const {nodes: sourceTextNodes, text: rawSourceText} = collectSourceText(
+      record.element,
+      record.mixedContent
+    );
+    const sourceText = normalizeSourceText(rawSourceText);
     if (!sourceText || !isTranslatableBlock(record.element, sourceText, targetLanguage)) return 'invalid';
     if (record.sourceHash) {
       if (hashSourceText(sourceText) !== record.sourceHash) return 'changed';
@@ -2718,8 +2731,11 @@ export class TranslationRenderer {
     translationText.textContent = String(translatedText ?? '');
     translation.appendChild(translationText);
     const tableLinkedGroup = tableLinked ? this.getTableLinkedGroup(tableLinked) : null;
-    const sourceTextNodes = collectSourceTextNodes(element, Boolean(mixedContent));
-    const sourceText = text ?? sourceTextFromNodes(sourceTextNodes);
+    const {nodes: sourceTextNodes, text: rawSourceText} = collectSourceText(
+      element,
+      Boolean(mixedContent)
+    );
+    const sourceText = text ?? normalizeSourceText(rawSourceText);
     const record = {
       element,
       translation,

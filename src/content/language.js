@@ -10,7 +10,7 @@ const WORD_PATTERN = /[\p{L}]+(?:['’][\p{L}]+)?/gu;
 // not enough for a long sentence on its own; repeated/common words must not
 // manufacture confidence.
 const ENGLISH_DISCRIMINATIVE_WORDS = new Set([
-  'access', 'active', 'accommodations', 'added', 'arrived', 'around', 'away',
+  'access', 'active', 'alone', 'accommodations', 'added', 'arrived', 'around', 'away',
   'background', 'block', 'body', 'breaking', 'cached', 'carefully', 'cell',
   'change', 'changed', 'changes', 'checks', 'chrome', 'close', 'column', 'community',
   'contains', 'content', 'current', 'deeply', 'denied', 'difficulty', 'dining',
@@ -26,7 +26,7 @@ const ENGLISH_DISCRIMINATIVE_WORDS = new Set([
   'stable', 'story', 'technical', 'teen', 'thanks', 'third', 'title', 'touch',
   'translatable',
   'translated', 'trophy', 'untitled', 'user', 'value',
-  'visible', 'visit', 'why', 'win', 'words', 'world', 'written', 'yes'
+  'visible', 'visit', 'why', 'win', 'words', 'world', 'work', 'written', 'yes'
 ]);
 
 // A single short label can be valid evidence when it is itself distinctive,

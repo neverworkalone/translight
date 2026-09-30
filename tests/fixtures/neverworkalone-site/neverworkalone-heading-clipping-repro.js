@@ -5,6 +5,7 @@ const headingTargets = [
   document.querySelector('#hero-title'),
   document.querySelector('#about-title')
 ];
+const translationInputs = [];
 
 function normalizedText(value) {
   return String(value ?? '').replace(/[\t\r\n ]+/gu, ' ').trim();
@@ -12,7 +13,8 @@ function normalizedText(value) {
 
 function translate(text) {
   const source = normalizedText(text);
-  if (source.startsWith("You'll never work alone") || source.startsWith("You'll neverwork alone")) {
+  translationInputs.push(source);
+  if (source === "You'll never work alone") {
     return '당신은 결코 혼자 일하지 않을 것입니다';
   }
   if (source === 'Never Work Alone') return '절대 혼자 일하지 마십시오';
@@ -96,23 +98,34 @@ function highlightFragmentIntersections(rects) {
 }
 
 function measureTarget(element, session) {
+  const expectedSource = element.id === 'hero-title' ? "You'll never work alone" : 'Never Work Alone';
   const record = session.renderer.getRecordForElement(element);
   const text = record?.translation?.querySelector('[data-translight-text="true"]');
-  if (!record || !text) return {source: normalizedText(element.textContent), translated: false};
+  if (!record || !text) {
+    return {
+      source: normalizedText(element.textContent),
+      expectedSource,
+      sourceMatchesExpected: false,
+      translated: false
+    };
+  }
   const rect = record.translation.getBoundingClientRect();
   const range = document.createRange();
   range.selectNodeContents(text);
   const textRects = Array.from(range.getClientRects());
   const textStyle = getComputedStyle(text);
-  const visible = textRects.some(({left, right, top, bottom}) =>
-    right > 0 && left < innerWidth && bottom > 0 && top < innerHeight
+  const visible = textRects.length > 0 && textRects.every(({left, right, top, bottom}) =>
+    left >= 0 && right <= innerWidth && top >= 0 && bottom <= innerHeight
   );
   return {
     translated: true,
     source: normalizedText(record.originalText),
+    expectedSource,
+    sourceMatchesExpected: normalizedText(record.originalText) === expectedSource,
     translation: normalizedText(text.textContent),
     placement: record.placement,
     visible,
+    viewportScrollY: scrollY,
     translationRect: {x: rect.x, y: rect.y, width: rect.width, height: rect.height},
     textLineRects: textRects.map(({x, y, width, height}) => ({x, y, width, height})),
     highlightFragmentRects: Array.from(
@@ -151,8 +164,46 @@ async function run() {
     }
   });
 
+  const collectedBlocks = session.collectBlocks(document.body, {
+    targetLanguage: 'ko',
+    splitSegments: false
+  });
+  const collectedTargetSources = headingTargets.map((element) => ({
+    target: element.id,
+    source: collectedBlocks.find((block) => block.element === element)?.text ?? null
+  }));
+
   await session.start();
   await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  const targetRecordSummaries = headingTargets.map((element) => {
+    const records = [...session.renderer.records.values()].filter((record) =>
+      record.element === element || element.contains(record.element) || record.element.contains(element)
+    );
+    return {
+      target: element.id,
+      directRecord: Boolean(session.renderer.getRecordForElement(element)),
+      records: records.map(({element: sourceElement, originalText}) => ({
+        element: sourceElement.id ? `#${sourceElement.id}` : sourceElement.tagName.toLowerCase(),
+        text: normalizedText(originalText)
+      }))
+    };
+  });
+  const targetResults = [];
+  for (const element of targets) {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const bounds = element.getBoundingClientRect();
+      const targetScrollY = Math.max(
+        0,
+        scrollY + bounds.top - Math.max(0, (innerHeight - bounds.height) / 2)
+      );
+      window.scrollTo({top: targetScrollY, behavior: 'instant'});
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const visibleBounds = element.getBoundingClientRect();
+      if (visibleBounds.top >= 0 && visibleBounds.bottom <= innerHeight) break;
+    }
+    targetResults.push(measureTarget(element, session));
+  }
+
   let maxScrollY = 0;
   for (let attempt = 0; attempt < 4; attempt += 1) {
     maxScrollY = Math.max(0, document.documentElement.scrollHeight - innerHeight);
@@ -162,7 +213,6 @@ async function run() {
     if (Math.abs(scrollY - maxScrollY) <= 1) break;
   }
   const atBottom = Math.abs(scrollY - maxScrollY) <= 1;
-  const targetResults = targets.map((element) => measureTarget(element, session));
   const translatedTargets = targetResults.filter(({translated}) => translated !== false);
   const clippedTargets = targetResults.filter((result) =>
     result.clippingAncestors?.some(({clipped}) => clipped)
@@ -177,6 +227,13 @@ async function run() {
     viewport: {width: innerWidth, height: innerHeight},
     pageScroll: {scrollY, maxScrollY, atBottom, scrollHeight: document.documentElement.scrollHeight},
     language: document.documentElement.lang,
+    collectedTargetSources: collectedTargetSources.filter(({target}) =>
+      targets.some((element) => element.id === target)
+    ),
+    translationInputs,
+    targetRecordSummaries: targetRecordSummaries.filter(({target}) =>
+      targets.some((element) => element.id === target)
+    ),
     targets: targetResults,
     allTargetsTranslated: translatedTargets.length === targetResults.length,
     untranslatedTargets: untranslatedTargets.map(({source}) => source),
@@ -188,7 +245,7 @@ async function run() {
     clippingReproduced: clippedTargets.length > 0,
     overlapReproduced: overlappingTargets.length > 0,
     testPassed: translatedTargets.length === targets.length &&
-      translatedTargets.every(({visible}) => visible) &&
+      translatedTargets.every(({visible, sourceMatchesExpected}) => visible && sourceMatchesExpected) &&
       clippedTargets.length === 0 && overlappingTargets.length === 0 && atBottom
   };
   window.__neverworkaloneIssue59Report = result;

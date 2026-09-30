@@ -29,19 +29,16 @@ supplied screenshot's page scale. The fixture report is written to `result.json`
 and the browser page also exposes `window.__neverworkaloneIssue59Report`. The
 CFT runner verifies that the fixture publishes a JSON report with a boolean
 `testPassed` value.
-`testPassed` requires all targeted headings to be translated and visible, with
-no clipping, overlap with nearby page content, or overlap between the painted
-highlight fragments on wrapped lines. The fixture reports
-`untranslatedTargets`; a missing translation cannot establish that clipping is
-fixed.
+`testPassed` requires both reported headings to be translated from their
+expected source text and visible, with no clipping, overlap with nearby page
+content, or overlap between the painted highlight fragments on wrapped lines.
+The fixture reports `untranslatedTargets` and source mismatches so a missing or
+malformed source cannot establish that clipping is fixed.
 
-On the English issue route, the About heading translates into two visible lines
-without clipping or overlap with nearby page content. The hero heading remains
-untranslated in the saved page, so its clipping cannot be assessed and the
-English route does not pass the full reproduction.
-
-The Korean screenshot route reproduces overlap between the yellow highlight
-fragments: CFT reports a 26.8px intersection between the two wrapped-line
-fragments. The text glyphs themselves remain visually separate, but the
-highlight backgrounds run together. This is measured separately from overlap
-with nearby page content and is the rendering defect addressed by the fix.
+The English issue route switches the saved page to English and targets both
+reported headings. The fixture keeps the page's original `<br>` in the hero
+heading and verifies that production collection preserves its word boundary.
+The Korean screenshot route remains available with `?language=ko`; it measures
+the About heading and previously reproduced a 26.8px intersection between
+wrapped highlight fragments. The English route is the required regression for
+the reported path and both routes measure clipping and overlap separately.

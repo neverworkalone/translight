@@ -76,6 +76,14 @@ describe('content language detection', () => {
     }
   });
 
+  it.each(["You'll never work alone", 'Never Work Alone'])(
+    'recognizes English brand statements with distinct language evidence: %s',
+    (text) => {
+      expect(classifyTextLanguage(text)).toBe('en');
+      expect(isTranslatableText(text, 'ko')).toBe(true);
+    }
+  );
+
   it('keeps representative undeclared English prose eligible', () => {
     for (const text of UNDECLARED_ENGLISH_PROSE) {
       expect(classifyTextLanguage(text)).toBe('en');
