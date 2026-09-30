@@ -1,32 +1,29 @@
 # Never Work Alone heading clipping reproduction
 
-This CFT fixture copies the current live site's hero and About layout rules for
-the two phrases shown in the issue screenshot. It marks the hero title as
-English so the production `PageSession` collects the line-break title, then
-starts a deterministic Korean provider and records the generated text
-rectangles and any clipping ancestor. The live site currently leaves that
-heading's `lang` attribute unset, so the fixture isolates rendering from the
-separate language-admission heuristic.
+`tests/fixtures/neverworkalone-site/` is based on the saved homepage supplied in
+`neverworkalone.zip`. It keeps the page's HTML, CSS, assets, and language
+switcher. The saved extensionless Google Fonts stylesheet is served as
+`fonts.css` so Vite provides its CSS MIME type. The other page changes add a
+hidden report element and load a fixture module that clicks the real English
+button, starts production `PageSession` with deterministic Korean translations,
+and records text geometry and clipping ancestors for the two reported headings.
 
-Run the fixture through the repository-managed Chrome for Testing runner:
+Run the saved page through the repository-managed Chrome for Testing runner:
 
 ```bash
 npm run dev -- --host 127.0.0.1
 npm run test:metacritic:chrome -- \
   --skip-translation \
-  --scenario=navigation \
-  --url=http://127.0.0.1:5173/tests/fixtures/neverworkalone-heading-clipping-repro.html \
+  --scenario=fixture \
+  --url=http://127.0.0.1:5173/tests/fixtures/neverworkalone-site/neverworkalone.html \
   --window-size=925,676 \
   --output-dir=/private/tmp/translight-issue59-before
 ```
 
-The 925×676 window gives the CFT page a 925×533 viewport, matching the issue
-screenshot. `--window-size` applies to launched browsers; attach mode keeps the
-attached browser's existing size.
-
-The runner's navigation checks expect the Metacritic fixture and therefore
-exit when this local page has no `Star Wars Zero Company` link. Its CFT
-`failure.png` is still a browser rendering capture of the fixture. The issue
-reproduction is visible in the page, with geometry recorded in
-`window.__neverworkaloneIssue59Report`. The report panel is hidden at the
-issue's viewport width so it does not cover the text being checked.
+The requested window size yields a 925×533 viewport in CFT, matching the issue
+screenshot. The fixture report is written to `result.json` and the browser page
+also exposes `window.__neverworkaloneIssue59Report`. The CFT runner verifies
+that the fixture publishes a JSON report with a boolean `testPassed` value.
+`testPassed` means at least one targeted translation rendered and none of the
+rendered target translations were clipped. `untranslatedTargets` is recorded
+separately because a missing translation cannot establish a clipping result.

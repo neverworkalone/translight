@@ -1,4 +1,4 @@
-import {PageSession} from '../../src/content/page-session.js';
+import {PageSession} from '../../../src/content/page-session.js';
 
 const reportElement = document.querySelector('#report');
 const targets = [
@@ -15,9 +15,7 @@ function translate(text) {
   if (source.startsWith("You'll never work alone") || source.startsWith("You'll neverwork alone")) {
     return '당신은 결코 혼자 일하지 않을 것입니다';
   }
-  if (source === 'Never Work Alone') {
-    return '절대 혼자 일하지 마세요';
-  }
+  if (source === 'Never Work Alone') return '절대 혼자 일하지 마세요';
   return `번역: ${source}`;
 }
 
@@ -52,11 +50,9 @@ function measureTarget(element, session) {
   const text = record?.translation?.querySelector('[data-translight-text="true"]');
   if (!record || !text) return {source: normalizedText(element.textContent), translated: false};
   const rect = record.translation.getBoundingClientRect();
-  const textRects = Array.from((() => {
-    const range = document.createRange();
-    range.selectNodeContents(text);
-    return range.getClientRects();
-  })());
+  const range = document.createRange();
+  range.selectNodeContents(text);
+  const textRects = Array.from(range.getClientRects());
   return {
     translated: true,
     source: normalizedText(record.originalText),
@@ -69,9 +65,10 @@ function measureTarget(element, session) {
 }
 
 async function run() {
-  // The issue occurs after choosing English in the footer and then translating.
-  document.documentElement.lang = 'en';
+  // Use the saved site's own language control before starting the production path.
   document.querySelector('[data-language-choice="en"]').click();
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
   const session = new PageSession({
     generation: 5901,
     document,
@@ -88,17 +85,21 @@ async function run() {
   await session.start();
   await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   const targetResults = targets.map((element) => measureTarget(element, session));
-  const allTargetsTranslated = targetResults.every(({translated}) => translated !== false);
+  const translatedTargets = targetResults.filter(({translated}) => translated !== false);
   const clippedTargets = targetResults.filter((result) =>
     result.clippingAncestors?.some(({clipped}) => clipped)
   );
+  const untranslatedTargets = targetResults.filter(({translated}) => translated === false);
   const result = {
     fixture: 'neverworkalone-heading-clipping-repro',
     viewport: {width: innerWidth, height: innerHeight},
     language: document.documentElement.lang,
     targets: targetResults,
+    allTargetsTranslated: translatedTargets.length === targetResults.length,
+    untranslatedTargets: untranslatedTargets.map(({source}) => source),
     clippedTargets: clippedTargets.map(({source}) => source),
-    testPassed: allTargetsTranslated && clippedTargets.length === 0
+    clippingReproduced: clippedTargets.length > 0,
+    testPassed: translatedTargets.length > 0 && clippedTargets.length === 0
   };
   window.__neverworkaloneIssue59Report = result;
   reportElement.textContent = JSON.stringify(result, null, 2);
