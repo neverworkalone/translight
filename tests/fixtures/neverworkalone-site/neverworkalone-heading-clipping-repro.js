@@ -86,6 +86,15 @@ function lineRangeIntersections(textRects) {
   );
 }
 
+function highlightFragmentIntersections(rects) {
+  return lineRangeIntersections(rects.map(({x, y, width, height}) => ({
+    left: x,
+    top: y,
+    right: x + width,
+    bottom: y + height
+  })));
+}
+
 function measureTarget(element, session) {
   const record = session.renderer.getRecordForElement(element);
   const text = record?.translation?.querySelector('[data-translight-text="true"]');
@@ -108,6 +117,7 @@ function measureTarget(element, session) {
     textLineRects: textRects.map(({x, y, width, height}) => ({x, y, width, height})),
     highlightFragmentRects: Array.from(text.getClientRects(), ({x, y, width, height}) => ({x, y, width, height})),
     textStyle: {fontSize: textStyle.fontSize, lineHeight: textStyle.lineHeight, backgroundColor: textStyle.backgroundColor},
+    highlightFragmentIntersections: highlightFragmentIntersections(Array.from(text.getClientRects())),
     lineRangeIntersections: lineRangeIntersections(textRects),
     clippingAncestors: clippingAncestors(text),
     overlappingPeers: overlappingPeers(element, record.translation)
@@ -144,7 +154,9 @@ async function run() {
   const clippedTargets = targetResults.filter((result) =>
     result.clippingAncestors?.some(({clipped}) => clipped)
   );
-  const overlappingTargets = targetResults.filter((result) => result.overlappingPeers?.length > 0);
+  const overlappingTargets = targetResults.filter((result) =>
+    result.overlappingPeers?.length > 0 || result.highlightFragmentIntersections?.length > 0
+  );
   const untranslatedTargets = targetResults.filter(({translated}) => translated === false);
   const result = {
     fixture: 'neverworkalone-heading-clipping-repro',
@@ -157,6 +169,7 @@ async function run() {
     untranslatedTargets: untranslatedTargets.map(({source}) => source),
     clippedTargets: clippedTargets.map(({source}) => source),
     overlappingTargets: overlappingTargets.map(({source}) => source),
+    highlightOverlapReproduced: targetResults.some(({highlightFragmentIntersections: intersections}) => intersections?.length > 0),
     clippingReproduced: clippedTargets.length > 0,
     overlapReproduced: overlappingTargets.length > 0,
     testPassed: translatedTargets.length === targets.length &&

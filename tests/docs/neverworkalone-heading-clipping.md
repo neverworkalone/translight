@@ -29,20 +29,19 @@ supplied screenshot's page scale. The fixture report is written to `result.json`
 and the browser page also exposes `window.__neverworkaloneIssue59Report`. The
 CFT runner verifies that the fixture publishes a JSON report with a boolean
 `testPassed` value.
-`testPassed` requires both targeted headings to be translated and visible, with
-no clipping or overlap. The fixture also reports each overlap and
-`untranslatedTargets`; a missing translation cannot establish that the reported
-clipping or overlap is fixed.
-It also reports intersections between the browser's text-range line rectangles
-separately from intersections with other page elements, so line geometry can be
-compared with the actual CFT rendering.
+`testPassed` requires all targeted headings to be translated and visible, with
+no clipping, overlap with nearby page content, or overlap between the painted
+highlight fragments on wrapped lines. The fixture reports
+`untranslatedTargets`; a missing translation cannot establish that clipping is
+fixed.
 
-On the latest CFT run, the About heading translated into two visible lines with
-no clipping ancestor or overlapping peer. The hero heading remained untranslated
-in the saved page, so its clipping could not be assessed and `testPassed` is
-false. This run did not reproduce the reported clipping or overlap.
+On the English issue route, the About heading translates into two visible lines
+without clipping or overlap with nearby page content. The hero heading remains
+untranslated in the saved page, so its clipping cannot be assessed and the
+English route does not pass the full reproduction.
 
-In the screenshot's Korean page state, the two text-range rectangles intersect
-by 26.8px, but the high-resolution CFT rendering shows the glyphs on separate
-lines. The measured range rectangles extend beyond the painted glyphs, so their
-intersection is diagnostic geometry rather than visible text overlap.
+The Korean screenshot route reproduces overlap between the yellow highlight
+fragments: CFT reports a 26.8px intersection between the two wrapped-line
+fragments. The text glyphs themselves remain visually separate, but the
+highlight backgrounds run together. This is measured separately from overlap
+with nearby page content and is the rendering defect addressed by the fix.

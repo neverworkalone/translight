@@ -2125,6 +2125,9 @@ async function runFixtureScenario({page, result}) {
   result.fixtureReport = report;
   result.scenarioPassed = report.testPassed === true;
   result.scenario.completed = true;
+  result.fixtureScreenshotPath = resolve(result.outputDir, 'fixture.png');
+  await saveScreenshot(page, result.fixtureScreenshotPath)
+    .catch((error) => { result.fixtureScreenshotError = error.message; });
   if (!result.scenarioPassed) {
     throw new Error(`The browser fixture reported testPassed=${report.testPassed}.`);
   }
