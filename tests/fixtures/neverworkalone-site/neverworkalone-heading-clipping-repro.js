@@ -94,6 +94,7 @@ function measureTarget(element, session) {
   const range = document.createRange();
   range.selectNodeContents(text);
   const textRects = Array.from(range.getClientRects());
+  const textStyle = getComputedStyle(text);
   const visible = textRects.some(({left, right, top, bottom}) =>
     right > 0 && left < innerWidth && bottom > 0 && top < innerHeight
   );
@@ -105,6 +106,8 @@ function measureTarget(element, session) {
     visible,
     translationRect: {x: rect.x, y: rect.y, width: rect.width, height: rect.height},
     textLineRects: textRects.map(({x, y, width, height}) => ({x, y, width, height})),
+    highlightFragmentRects: Array.from(text.getClientRects(), ({x, y, width, height}) => ({x, y, width, height})),
+    textStyle: {fontSize: textStyle.fontSize, lineHeight: textStyle.lineHeight, backgroundColor: textStyle.backgroundColor},
     lineRangeIntersections: lineRangeIntersections(textRects),
     clippingAncestors: clippingAncestors(text),
     overlappingPeers: overlappingPeers(element, record.translation)
