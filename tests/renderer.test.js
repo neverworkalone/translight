@@ -50,6 +50,59 @@ describe('TranslationRenderer', () => {
     expect(document.documentElement.hasAttribute('data-translight-scroll-anchor')).toBe(false);
   });
 
+  it('keeps br-separated source hashes valid through insertion and recovery checks', () => {
+    document.body.innerHTML = '<h1 id="source">You\'ll never<br>work alone</h1>';
+    const source = document.querySelector('#source');
+    const [block] = collectTranslationBlocks(document.body, {splitSegments: false});
+    const renderer = new TranslationRenderer({document, sessionId: 'br-source-session'});
+
+    expect(block.text).toBe("You'll never work alone");
+    expect(renderer.isSourceHashCurrent(block)).toBe(true);
+
+    const translation = renderer.insert({...block, translatedText: '당신은 결코 혼자 일하지 않을 것입니다'});
+    const record = renderer.getRecordForElement(source);
+    expect(translation).not.toBeNull();
+    expect(record.originalText).toBe("You'll never work alone");
+
+    translation.remove();
+    expect(renderer.getRecoveryState(record)).toBe('ready');
+    renderer.removeAll();
+  });
+
+  it('keeps br-separated source hash checks linear as heading count doubles', () => {
+    const measureChildListReads = (headingCount) => {
+      document.body.innerHTML = Array.from(
+        {length: headingCount},
+        (_, index) => `<h1 id="source-${index}">You'll never<br>work alone</h1>`
+      ).join('');
+      const blocks = collectTranslationBlocks(document.body, {splitSegments: false});
+      const renderer = new TranslationRenderer({document, sessionId: `br-scale-${headingCount}`});
+      const descriptor = Object.getOwnPropertyDescriptor(Node.prototype, 'childNodes');
+      let childListReads = 0;
+      Object.defineProperty(Node.prototype, 'childNodes', {
+        configurable: true,
+        get() {
+          childListReads += 1;
+          return descriptor.get.call(this);
+        }
+      });
+      try {
+        expect(blocks).toHaveLength(headingCount);
+        expect(blocks.every((block) => renderer.isSourceHashCurrent(block))).toBe(true);
+        return childListReads;
+      } finally {
+        Object.defineProperty(Node.prototype, 'childNodes', descriptor);
+      }
+    };
+
+    const firstCount = 64;
+    const readsAtN = measureChildListReads(firstCount);
+    const readsAt2N = measureChildListReads(firstCount * 2);
+
+    expect(readsAtN).toBe(firstCount);
+    expect(readsAt2N).toBe(readsAtN * 2);
+  });
+
   it('prevents duplicate insertion and completely restores the DOM on cleanup', () => {
     const source = document.querySelector('#source');
     const renderer = new TranslationRenderer({ document, sessionId: 'session-2' });
@@ -2160,7 +2213,7 @@ describe('TranslationRenderer', () => {
     expect(document.body.innerHTML).toBe('<p id="source">Original text</p>');
   });
 
-  it('keeps highlight backgrounds at text height with half-size mini highlight padding', () => {
+  it('spaces wrapped highlight lines and keeps mini highlight padding half-sized', () => {
     const source = document.querySelector('#source');
     const renderer = new TranslationRenderer({document, sessionId: 'highlight-session'});
     renderer.insert({element: source, sourceId: 'highlight-source', translatedText: 'Highlighted text'});
@@ -2169,7 +2222,7 @@ describe('TranslationRenderer', () => {
     expect(document.querySelector('[data-translight-text="true"]')).not.toBeNull();
     expect(renderer.style.textContent).toContain('padding: 0 0.12em !important');
     expect(renderer.style.textContent).toContain('box-decoration-break: clone !important');
-    expect(renderer.style.textContent).toContain('line-height: 1 !important');
+    expect(renderer.style.textContent).toContain('line-height: 1.5 !important');
 
     renderer.updatePresentation({displayStyle: TRANSLATION_STYLES.MINI_HIGHLIGHT});
     expect(renderer.style.textContent).toContain('padding: 0 0.06em !important');

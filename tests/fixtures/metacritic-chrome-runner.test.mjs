@@ -66,6 +66,12 @@ describe('Metacritic Chrome runner', () => {
     expect(() => parseArgs(['--scenario=fixture'])).toThrow(/requires --url/u);
   });
 
+  it('parses a requested CFT browser window size', () => {
+    expect(parseArgs(['--window-size=925,676']).windowSize).toEqual({width: 925, height: 676});
+    expect(() => parseArgs(['--window-size=925'])).toThrow(/--window-size must be WIDTH,HEIGHT/u);
+    expect(() => parseArgs(['--window-size=0,533'])).toThrow(/--window-size width must be an integer/u);
+  });
+
   it('defaults to background browser launch on macOS and supports explicit overrides', () => {
     expect(parseArgs([]).background).toBe(process.platform === 'darwin');
     expect(parseArgs(['--background']).background).toBe(true);

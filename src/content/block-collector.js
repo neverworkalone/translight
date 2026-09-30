@@ -145,6 +145,7 @@ function textFromNode(node, root) {
   if (node !== root && isExcluded(node)) return '';
   if (node !== root && node.matches(GENERATED_SELECTOR)) return '';
   if (node !== root && node.matches(SEGMENT_SELECTOR)) return '';
+  if (isBreak(node)) return ' ';
   return Array.from(node.childNodes, (child) => textFromNode(child, root)).join('');
 }
 
@@ -156,6 +157,7 @@ function directTextFromNode(node, root) {
   if (node !== root && node.matches(GENERATED_SELECTOR)) return '';
   if (node !== root && node.matches(SEGMENT_SELECTOR)) return '';
   if (node !== root && node.matches(BLOCK_SELECTOR)) return '';
+  if (isBreak(node)) return ' ';
   return Array.from(node.childNodes, (child) => directTextFromNode(child, root)).join('');
 }
 
