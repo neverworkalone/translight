@@ -18,6 +18,8 @@ const session = new PageSession({
     prepare: async () => {},
     translate: async (text) => {
       translationInputs.push(text);
+      if (text === 'neverworkalone.com') return 'Neverworkalone.com';
+      if (text === 'https://www.neverworkalone.com') return text;
       return `ko:${text}`;
     },
     cancel: () => {},
@@ -83,16 +85,20 @@ async function run() {
   await session.start();
 
   const translation = session.renderer?.getRecordForElement(source)?.translation;
+  const urlTranslation = session.renderer?.getRecordForElement(url)?.translation;
   const sourceRect = source.getBoundingClientRect();
   const translationRect = translation?.getBoundingClientRect();
   const urlRect = url.getBoundingClientRect();
+  const urlTranslationRect = urlTranslation?.getBoundingClientRect();
   const translationText = translation?.querySelector('[data-translight-text="true"]');
+  const urlTranslationText = urlTranslation?.querySelector('[data-translight-text="true"]');
   const googleTransformRules = [...new Set(
     [...transformChain(source), ...transformChain(translation ?? source)]
       .flatMap(({matchingRules}) => matchingRules)
       .filter((rule) => rule.includes('.V9tjod') && rule.includes('scaleY(-1)'))
   )];
   const translatedUrlRecord = session.renderer?.getRecordForElement(url) ?? null;
+  const expectsUrlProtection = document.body.dataset.fixture === 'url-translation';
   const translationOverlapsUrl = Boolean(translationRect &&
     translationRect.left < urlRect.right && translationRect.right > urlRect.left &&
     translationRect.top < urlRect.bottom && translationRect.bottom > urlRect.top);
@@ -105,6 +111,10 @@ async function run() {
     href: link.href,
     hrefUnchanged: link.href === originalHref,
     urlHasTranslationRecord: Boolean(translatedUrlRecord),
+    urlTranslationText: urlTranslationText?.textContent ?? null,
+    urlTranslationRect: urlTranslationRect
+      ? {top: urlTranslationRect.top, bottom: urlTranslationRect.bottom}
+      : null,
     translationOverlapsUrl,
     placement: session.renderer?.getRecordForElement(source)?.placement,
     translationTransform: translation ? getComputedStyle(translation).transform : null,
@@ -117,11 +127,14 @@ async function run() {
     urlRect: {top: urlRect.top, bottom: urlRect.bottom},
     translationRect: translationRect ? {top: translationRect.top, bottom: translationRect.bottom} : null
   };
-  result.testPassed = Boolean(translation) && result.googleTransformRules.length > 0 &&
-    result.sourceVerticalFlipCount % 2 === 0 &&
-    result.translationVerticalFlipCount % 2 === 0 && result.translationBelowSource &&
-    result.urlTextUnchanged && result.hrefUnchanged && !result.urlHasTranslationRecord &&
-    !translationInputs.some((text) => text.includes(originalUrlText)) && !result.translationOverlapsUrl;
+  result.testPassed = expectsUrlProtection
+    ? !translation && !urlTranslation && translationInputs.length === 0 &&
+      result.urlTextUnchanged && result.hrefUnchanged
+    : Boolean(translation) && result.googleTransformRules.length > 0 &&
+      result.sourceVerticalFlipCount % 2 === 0 &&
+      result.translationVerticalFlipCount % 2 === 0 && result.translationBelowSource &&
+      result.urlTextUnchanged && result.hrefUnchanged && !result.urlHasTranslationRecord &&
+      !translationInputs.some((text) => text.includes(originalUrlText)) && !result.translationOverlapsUrl;
   report.textContent = JSON.stringify(result, null, 2);
 }
 

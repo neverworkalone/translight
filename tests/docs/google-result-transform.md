@@ -1,7 +1,12 @@
 # Google search result translation placement
 
-Fixture: ../fixtures/google-result-transform-repro.html and
-../fixtures/google-result-transform-repro.js
+Fixtures:
+
+- `../fixtures/google-result-transform-repro.html` checks the result title's
+  translation placement and the displayed URL.
+- `../fixtures/google-url-translation-repro.html` reproduces issue #62 from the
+  supplied Google screenshot: the result title and `.notranslate` URL display
+  are English-scoped, URL-like strings and must not be translated.
 
 ## Run
 
@@ -21,12 +26,29 @@ npm run test:metacritic:chrome -- \
   --output-dir=/private/tmp/translight-google-result
 ```
 
+Run the issue #62 case with the same runner and a separate output directory:
+
+```bash
+npm run test:metacritic:chrome -- \
+  --skip-translation \
+  --scenario=fixture \
+  --url=http://127.0.0.1:5173/tests/fixtures/google-url-translation-repro.html \
+  --output-dir=/private/tmp/translight-google-url-translation
+```
+
+The issue fixture starts the production `PageSession` with deterministic
+translations that reproduce the duplicate strings in the supplied screenshot.
+Before the fix it should fail because the domain title and the URL marked
+`.notranslate` are collected and sent to the provider. After the fix it should
+pass with neither URL-like source translated, while the ordinary English
+sentence in the first fixture remains translatable.
+
 The runner reads the JSON report from the page and exits successfully only
 when the browser assertions pass. On failure it writes `failure.png` alongside
 the JSON report and trace.
 
-The fixture starts the production `PageSession` against the captured result
-DOM and CSS. Google applies `transform: scaleY(-1)` to `.V9tjod`,
+The placement fixture starts the production `PageSession` against the captured
+result DOM and CSS. Google applies `transform: scaleY(-1)` to `.V9tjod`,
 `.V9tjod .LC20lb`, and `.V9tjod .ESMNde`. The fixture records all collected
 sources and provider inputs, the displayed URL text and link target, the URL
 element's translation record, and the title translation's position relative to
