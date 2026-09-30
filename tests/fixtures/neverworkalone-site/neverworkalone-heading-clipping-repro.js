@@ -145,7 +145,9 @@ function measureTarget(element, session) {
 }
 
 async function run() {
-  const testLanguage = new URLSearchParams(location.search).get('language') === 'ko' ? 'ko' : 'en';
+  const params = new URLSearchParams(location.search);
+  const testLanguage = params.get('language') === 'ko' ? 'ko' : 'en';
+  const legacyLineHeightBaseline = params.get('line-height') === 'legacy';
   const targets = testLanguage === 'ko' ? [headingTargets[1]] : headingTargets;
   // English is the issue #59 path; ?language=ko matches the supplied screenshot.
   document.querySelector('[data-language-choice="' + testLanguage + '"]').click();
@@ -175,6 +177,17 @@ async function run() {
 
   await session.start();
   await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  if (legacyLineHeightBaseline) {
+    for (const element of targets) {
+      const translation = session.renderer.getRecordForElement(element)?.translation;
+      const text = translation?.querySelector('[data-translight-text="true"]');
+      if (!text) throw new Error(`Cannot apply legacy line-height to ${element.id}.`);
+      // Keep the current PageSession and translations, but restore the old
+      // highlight line-height so CFT can isolate the rendering change.
+      text.style.setProperty('line-height', '1', 'important');
+    }
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  }
   const targetRecordSummaries = headingTargets.map((element) => {
     const records = [...session.renderer.records.values()].filter((record) =>
       record.element === element || element.contains(record.element) || record.element.contains(element)
@@ -224,6 +237,8 @@ async function run() {
   const result = {
     fixture: 'neverworkalone-heading-clipping-repro',
     testCase: testLanguage === 'ko' ? 'screenshot-korean-state' : 'issue-59-english-state',
+    visualBaseline: legacyLineHeightBaseline ? 'legacy-line-height' : 'current-line-height',
+    expectedVisualFailure: legacyLineHeightBaseline ? 'highlight-fragment-overlap' : null,
     viewport: {width: innerWidth, height: innerHeight},
     pageScroll: {scrollY, maxScrollY, atBottom, scrollHeight: document.documentElement.scrollHeight},
     language: document.documentElement.lang,
@@ -246,10 +261,17 @@ async function run() {
     overlapReproduced: overlappingTargets.length > 0,
     testPassed: translatedTargets.length === targets.length &&
       translatedTargets.every(({visible, sourceMatchesExpected}) => visible && sourceMatchesExpected) &&
-      clippedTargets.length === 0 && overlappingTargets.length === 0 && atBottom
+      clippedTargets.length === 0 &&
+      targetResults.every(({overlappingPeers: peers}) => peers?.length === 0) &&
+      (legacyLineHeightBaseline ? resultHighlightOverlap(targetResults) : overlappingTargets.length === 0) &&
+      atBottom
   };
   window.__neverworkaloneIssue59Report = result;
   reportElement.textContent = JSON.stringify(result, null, 2);
+}
+
+function resultHighlightOverlap(targets) {
+  return targets.some(({highlightFragmentIntersections: intersections}) => intersections?.length > 0);
 }
 
 run().catch((error) => {

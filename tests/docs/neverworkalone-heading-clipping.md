@@ -35,6 +35,17 @@ content, or overlap between the painted highlight fragments on wrapped lines.
 The fixture reports `untranslatedTargets` and source mismatches so a missing or
 malformed source cannot establish that clipping is fixed.
 
+To isolate the old rendering rule from collection and translation, add
+`?line-height=legacy` to the English fixture URL. This keeps the current
+production `PageSession` and deterministic translations, then applies the old
+`line-height: 1` rule to both rendered highlights before measuring. In this
+mode, `testPassed` means both targets are translated and the old highlight
+fragment overlap is reproduced; `visualBaseline` and
+`expectedVisualFailure` identify the controlled baseline. Run both the normal
+URL and baseline URL at each relevant viewport. The baseline is a browser
+control for the rendering change, not a claim that the original pre-fix
+checkout had the later English collection fixes.
+
 The English issue route switches the saved page to English and targets both
 reported headings. The fixture keeps the page's original `<br>` in the hero
 heading and verifies that production collection preserves its word boundary.
