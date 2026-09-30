@@ -51,7 +51,7 @@ function overlappingPeers(element, translation) {
   const candidates = [
     ...Array.from(section?.querySelectorAll('h1, h2, p, a, button') ?? []),
     document.querySelector('.site-footer')
-  ].filter((candidate) => candidate && candidate !== element && candidate !== translation &&
+  ].filter((candidate) => candidate && candidate !== translation &&
     !element.contains(candidate) && !candidate.contains(element));
 
   return candidates.flatMap((candidate) => {
