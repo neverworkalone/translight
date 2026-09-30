@@ -31,3 +31,8 @@ CFT runner verifies that the fixture publishes a JSON report with a boolean
 no clipping or overlap. The fixture also reports each overlap and
 `untranslatedTargets`; a missing translation cannot establish that the reported
 clipping or overlap is fixed.
+
+On the latest CFT run, the About heading translated into two visible lines with
+no clipping ancestor or overlapping peer. The hero heading remained untranslated
+in the saved page, so its clipping could not be assessed and `testPassed` is
+false. This run did not reproduce the reported clipping or overlap.
